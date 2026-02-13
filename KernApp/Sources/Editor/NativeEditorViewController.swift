@@ -502,6 +502,140 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                 return
             }
         }
+
+        // Tables (GFM): if the user just finished typing a valid table block, convert it to a TextKit table.
+        // This is intentionally conservative: it triggers only after a newline and only when we see a
+        // header + delimiter + at least one body row.
+        if prevKind == .paragraph {
+            applyTableInputRulesIfNeeded(caret: caret, prevParagraph: prevPara, storage: storage, ns: ns)
+        }
+    }
+
+    private func applyTableInputRulesIfNeeded(caret: Int, prevParagraph: NSRange, storage: NSTextStorage, ns: NSString) {
+        // Collect contiguous plain paragraphs above the caret (ending at prevParagraph).
+        // Stop at the first blank line or non-paragraph block kind.
+        var paras: [NSRange] = []
+        var p = prevParagraph
+        var steps = 0
+        while true {
+            steps += 1
+            if steps > 20 { break } // prevent runaway scanning
+
+            let kindRaw = storage.attribute(.kernBlockKind, at: max(0, min(p.location, max(0, storage.length - 1))), effectiveRange: nil) as? Int
+            let kind = KernBlockKind(rawValue: kindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+            if kind != .paragraph { break }
+
+            let contentRange = paragraphContentRange(ns: ns, paraRange: p)
+            let line = contentRange.length > 0 ? storage.attributedSubstring(from: contentRange).string : ""
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { break }
+
+            paras.insert(p, at: 0)
+
+            if p.location == 0 { break }
+            let prevLoc = max(0, p.location - 1)
+            let prevP = ns.paragraphRange(for: NSRange(location: prevLoc, length: 0))
+            if prevP.location == p.location { break }
+            p = prevP
+        }
+
+        guard paras.count >= 3 else { return }
+
+        // Extract lines, aligned with paras (drop trailing newline).
+        var lines: [String] = []
+        lines.reserveCapacity(paras.count)
+        for r in paras {
+            let cr = paragraphContentRange(ns: ns, paraRange: r)
+            let s = cr.length > 0 ? storage.attributedSubstring(from: cr).string : ""
+            lines.append(s)
+        }
+
+        // Find the last delimiter row in this block.
+        var delimiterIndex: Int?
+        if lines.count >= 2 {
+            for i in stride(from: lines.count - 1, through: 1, by: -1) {
+                if isGfmTableDelimiterRow(lines[i]), looksLikeGfmTableRow(lines[i - 1]) {
+                    delimiterIndex = i
+                    break
+                }
+            }
+        }
+
+        guard let d = delimiterIndex else { return }
+        let headerIndex = d - 1
+        let firstBodyIndex = d + 1
+        guard firstBodyIndex < lines.count else { return } // require at least one body row
+        guard looksLikeGfmTableRow(lines[firstBodyIndex]) else { return }
+
+        // Extend through contiguous body rows.
+        var lastRowIndex = firstBodyIndex
+        var j = firstBodyIndex
+        while j < lines.count {
+            if looksLikeGfmTableRow(lines[j]) {
+                lastRowIndex = j
+                j += 1
+                continue
+            }
+            break
+        }
+
+        // Replace exactly the table lines (header..lastRowIndex).
+        let startLoc = paras[headerIndex].location
+        let endLoc = paras[lastRowIndex].location + paras[lastRowIndex].length
+        guard endLoc >= startLoc else { return }
+        let replaceRange = NSRange(location: startLoc, length: endLoc - startLoc)
+
+        // Convert with the same importer used for file-open. This ensures table attrs match export logic.
+        let markdown = storage.attributedSubstring(from: replaceRange).string
+        let opt = NativeMarkdownCodec.Options.fromUserDefaults()
+        let imported = NativeMarkdownCodec.importMarkdown(markdown, options: opt)
+
+        let kRaw = imported.attribute(.kernBlockKind, at: 0, effectiveRange: nil) as? Int
+        let k = KernBlockKind(rawValue: kRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+        guard k == .tableCell else { return }
+
+        isApplyingInputRules = true
+        defer { isApplyingInputRules = false }
+
+        let delta = imported.length - replaceRange.length
+        storage.replaceCharacters(in: replaceRange, with: imported)
+
+        // Keep caret location stable relative to the replaced block (best-effort).
+        let newCaret = min(max(0, caret + delta), storage.length)
+        textView.setSelectedRange(NSRange(location: newCaret, length: 0))
+    }
+
+    private func looksLikeGfmTableRow(_ line: String) -> Bool {
+        // A very loose heuristic: must contain at least one pipe.
+        // (We rely on a strict delimiter-row check to avoid false positives.)
+        return line.contains("|")
+    }
+
+    private func isGfmTableDelimiterRow(_ line: String) -> Bool {
+        // Example:
+        // | :--- | :---: | ---: |
+        // Left/Right pipes are optional in GFM.
+        var s = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("|") { s.removeFirst() }
+        if s.hasSuffix("|") { s.removeLast() }
+
+        // Must have at least 2 columns.
+        let parts = s.split(separator: "|", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count >= 2 else { return false }
+
+        for p in parts {
+            guard !p.isEmpty else { return false }
+            // Match ^:?-{3,}:?$
+            var t = p
+            let hasLeadingColon = t.hasPrefix(":")
+            let hasTrailingColon = t.hasSuffix(":")
+            if hasLeadingColon { t.removeFirst() }
+            if hasTrailingColon, !t.isEmpty { t.removeLast() }
+
+            let dashes = t.filter { $0 == "-" }.count
+            if dashes < 3 { return false }
+            if t.contains(where: { $0 != "-" }) { return false }
+        }
+        return true
     }
 
     private func previousParagraphContent(storage: NSTextStorage, ns: NSString, paraRange: NSRange) -> String {
