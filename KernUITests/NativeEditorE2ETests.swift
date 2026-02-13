@@ -34,6 +34,7 @@ final class NativeEditorE2ETests: XCTestCase {
         // Disk should contain standard GFM tasks for interoperability.
         let saved = try waitForFileContains(tmp, substring: "- [x] todo", timeout: 5)
         XCTAssertTrue(saved.contains("- [x] todo"))
+        XCTAssertFalse(saved.contains("- [ ] \n"), "Should not persist an empty marker-only task item")
     }
 
     func testKernDialectExportsStandaloneTasksAsBracketOnly() throws {
@@ -85,6 +86,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let saved = try waitForFileContains(tmp, substring: "1. one", timeout: 5)
         XCTAssertTrue(saved.contains("1. one"))
         XCTAssertTrue(saved.contains("2. two"))
+        XCTAssertFalse(saved.contains("3. \n"), "Should not persist an empty marker-only ordered item")
     }
 
     func testTaskRenderingKernShowsBulletDotForBulletedTasks() throws {
@@ -206,6 +208,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let saved = try waitForFileContains(tmp, substring: "- one", timeout: 5)
         XCTAssertTrue(saved.contains("- one"))
         XCTAssertTrue(saved.contains("- two"))
+        XCTAssertFalse(saved.contains("\n- \n"), "Should not persist an empty marker-only bullet item")
     }
 
     func testShiftEnterInBulletDoesNotContinueList() throws {
