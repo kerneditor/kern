@@ -539,6 +539,123 @@ final class NativeEditorE2ETests: XCTestCase {
         attachScreenshot(name: "hit-target-marker-after", element: textView)
     }
 
+    func testReloadOnDiskChangeShowsToastAndUpdatesContent() throws {
+        let tmp = try makeTempMarkdownFile(name: "kern-ui-reload-on-disk-change")
+        try "Before.\n".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let app = makeApp(opening: tmp)
+        app.launch()
+
+        let textView = app.textViews["NativeEditor.TextView"]
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+
+        let beforeValue = (textView.value as? String) ?? ""
+        XCTAssertTrue(beforeValue.contains("Before."))
+        attachScreenshot(name: "reload-before", element: textView)
+
+        // External write: should trigger NSFilePresenter -> revert -> applyExternalMarkdownUpdate.
+        try "After.\n".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let toast = app.staticTexts["NativeEditor.ReloadToast"]
+        XCTAssertTrue(toast.waitForExistence(timeout: 8))
+
+        let afterValue = waitForTextViewValue(
+            textView,
+            timeout: 8.0,
+            description: "file reload should update editor content"
+        ) { v in
+            v.contains("After.")
+        }
+        XCTAssertTrue(afterValue.contains("After."))
+        attachScreenshot(name: "reload-after", element: textView)
+    }
+
+    func testFindReplaceReplacesMatchesInOrder() throws {
+        let tmp = try makeTempMarkdownFile(name: "kern-ui-find-replace")
+        try "alpha beta alpha\n".write(to: tmp, atomically: true, encoding: .utf8)
+
+        let app = makeApp(opening: tmp)
+        app.launch()
+
+        let textView = app.textViews["NativeEditor.TextView"]
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        textView.click()
+
+        // Cmd+Shift+H: Find and Replace...
+        textView.typeKey("h", modifierFlags: [.command, .shift])
+
+        let findSearch = app.searchFields["NativeEditor.FindField"]
+        let findText = app.textFields["NativeEditor.FindField"]
+        XCTAssertTrue(findSearch.waitForExistence(timeout: 5) || findText.waitForExistence(timeout: 5))
+        let findField = findSearch.exists ? findSearch : findText
+        findField.click()
+        findField.typeText("alpha")
+
+        let replaceText = app.textFields["NativeEditor.ReplaceField"]
+        let replaceSearch = app.searchFields["NativeEditor.ReplaceField"]
+        XCTAssertTrue(replaceText.waitForExistence(timeout: 5) || replaceSearch.waitForExistence(timeout: 5))
+        let replaceField = replaceText.exists ? replaceText : replaceSearch
+        replaceField.click()
+        replaceField.typeText("ALPHA")
+
+        let replaceButton = app.buttons["NativeEditor.ReplaceButton"]
+        XCTAssertTrue(replaceButton.waitForExistence(timeout: 5))
+        replaceButton.click()
+
+        let once = waitForTextViewValue(textView, timeout: 2.0, description: "replace first match") { v in
+            v.contains("ALPHA beta alpha")
+        }
+        XCTAssertTrue(once.contains("ALPHA beta alpha"))
+        attachScreenshot(name: "find-replace-once", element: textView)
+
+        replaceButton.click()
+        let twice = waitForTextViewValue(textView, timeout: 2.0, description: "replace second match") { v in
+            v.contains("ALPHA beta ALPHA")
+        }
+        XCTAssertTrue(twice.contains("ALPHA beta ALPHA"))
+        attachScreenshot(name: "find-replace-twice", element: textView)
+
+        try save(app: app)
+        let saved = try waitForFileContains(tmp, substring: "ALPHA beta ALPHA", timeout: 5)
+        XCTAssertTrue(saved.contains("ALPHA beta ALPHA"))
+    }
+
+    func testCheckboxHitTargetGlyphTogglesByClick() throws {
+        guard isExhaustiveUIEnabled() else {
+            throw XCTSkip("Set KERN_ENABLE_EXHAUSTIVE_TESTS=1 to run hit-target UI tests")
+        }
+
+        let tmp = try makeTempMarkdownFile(name: "kern-ui-checkbox-hit-target-glyph")
+        try "- [ ] item\n".write(to: tmp, atomically: true, encoding: .utf8)
+
+        // Default hit target is `glyph`. Use GFM rendering (default) to avoid a leading bullet dot.
+        let app = makeApp(opening: tmp, env: [
+            "KERN_NATIVE_TASK_RENDERING": "gfm",
+            "KERN_NATIVE_CHECKBOX_HIT_TARGET": "glyph",
+        ])
+        app.launch()
+
+        let textView = app.textViews["NativeEditor.TextView"]
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+
+        let value = (textView.value as? String) ?? ""
+        XCTAssertTrue(value.contains("☐ item"))
+        attachScreenshot(name: "hit-target-glyph-before", element: textView)
+
+        // Click directly on the checkbox glyph at the start of the first line.
+        clickAtOffset(textView, x: 26, y: 40)
+
+        let toggled = waitForTextViewValue(
+            textView,
+            timeout: 2.0,
+            description: "clicking checkbox glyph should toggle"
+        ) { v in
+            v.contains("☑ item")
+        }
+        XCTAssertTrue(toggled.contains("☑ item"))
+        attachScreenshot(name: "hit-target-glyph-after", element: textView)
+    }
+
     func testScenarioMatrix_ExhaustiveUI() throws {
         guard isExhaustiveUIEnabled() else {
             throw XCTSkip("Set KERN_ENABLE_EXHAUSTIVE_TESTS=1 to run exhaustive UI matrix")
@@ -671,6 +788,8 @@ final class NativeEditorE2ETests: XCTestCase {
         app.launchEnvironment["KERN_UI_TESTING"] = "1"
         app.launchEnvironment["KERN_TEST_WINDOW_SIZE"] = "900x650"
         app.launchEnvironment["KERN_TEST_APPEARANCE"] = "light"
+        // Ensure transient UI is visible long enough for deterministic UI assertions.
+        app.launchEnvironment["KERN_TEST_TOAST_DURATION_MS"] = "2000"
 
         for (k, v) in env {
             app.launchEnvironment[k] = v

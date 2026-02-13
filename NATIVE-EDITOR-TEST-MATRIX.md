@@ -43,6 +43,9 @@ Preferences are controlled via:
 | Soft line breaks | Shift+Enter creates in-item line break (export uses hard breaks + indents) | `soft-breaks.*` fixture | `testShiftEnterInBulletDoesNotContinueList` | |
 | Code fences | Fenced blocks render monospaced + background; export fences | `basic.*` fixture | `testCodeBlockCopyButtonCopiesWholeBlock` | Copy button tested; styling snapshot gated |
 | Tables (GFM) | `| a | b |` imports as real table (borders + alignment); export canonical table markdown | `tables.*` fixture | `testTypedTableConvertsAndExportsGfmTable`, `testOpenFileWithGfmTableRendersWysiwygAndExportsStable` (+ matrix includes table round-trip) | Rendered via TextKit `NSTextTableBlock` |
+| File reload on disk change | External write triggers reload + toast; editor updates content | (N/A) | `testReloadOnDiskChangeShowsToastAndUpdatesContent` | Toast is labeled `NativeEditor.ReloadToast` for UI assertions |
+| Find / Replace | Find bar is native + testable; replace mutates document deterministically | (N/A) | `testFindReplaceReplacesMatchesInOrder` | Find UI is `NativeEditor.FindBar` (no system Find panel dependency) |
+| Checkbox click hit-target | Clicking checkbox glyph toggles; optional marker-region toggles | options tests | `testCheckboxHitTargetGlyphTogglesByClick` (gated), `testCheckboxHitTargetMarkerTogglesWhenEnabled` (gated) | Coordinate-based clicks can be flaky; gated behind exhaustive UI |
 | Visual regression | Stable rendering across changes | Snapshot tests (gated) | UI screenshots attached always | Enable with `KERN_ENABLE_SNAPSHOT_TESTS=1` |
 | Future Markdown features | Blockquotes, images, strikethrough, autolinks, nested lists, etc. | `KernTests/NativeMarkdownCodecFutureSpecTests.swift` (gated + expected-failure) | None yet | Enable with `KERN_ENABLE_EXHAUSTIVE_TESTS=1` |
 

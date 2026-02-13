@@ -210,6 +210,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let findReplaceItem = NSMenuItem(title: "Find and Replace\u{2026}", action: #selector(NativeEditorViewController.showFindReplace(_:)), keyEquivalent: "h")
         findReplaceItem.keyEquivalentModifierMask = [.command, .shift]
         findMenu.addItem(findReplaceItem)
+        findMenu.addItem(NSMenuItem.separator())
+        findMenu.addItem(withTitle: "Find Next", action: #selector(NativeEditorViewController.findNext(_:)), keyEquivalent: "g")
+        let findPrevItem = NSMenuItem(title: "Find Previous", action: #selector(NativeEditorViewController.findPrevious(_:)), keyEquivalent: "g")
+        findPrevItem.keyEquivalentModifierMask = [.command, .shift]
+        findMenu.addItem(findPrevItem)
+        findMenu.addItem(NSMenuItem.separator())
         let useSelectionItem = NSMenuItem(title: "Use Selection for Find", action: #selector(NativeEditorViewController.useSelectionForFind(_:)), keyEquivalent: "e")
         findMenu.addItem(useSelectionItem)
         findMenuItem.submenu = findMenu

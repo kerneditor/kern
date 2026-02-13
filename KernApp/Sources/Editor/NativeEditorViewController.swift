@@ -13,6 +13,23 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private let textView = NativeMarkdownTextView()
     private let codeCopyButton = NSButton(title: "Copy", target: nil, action: nil)
 
+    // Find / Replace (native, testable; avoids depending on the system Find panel UI).
+    private let findBarView = NSView()
+    private let findField = NSSearchField()
+    private let replaceField = NSTextField()
+    private let findMatchLabel = NSTextField(labelWithString: "")
+    private let findPrevButton = NSButton(title: "", target: nil, action: nil)
+    private let findNextButton = NSButton(title: "", target: nil, action: nil)
+    private let replaceButton = NSButton(title: "Replace", target: nil, action: nil)
+    private let replaceAllButton = NSButton(title: "All", target: nil, action: nil)
+    private let findCloseButton = NSButton(title: "", target: nil, action: nil)
+
+    private var isFindReplaceMode = false
+    private var findMatches: [NSRange] = []
+    private var findCurrentIndex: Int = 0
+    private var findAnchorLocation: Int = 0
+    private var findUpdateWorkItem: DispatchWorkItem?
+
     private var isApplyingExternalUpdate = false
     private var isApplyingInputRules = false
     private var isApplyingAutoNewline = false
@@ -83,6 +100,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         codeCopyButton.isHidden = true
         container.addSubview(codeCopyButton)
 
+        configureFindBar(container: container)
+
         // Track scroll to keep the copy button positioned.
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -93,6 +112,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         )
 
         view = container
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        layoutFindBar()
+        updateCodeCopyButtonVisibilityAndPosition()
     }
 
     // MARK: - External Updates
@@ -247,6 +272,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         applyMarkdownInputRulesIfNeeded()
         handleNewlineContinuationIfNeeded()
         updateCodeCopyButtonVisibilityAndPosition()
+        scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
         scheduleExport()
     }
 
@@ -756,10 +782,349 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         scheduleExport()
     }
 
+    // MARK: - Find / Replace
+
+    private func configureFindBar(container: NSView) {
+        findBarView.wantsLayer = true
+        findBarView.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+        findBarView.layer?.cornerRadius = 10
+        findBarView.layer?.borderWidth = 1
+        findBarView.layer?.borderColor = NSColor.separatorColor.cgColor
+        findBarView.isHidden = true
+        findBarView.setAccessibilityIdentifier("NativeEditor.FindBar")
+
+        findField.setAccessibilityIdentifier("NativeEditor.FindField")
+        findField.placeholderString = "Find"
+        findField.font = NSFont.systemFont(ofSize: 13)
+        findField.sendsSearchStringImmediately = true
+        findField.target = self
+        findField.action = #selector(findFieldDidChange(_:))
+
+        replaceField.setAccessibilityIdentifier("NativeEditor.ReplaceField")
+        replaceField.placeholderString = "Replace"
+        replaceField.font = NSFont.systemFont(ofSize: 13)
+        replaceField.bezelStyle = .roundedBezel
+        replaceField.isHidden = true
+
+        findMatchLabel.setAccessibilityIdentifier("NativeEditor.FindMatchLabel")
+        findMatchLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        findMatchLabel.textColor = .secondaryLabelColor
+        findMatchLabel.alignment = .right
+        findMatchLabel.stringValue = ""
+
+        func configureIconButton(_ button: NSButton, symbol: String, id: String, action: Selector, toolTip: String) {
+            button.title = ""
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)
+            button.isBordered = false
+            button.contentTintColor = .secondaryLabelColor
+            button.target = self
+            button.action = action
+            button.setAccessibilityIdentifier(id)
+            button.toolTip = toolTip
+        }
+
+        configureIconButton(findPrevButton, symbol: "chevron.up", id: "NativeEditor.FindPrevButton", action: #selector(findPrevious(_:)), toolTip: "Previous match")
+        configureIconButton(findNextButton, symbol: "chevron.down", id: "NativeEditor.FindNextButton", action: #selector(findNext(_:)), toolTip: "Next match")
+        configureIconButton(findCloseButton, symbol: "xmark", id: "NativeEditor.FindCloseButton", action: #selector(closeFindBar(_:)), toolTip: "Close find")
+
+        replaceButton.target = self
+        replaceButton.action = #selector(replaceCurrent(_:))
+        replaceButton.setAccessibilityIdentifier("NativeEditor.ReplaceButton")
+        replaceButton.bezelStyle = .rounded
+        replaceButton.controlSize = .small
+        replaceButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        replaceButton.isHidden = true
+
+        replaceAllButton.target = self
+        replaceAllButton.action = #selector(replaceAll(_:))
+        replaceAllButton.setAccessibilityIdentifier("NativeEditor.ReplaceAllButton")
+        replaceAllButton.bezelStyle = .rounded
+        replaceAllButton.controlSize = .small
+        replaceAllButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        replaceAllButton.isHidden = true
+
+        findBarView.addSubview(findField)
+        findBarView.addSubview(replaceField)
+        findBarView.addSubview(findMatchLabel)
+        findBarView.addSubview(findPrevButton)
+        findBarView.addSubview(findNextButton)
+        findBarView.addSubview(replaceButton)
+        findBarView.addSubview(replaceAllButton)
+        findBarView.addSubview(findCloseButton)
+
+        container.addSubview(findBarView)
+        layoutFindBar()
+    }
+
+    private func layoutFindBar() {
+        guard isViewLoaded else { return }
+
+        let barHeight: CGFloat = isFindReplaceMode ? 44 : 38
+        let margin: CGFloat = 12
+        let maxWidth: CGFloat = 760
+
+        let availableWidth = max(320, view.bounds.width - margin * 2)
+        let width = min(maxWidth, availableWidth)
+        let x = (view.bounds.width - width) / 2
+        let y = view.bounds.height - barHeight - margin
+
+        findBarView.frame = NSRect(x: x, y: y, width: width, height: barHeight)
+        findBarView.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+
+        let pad: CGFloat = 10
+        let spacing: CGFloat = 6
+        let buttonW: CGFloat = 22
+        let labelW: CGFloat = 72
+
+        func centerY(_ h: CGFloat) -> CGFloat { (barHeight - h) / 2 }
+
+        var right = width - pad
+
+        // Close
+        findCloseButton.frame = NSRect(x: right - buttonW, y: centerY(buttonW), width: buttonW, height: buttonW)
+        right -= buttonW + spacing
+
+        // Next / Prev
+        findNextButton.frame = NSRect(x: right - buttonW, y: centerY(buttonW), width: buttonW, height: buttonW)
+        right -= buttonW + spacing
+        findPrevButton.frame = NSRect(x: right - buttonW, y: centerY(buttonW), width: buttonW, height: buttonW)
+        right -= buttonW + spacing
+
+        // Replace buttons (optional)
+        replaceButton.isHidden = !isFindReplaceMode
+        replaceAllButton.isHidden = !isFindReplaceMode
+        replaceField.isHidden = !isFindReplaceMode
+
+        if isFindReplaceMode {
+            let allW: CGFloat = 44
+            let repW: CGFloat = 74
+            replaceAllButton.frame = NSRect(x: right - allW, y: centerY(22), width: allW, height: 22)
+            right -= allW + spacing
+            replaceButton.frame = NSRect(x: right - repW, y: centerY(22), width: repW, height: 22)
+            right -= repW + spacing
+        }
+
+        // Match label
+        findMatchLabel.frame = NSRect(x: right - labelW, y: centerY(18), width: labelW, height: 18)
+        right -= labelW + spacing
+
+        let fieldH: CGFloat = 24
+        let fieldsWidth = max(160, right - pad)
+
+        if isFindReplaceMode {
+            let fieldW = max(120, floor((fieldsWidth - spacing) / 2))
+            findField.frame = NSRect(x: pad, y: centerY(fieldH), width: fieldW, height: fieldH)
+            replaceField.frame = NSRect(x: pad + fieldW + spacing, y: centerY(fieldH), width: fieldsWidth - fieldW - spacing, height: fieldH)
+        } else {
+            findField.frame = NSRect(x: pad, y: centerY(fieldH), width: fieldsWidth, height: fieldH)
+            replaceField.frame = .zero
+        }
+    }
+
     @objc func showFind(_ sender: Any?) {
-        let item = NSMenuItem()
-        item.tag = Int(NSFindPanelAction.showFindPanel.rawValue)
-        textView.performFindPanelAction(item)
+        presentFindBar(replaceMode: false)
+    }
+
+    @objc func showFindReplace(_ sender: Any?) {
+        presentFindBar(replaceMode: true)
+    }
+
+    @objc func useSelectionForFind(_ sender: Any?) {
+        presentFindBar(replaceMode: isFindReplaceMode)
+        setFindQueryFromSelection()
+        findAnchorLocation = textView.selectedRange().location
+        updateFindMatches(resetIndex: true, anchorLocation: findAnchorLocation)
+    }
+
+    @objc func findNext(_ sender: Any?) {
+        if findBarView.isHidden { presentFindBar(replaceMode: false) }
+        updateFindMatches(resetIndex: false, anchorLocation: nil)
+        guard !findMatches.isEmpty else { return }
+
+        let selection = textView.selectedRange()
+        let anchor = selection.location + selection.length
+        let idx = findMatches.firstIndex(where: { $0.location >= anchor }) ?? 0
+        selectFindMatch(at: idx)
+    }
+
+    @objc func findPrevious(_ sender: Any?) {
+        if findBarView.isHidden { presentFindBar(replaceMode: false) }
+        updateFindMatches(resetIndex: false, anchorLocation: nil)
+        guard !findMatches.isEmpty else { return }
+
+        let anchor = textView.selectedRange().location
+        let idx = findMatches.lastIndex(where: { $0.location < anchor }) ?? (findMatches.count - 1)
+        selectFindMatch(at: idx)
+    }
+
+    @objc private func findFieldDidChange(_ sender: Any?) {
+        findAnchorLocation = textView.selectedRange().location
+        scheduleFindUpdate(resetIndex: true, anchorLocation: findAnchorLocation)
+    }
+
+    @objc private func closeFindBar(_ sender: Any?) {
+        hideFindBar()
+    }
+
+    @objc private func replaceCurrent(_ sender: Any?) {
+        guard isFindReplaceMode else { return }
+        guard let storage = textView.textStorage else { return }
+
+        updateFindMatches(resetIndex: false, anchorLocation: nil)
+        guard !findMatches.isEmpty else { return }
+
+        let match = findMatches[findCurrentIndex]
+        let replacement = replaceField.stringValue
+
+        NativeFindEngine.replace(in: storage, range: match, replacement: replacement)
+        scheduleExport()
+
+        // Move past the replaced span so we don't get stuck re-matching the replacement text.
+        let anchor = match.location + (replacement as NSString).length
+        findAnchorLocation = anchor
+        updateFindMatches(resetIndex: true, anchorLocation: anchor)
+    }
+
+    @objc private func replaceAll(_ sender: Any?) {
+        guard isFindReplaceMode else { return }
+        guard let storage = textView.textStorage else { return }
+
+        let query = findField.stringValue
+        guard !query.isEmpty else { return }
+
+        let matches = NativeFindEngine.allMatches(in: textView.string, query: query)
+        guard !matches.isEmpty else {
+            updateFindMatches(resetIndex: true, anchorLocation: nil)
+            return
+        }
+
+        let replacement = replaceField.stringValue
+        for r in matches.reversed() {
+            NativeFindEngine.replace(in: storage, range: r, replacement: replacement)
+        }
+        scheduleExport()
+
+        findAnchorLocation = 0
+        updateFindMatches(resetIndex: true, anchorLocation: 0)
+    }
+
+    private func presentFindBar(replaceMode: Bool) {
+        loadViewIfNeeded()
+
+        isFindReplaceMode = replaceMode
+        findBarView.isHidden = false
+        layoutFindBar()
+
+        // Prefer selection as initial query (macOS standard behavior).
+        setFindQueryFromSelection(allowEmpty: true)
+
+        findAnchorLocation = textView.selectedRange().location
+        updateFindMatches(resetIndex: true, anchorLocation: findAnchorLocation)
+
+        view.window?.makeFirstResponder(findField)
+    }
+
+    private func hideFindBar() {
+        findBarView.isHidden = true
+        findMatchLabel.stringValue = ""
+        view.window?.makeFirstResponder(textView)
+    }
+
+    private func scheduleFindUpdate(resetIndex: Bool, anchorLocation: Int?) {
+        guard !findBarView.isHidden else { return }
+
+        findUpdateWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.updateFindMatches(resetIndex: resetIndex, anchorLocation: anchorLocation)
+        }
+        findUpdateWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+    }
+
+    private func updateFindMatches(resetIndex: Bool, anchorLocation: Int?) {
+        guard !findBarView.isHidden else { return }
+
+        let query = findField.stringValue
+        if query.isEmpty {
+            findMatches = []
+            findCurrentIndex = 0
+            updateFindBarUI()
+            return
+        }
+
+        findMatches = NativeFindEngine.allMatches(in: textView.string, query: query)
+
+        if findMatches.isEmpty {
+            findCurrentIndex = 0
+            updateFindBarUI()
+            return
+        }
+
+        if resetIndex {
+            let anchor = anchorLocation ?? findAnchorLocation
+            if let idx = findMatches.firstIndex(where: { $0.location >= anchor }) {
+                findCurrentIndex = idx
+            } else {
+                findCurrentIndex = 0
+            }
+        } else {
+            findCurrentIndex = min(findCurrentIndex, findMatches.count - 1)
+        }
+
+        selectFindMatch(at: findCurrentIndex)
+    }
+
+    private func selectFindMatch(at index: Int) {
+        guard index >= 0, index < findMatches.count else {
+            updateFindBarUI()
+            return
+        }
+
+        findCurrentIndex = index
+        let r = findMatches[index]
+        textView.setSelectedRange(r)
+        textView.scrollRangeToVisible(r)
+        findAnchorLocation = r.location + r.length
+        updateFindBarUI()
+    }
+
+    private func updateFindBarUI() {
+        let query = findField.stringValue
+        if query.isEmpty {
+            findMatchLabel.stringValue = ""
+            findPrevButton.isEnabled = false
+            findNextButton.isEnabled = false
+            replaceButton.isEnabled = false
+            replaceAllButton.isEnabled = false
+            return
+        }
+
+        if findMatches.isEmpty {
+            findMatchLabel.stringValue = "No matches"
+            findPrevButton.isEnabled = false
+            findNextButton.isEnabled = false
+            replaceButton.isEnabled = false
+            replaceAllButton.isEnabled = false
+            return
+        }
+
+        findMatchLabel.stringValue = "\(findCurrentIndex + 1)/\(findMatches.count)"
+        findPrevButton.isEnabled = true
+        findNextButton.isEnabled = true
+        replaceButton.isEnabled = isFindReplaceMode
+        replaceAllButton.isEnabled = isFindReplaceMode
+    }
+
+    private func setFindQueryFromSelection(allowEmpty: Bool = false) {
+        let range = textView.selectedRange()
+        guard range.length > 0 else {
+            if allowEmpty { return }
+            return
+        }
+        let ns = textView.string as NSString
+        guard range.location + range.length <= ns.length else { return }
+        findField.stringValue = ns.substring(with: range)
     }
 
     // MARK: - Code Block Copy
@@ -847,18 +1212,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         codeCopyButton.isHidden = false
     }
 
-    @objc func showFindReplace(_ sender: Any?) {
-        // AppKit's NSFindPanelAction does not have a dedicated "show replace panel" tag.
-        // For the prototype, just open the standard Find panel.
-        showFind(sender)
-    }
-
-    @objc func useSelectionForFind(_ sender: Any?) {
-        let item = NSMenuItem()
-        item.tag = Int(NSFindPanelAction.setFindString.rawValue)
-        textView.performFindPanelAction(item)
-    }
-
     // MARK: - Toast
 
     private var toastView: NSView?
@@ -870,6 +1223,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(white: 0, alpha: 0.7).cgColor
         container.layer?.cornerRadius = 8
+        container.setAccessibilityIdentifier("NativeEditor.ReloadToast.Container")
 
         let label = NSTextField(labelWithString: "File reloaded from disk")
         label.font = .systemFont(ofSize: 12, weight: .medium)
@@ -877,6 +1231,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         label.backgroundColor = .clear
         label.isBezeled = false
         label.isEditable = false
+        label.setAccessibilityIdentifier("NativeEditor.ReloadToast")
         label.sizeToFit()
 
         let hPad: CGFloat = 12
@@ -898,7 +1253,16 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         view.addSubview(container)
         toastView = container
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+        // Keep the toast visible long enough for humans, but allow UI tests to shorten it.
+        let duration: TimeInterval = {
+            let env = ProcessInfo.processInfo.environment
+            if let raw = env["KERN_TEST_TOAST_DURATION_MS"], let ms = Double(raw) {
+                return max(0.05, ms / 1000.0)
+            }
+            return 3.0
+        }()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self else { return }
             self.dismissToast()
         }
