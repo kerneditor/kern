@@ -77,8 +77,18 @@ NEED_XCODEGEN=true
 if [ "$SKIP_XCODEGEN" = true ]; then
   NEED_XCODEGEN=false
 fi
-if [ -f "KernTextKit.xcodeproj/project.pbxproj" ] && [ "KernTextKit.xcodeproj/project.pbxproj" -nt "project.yml" ]; then
+
+# Xcodegen needs to run whenever the set of source files changes (new tests, new files, etc.).
+# Relying only on `project.yml` mtime is insufficient because adding a new file doesn't touch it.
+PBXPROJ="KernTextKit.xcodeproj/project.pbxproj"
+if [ -f "$PBXPROJ" ] && [ "$PBXPROJ" -nt "project.yml" ]; then
   NEED_XCODEGEN=false
+
+  # If any sources/tests/ui-tests/resources are newer than the generated pbxproj,
+  # re-run xcodegen so the project includes them.
+  if find KernApp/Sources KernTests KernUITests -type f \( -name "*.swift" -o -name "*.xcassets" \) -newer "$PBXPROJ" 2>/dev/null | grep -q .; then
+    NEED_XCODEGEN=true
+  fi
 fi
 
 if [ "$NEED_XCODEGEN" = true ]; then

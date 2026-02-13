@@ -67,6 +67,7 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
 
     // MARK: - TextKit helpers
 
+    @MainActor
     private func makeLaidOutTextView(attr: NSAttributedString, width: CGFloat, height: CGFloat) -> NSTextView {
         let textStorage = NSTextStorage(attributedString: attr)
         let layoutManager = NSLayoutManager()
@@ -85,6 +86,7 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
         return tv
     }
 
+    @MainActor
     private func firstIndex(with key: NSAttributedString.Key, in textView: NSTextView) -> Int? {
         guard let storage = textView.textStorage else { return nil }
         var found: Int?
@@ -97,6 +99,7 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
         return found
     }
 
+    @MainActor
     private func glyphRect(atCharIndex charIndex: Int, in textView: NSTextView) -> NSRect {
         guard let lm = textView.layoutManager, let tc = textView.textContainer else { return .zero }
         let glyphIndex = lm.glyphIndexForCharacter(at: charIndex)
@@ -107,4 +110,3 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
         return rect
     }
 }
-

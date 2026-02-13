@@ -9,6 +9,8 @@ extension NSAttributedString.Key {
     static let kernOrderedIndex = NSAttributedString.Key("kern.orderedIndex") // Int
     static let kernOrderedIsTask = NSAttributedString.Key("kern.orderedIsTask") // Bool
     static let kernTaskStyle = NSAttributedString.Key("kern.taskStyle") // Int
+    static let kernListIndent = NSAttributedString.Key("kern.listIndent") // Int (leading spaces to export)
+    static let kernListDepth = NSAttributedString.Key("kern.listDepth") // Int (nesting depth for rendering)
 
     static let kernStrong = NSAttributedString.Key("kern.strong") // Bool
     static let kernEmphasis = NSAttributedString.Key("kern.emphasis") // Bool

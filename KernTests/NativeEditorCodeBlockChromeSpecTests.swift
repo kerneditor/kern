@@ -108,6 +108,7 @@ final class NativeEditorCodeBlockChromeSpecTests: XCTestCase {
         return window
     }
 
+    @MainActor
     private func findSubview(withAXIdentifier id: String, in view: NSView) -> NSView? {
         if view.accessibilityIdentifier() == id { return view }
         for sub in view.subviews {
@@ -157,4 +158,3 @@ final class NativeEditorCodeBlockChromeSpecTests: XCTestCase {
         return colors.count >= 2
     }
 }
-

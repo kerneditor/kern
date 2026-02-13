@@ -290,7 +290,7 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
         // ── Thematic breaks: spaced + indented variants
         for rule in ["- - -", "* * *", "_ _ _", " ---", "*** ", "  ___"] {
             cases.append(.init(
-                name: "thematic-break-variant-\(rule.replacingOccurrences(of: \" \", with: \"_\"))",
+                name: "thematic-break-variant-\(rule.replacingOccurrences(of: " ", with: "_"))",
                 markdown: "Before\n\n\(rule)\n\nAfter\n",
                 expectWysiwygContains: ["Before", "After"],
                 expectWysiwygNotContains: ["- - -", "* * *", "_ _ _", "---", "***", "___"],

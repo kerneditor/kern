@@ -185,20 +185,42 @@ enum NativeMarkdownCodec {
                 continue
             }
 
-            // Bullet/standalone task: - [ ] text / [] text / [ ] text
+            // Bullet/standalone task: - [ ] text / * [ ] text / + [ ] text / [] text / [ ] text
             if let task = parseTask(line) {
                 var (combined, prevHardBreak) = stripHardBreakMarker(task.text)
+                let continuationIndent = String(repeating: " ", count: task.indent + 2)
+
                 var j = i + 1
                 while j < lines.count {
                     let next = lines[j]
-                    guard next.hasPrefix("  ") else { break }
-                    let (nextText, nextHardBreak) = stripHardBreakMarker(String(next.dropFirst(2)))
+                    guard next.hasPrefix(continuationIndent) else { break }
+                    let stripped = String(next.dropFirst(continuationIndent.count))
+
+                    // If the next line starts a nested list item (or another block), don't treat it
+                    // as a continuation of this item's text.
+                    if parseTask(stripped) != nil
+                        || (options.orderedTasksEnabled && parseOrderedTask(stripped) != nil)
+                        || parseOrdered(stripped) != nil
+                        || parseBullet(stripped) != nil
+                        || parseHeading(stripped) != nil
+                        || parseFenceStart(stripped) != nil
+                    {
+                        break
+                    }
+
+                    let (nextText, nextHardBreak) = stripHardBreakMarker(stripped)
                     combined += (prevHardBreak ? "\u{2028}" : " ") + nextText
                     prevHardBreak = nextHardBreak
                     j += 1
                 }
 
-                let para = makeTaskParagraph((task.style, task.checked, combined), baseFont: baseFont, options: options)
+                let para = makeTaskParagraph(
+                    (task.style, task.checked, combined),
+                    indent: task.indent,
+                    depth: task.depth,
+                    baseFont: baseFont,
+                    options: options
+                )
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -211,13 +233,24 @@ enum NativeMarkdownCodec {
             // Ordered task (Kern preference): 1. [ ] text
             if options.orderedTasksEnabled, let orderedTask = parseOrderedTask(line) {
                 var (combined, prevHardBreak) = stripHardBreakMarker(orderedTask.text)
-                let indentWidth = orderedIndentWidth(for: line) ?? 3
+                let continuationIndent = String(repeating: " ", count: orderedTask.indent + orderedTask.markerLen)
                 var j = i + 1
                 while j < lines.count {
                     let next = lines[j]
-                    guard next.count >= indentWidth else { break }
-                    guard next.hasPrefix(String(repeating: " ", count: indentWidth)) else { break }
-                    let (nextText, nextHardBreak) = stripHardBreakMarker(String(next.dropFirst(indentWidth)))
+                    guard next.hasPrefix(continuationIndent) else { break }
+                    let stripped = String(next.dropFirst(continuationIndent.count))
+
+                    if parseTask(stripped) != nil
+                        || (options.orderedTasksEnabled && parseOrderedTask(stripped) != nil)
+                        || parseOrdered(stripped) != nil
+                        || parseBullet(stripped) != nil
+                        || parseHeading(stripped) != nil
+                        || parseFenceStart(stripped) != nil
+                    {
+                        break
+                    }
+
+                    let (nextText, nextHardBreak) = stripHardBreakMarker(stripped)
                     combined += (prevHardBreak ? "\u{2028}" : " ") + nextText
                     prevHardBreak = nextHardBreak
                     j += 1
@@ -238,7 +271,12 @@ enum NativeMarkdownCodec {
                     }
                 }
 
-                let para = makeOrderedTaskParagraph((normalizedIndex, orderedTask.checked, combined), baseFont: baseFont)
+                let para = makeOrderedTaskParagraph(
+                    (normalizedIndex, orderedTask.checked, combined),
+                    indent: orderedTask.indent,
+                    depth: orderedTask.depth,
+                    baseFont: baseFont
+                )
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -251,13 +289,24 @@ enum NativeMarkdownCodec {
             // Ordered list: 1. text
             if let ordered = parseOrdered(line) {
                 var (combined, prevHardBreak) = stripHardBreakMarker(ordered.text)
-                let indentWidth = orderedIndentWidth(for: line) ?? 3
+                let continuationIndent = String(repeating: " ", count: ordered.indent + ordered.markerLen)
                 var j = i + 1
                 while j < lines.count {
                     let next = lines[j]
-                    guard next.count >= indentWidth else { break }
-                    guard next.hasPrefix(String(repeating: " ", count: indentWidth)) else { break }
-                    let (nextText, nextHardBreak) = stripHardBreakMarker(String(next.dropFirst(indentWidth)))
+                    guard next.hasPrefix(continuationIndent) else { break }
+                    let stripped = String(next.dropFirst(continuationIndent.count))
+
+                    if parseTask(stripped) != nil
+                        || (options.orderedTasksEnabled && parseOrderedTask(stripped) != nil)
+                        || parseOrdered(stripped) != nil
+                        || parseBullet(stripped) != nil
+                        || parseHeading(stripped) != nil
+                        || parseFenceStart(stripped) != nil
+                    {
+                        break
+                    }
+
+                    let (nextText, nextHardBreak) = stripHardBreakMarker(stripped)
                     combined += (prevHardBreak ? "\u{2028}" : " ") + nextText
                     prevHardBreak = nextHardBreak
                     j += 1
@@ -278,7 +327,12 @@ enum NativeMarkdownCodec {
                     }
                 }
 
-                let para = makeOrderedParagraph((normalizedIndex, combined), baseFont: baseFont)
+                let para = makeOrderedParagraph(
+                    (normalizedIndex, combined),
+                    indent: ordered.indent,
+                    depth: ordered.depth,
+                    baseFont: baseFont
+                )
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -290,18 +344,31 @@ enum NativeMarkdownCodec {
 
             // Bullet list: - text
             if let bullet = parseBullet(line) {
-                var (combined, prevHardBreak) = stripHardBreakMarker(bullet)
+                var (combined, prevHardBreak) = stripHardBreakMarker(bullet.text)
+                let continuationIndent = String(repeating: " ", count: bullet.indent + 2)
                 var j = i + 1
                 while j < lines.count {
                     let next = lines[j]
-                    guard next.hasPrefix("  ") else { break }
-                    let (nextText, nextHardBreak) = stripHardBreakMarker(String(next.dropFirst(2)))
+                    guard next.hasPrefix(continuationIndent) else { break }
+                    let stripped = String(next.dropFirst(continuationIndent.count))
+
+                    if parseTask(stripped) != nil
+                        || (options.orderedTasksEnabled && parseOrderedTask(stripped) != nil)
+                        || parseOrdered(stripped) != nil
+                        || parseBullet(stripped) != nil
+                        || parseHeading(stripped) != nil
+                        || parseFenceStart(stripped) != nil
+                    {
+                        break
+                    }
+
+                    let (nextText, nextHardBreak) = stripHardBreakMarker(stripped)
                     combined += (prevHardBreak ? "\u{2028}" : " ") + nextText
                     prevHardBreak = nextHardBreak
                     j += 1
                 }
 
-                let para = makeBulletParagraph(combined, baseFont: baseFont)
+                let para = makeBulletParagraph(combined, indent: bullet.indent, depth: bullet.depth, baseFont: baseFont)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -938,50 +1005,82 @@ enum NativeMarkdownCodec {
         line.trimmingCharacters(in: .whitespacesAndNewlines) == "```"
     }
 
-    private static func parseTask(_ line: String) -> (style: KernTaskStyle, checked: Bool, text: String)? {
-        // Prototype task parsing:
-        // - Standard GFM: "- [ ] " / "- [x] "
-        // - Kern/Notion-style shortcut: "[] " / "[x] " / "[ ] "
+    private static func parseLeadingIndent(_ line: String) -> (indent: Int, rest: Substring) {
+        var indent = 0
+        var idx = line.startIndex
+        while idx < line.endIndex {
+            let ch = line[idx]
+            if ch == " " {
+                indent += 1
+            } else if ch == "\t" {
+                // Treat tabs as 4 spaces for indentation semantics.
+                indent += 4
+            } else {
+                break
+            }
+            idx = line.index(after: idx)
+        }
+        return (indent, line[idx...])
+    }
+
+    private static func parseTask(_ line: String) -> (indent: Int, depth: Int, style: KernTaskStyle, checked: Bool, text: String)? {
+        // Task parsing:
+        // - Standard GFM: "- [ ] " / "* [x] " / "+ [ ] " (supports extra whitespace + tabs)
+        // - Kern/Notion-style shortcut: "[] " / "[x] " / "[ ] " (optionally indented)
         guard line.count >= 3 else { return nil }
 
+        let (indent, rest) = parseLeadingIndent(line)
+
         // Standard: "- [ ] "
-        if line.hasPrefix("- ["), line.count >= 6 {
-            let chars = Array(line)
-            guard chars[0] == "-", chars[1] == " ", chars[2] == "[", chars[4] == "]", chars[5] == " " else {
-                return nil
-            }
-            let checkedChar = chars[3]
+        if let marker = rest.first, ["-", "*", "+"].contains(marker) {
+            let afterMarker = rest.dropFirst()
+            guard let ws = afterMarker.first, ws == " " || ws == "\t" else { /* not a list marker */ return nil }
+            let afterWS = afterMarker.drop(while: { $0 == " " || $0 == "\t" })
+            guard afterWS.hasPrefix("["), afterWS.count >= 4 else { return nil }
+            let chars = Array(afterWS)
+            guard chars.count >= 4, chars[0] == "[", chars[2] == "]" else { return nil }
+            let checkedChar = chars[1]
             let checked = checkedChar == "x" || checkedChar == "X"
-            let text = String(chars.dropFirst(6))
-            return (.bulleted, checked, text)
+            // Require at least one whitespace after closing bracket.
+            guard chars.count >= 4, chars[3] == " " || chars[3] == "\t" else { return nil }
+            let text = String(afterWS.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+            let depth = indent / 2
+            return (indent, depth, .bulleted, checked, text)
         }
 
         // Shortcut: "[] " / "[ ] " / "[x] "
-        if line.hasPrefix("[] "), line.count >= 3 {
-            let text = String(line.dropFirst(3))
-            return (.standalone, false, text)
+        let trimmed = String(rest)
+        if trimmed.hasPrefix("[] ") {
+            let text = String(trimmed.dropFirst(3))
+            return (indent, 0, .standalone, false, text)
         }
-        if line.hasPrefix("[ ] "), line.count >= 4 {
-            let text = String(line.dropFirst(4))
-            return (.standalone, false, text)
+        if trimmed.hasPrefix("[ ] ") {
+            let text = String(trimmed.dropFirst(4))
+            return (indent, 0, .standalone, false, text)
         }
-        if line.hasPrefix("[x] ") || line.hasPrefix("[X] "), line.count >= 4 {
-            let text = String(line.dropFirst(4))
-            return (.standalone, true, text)
+        if trimmed.hasPrefix("[x] ") || trimmed.hasPrefix("[X] ") {
+            let text = String(trimmed.dropFirst(4))
+            return (indent, 0, .standalone, true, text)
         }
 
         return nil
     }
 
-    private static func parseBullet(_ line: String) -> String? {
-        guard line.hasPrefix("- ") else { return nil }
-        return String(line.dropFirst(2))
+    private static func parseBullet(_ line: String) -> (indent: Int, depth: Int, text: String)? {
+        let (indent, rest) = parseLeadingIndent(line)
+        guard let marker = rest.first, ["-", "*", "+"].contains(marker) else { return nil }
+        let afterMarker = rest.dropFirst()
+        guard let ws = afterMarker.first, ws == " " || ws == "\t" else { return nil }
+        let text = String(afterMarker.drop(while: { $0 == " " || $0 == "\t" }))
+        let depth = indent / 2
+        return (indent, depth, text)
     }
 
-    private static func parseOrdered(_ line: String) -> (index: Int, text: String)? {
-        // Minimal: "1. text" (digits + '.' + space)
+    private static func parseOrdered(_ line: String) -> (indent: Int, depth: Int, index: Int, text: String, markerLen: Int)? {
+        // Minimal: "1. text" (digits + '.' + whitespace)
+        let (indent, rest) = parseLeadingIndent(line)
         var digits = ""
-        for ch in line {
+        for ch in rest {
             if ch.isNumber {
                 digits.append(ch)
             } else {
@@ -990,49 +1089,40 @@ enum NativeMarkdownCodec {
         }
         guard !digits.isEmpty else { return nil }
         guard let n = Int(digits) else { return nil }
-        let dotIndex = line.index(line.startIndex, offsetBy: digits.count)
-        guard dotIndex < line.endIndex, line[dotIndex] == "." else { return nil }
-        let afterDot = line.index(after: dotIndex)
-        guard afterDot < line.endIndex, line[afterDot] == " " else { return nil }
-        let textStart = line.index(after: afterDot)
-        let text = String(line[textStart...])
-        return (n, text)
+        let dotIndex = rest.index(rest.startIndex, offsetBy: digits.count)
+        guard dotIndex < rest.endIndex, rest[dotIndex] == "." else { return nil }
+        let afterDot = rest.index(after: dotIndex)
+        guard afterDot < rest.endIndex else { return nil }
+        guard rest[afterDot] == " " || rest[afterDot] == "\t" else { return nil }
+        let textStart = rest.index(after: afterDot)
+        let text = String(rest[textStart...])
+        let depth = indent / 3
+        let markerLen = digits.count + 2 // ". " (treat tab as 1 char here; indentation uses spaces)
+        return (indent, depth, max(1, n), text, markerLen)
     }
 
-    private static func orderedIndentWidth(for line: String) -> Int? {
+    private static func parseOrderedTask(_ line: String) -> (indent: Int, depth: Int, index: Int, checked: Bool, text: String, markerLen: Int)? {
+        // Minimal: "1. [ ] text" (digits + '.' + whitespace + '[' + (' '|'x') + ']' + whitespace)
+        let (indent, rest) = parseLeadingIndent(line)
         var digits = ""
-        for ch in line {
+        for ch in rest {
             if ch.isNumber { digits.append(ch) } else { break }
         }
         guard !digits.isEmpty else { return nil }
-        let i = line.index(line.startIndex, offsetBy: digits.count)
-        guard i < line.endIndex, line[i] == "." else { return nil }
-        let afterDot = line.index(after: i)
-        guard afterDot < line.endIndex, line[afterDot] == " " else { return nil }
-        return digits.count + 2 // ". "
-    }
-
-    private static func parseOrderedTask(_ line: String) -> (index: Int, checked: Bool, text: String)? {
-        // Minimal: "1. [ ] text" (digits + '.' + space + '[' + (' '|'x') + ']' + space)
-        var digits = ""
-        for ch in line {
-            if ch.isNumber {
-                digits.append(ch)
-            } else {
-                break
-            }
-        }
-        guard !digits.isEmpty else { return nil }
         guard let n = Int(digits) else { return nil }
-        let chars = Array(line)
+        let chars = Array(rest)
         let prefixLen = digits.count
-        guard chars.count >= prefixLen + 7 else { return nil }
-        guard chars[prefixLen] == ".", chars[prefixLen + 1] == " " else { return nil }
-        guard chars[prefixLen + 2] == "[", chars[prefixLen + 4] == "]", chars[prefixLen + 5] == " " else { return nil }
+        guard chars.count >= prefixLen + 6 else { return nil }
+        guard chars[prefixLen] == "." else { return nil }
+        guard chars[prefixLen + 1] == " " || chars[prefixLen + 1] == "\t" else { return nil }
+        guard chars[prefixLen + 2] == "[", chars[prefixLen + 4] == "]" else { return nil }
         let checkedChar = chars[prefixLen + 3]
         let checked = checkedChar == "x" || checkedChar == "X"
+        guard chars[prefixLen + 5] == " " || chars[prefixLen + 5] == "\t" else { return nil }
         let text = String(chars.dropFirst(prefixLen + 6))
-        return (max(1, n), checked, text)
+        let depth = indent / 3
+        let markerLen = prefixLen + 2
+        return (indent, depth, max(1, n), checked, text, markerLen)
     }
 
     private static func parseHeadingCheckbox(_ text: String) -> (checked: Bool, text: String)? {
@@ -1050,7 +1140,13 @@ enum NativeMarkdownCodec {
 
     // MARK: - Block rendering
 
-    private static func makeTaskParagraph(_ task: (style: KernTaskStyle, checked: Bool, text: String), baseFont: NSFont, options: Options) -> NSAttributedString {
+    private static func makeTaskParagraph(
+        _ task: (style: KernTaskStyle, checked: Bool, text: String),
+        indent: Int,
+        depth: Int,
+        baseFont: NSFont,
+        options: Options
+    ) -> NSAttributedString {
         let para = NSMutableAttributedString()
 
         // Marker prefix: checkbox + " " (and optional bullet dot for bulleted task items).
@@ -1077,6 +1173,8 @@ enum NativeMarkdownCodec {
         let content = parseInline(task.text, baseFont: baseFont)
         para.append(content)
 
+        para.addAttribute(.kernListIndent, value: max(0, indent), range: NSRange(location: 0, length: min(1, para.length)))
+        para.addAttribute(.kernListDepth, value: max(0, depth), range: NSRange(location: 0, length: min(1, para.length)))
         applyBlockAttributes(para, kind: .task, baseFont: baseFont, headingLevel: nil)
         para.addAttribute(.kernTaskStyle, value: task.style.rawValue, range: NSRange(location: 0, length: min(1, para.length)))
 
@@ -1123,7 +1221,7 @@ enum NativeMarkdownCodec {
         return para
     }
 
-    private static func makeBulletParagraph(_ text: String, baseFont: NSFont) -> NSAttributedString {
+    private static func makeBulletParagraph(_ text: String, indent: Int, depth: Int, baseFont: NSFont) -> NSAttributedString {
         let para = NSMutableAttributedString()
         let markerAttrs = baseAttributes(baseFont: baseFont).merging(
             [.kernMarker: true],
@@ -1131,6 +1229,8 @@ enum NativeMarkdownCodec {
         )
         para.append(NSAttributedString(string: "• ", attributes: markerAttrs))
         para.append(parseInline(text, baseFont: baseFont))
+        para.addAttribute(.kernListIndent, value: max(0, indent), range: NSRange(location: 0, length: min(1, para.length)))
+        para.addAttribute(.kernListDepth, value: max(0, depth), range: NSRange(location: 0, length: min(1, para.length)))
         applyBlockAttributes(para, kind: .bullet, baseFont: baseFont, headingLevel: nil)
         return para
     }
@@ -1156,7 +1256,7 @@ enum NativeMarkdownCodec {
         return para
     }
 
-    private static func makeOrderedParagraph(_ ordered: (index: Int, text: String), baseFont: NSFont) -> NSAttributedString {
+    private static func makeOrderedParagraph(_ ordered: (index: Int, text: String), indent: Int, depth: Int, baseFont: NSFont) -> NSAttributedString {
         let para = NSMutableAttributedString()
 
         let markerAttrs = baseAttributes(baseFont: baseFont).merging(
@@ -1169,13 +1269,20 @@ enum NativeMarkdownCodec {
         let content = parseInline(ordered.text, baseFont: baseFont)
         para.append(content)
 
+        para.addAttribute(.kernListIndent, value: max(0, indent), range: NSRange(location: 0, length: min(1, para.length)))
+        para.addAttribute(.kernListDepth, value: max(0, depth), range: NSRange(location: 0, length: min(1, para.length)))
         applyBlockAttributes(para, kind: .ordered, baseFont: baseFont, headingLevel: nil)
         para.addAttribute(.kernOrderedIndex, value: max(1, ordered.index), range: NSRange(location: 0, length: min(marker.count, para.length)))
 
         return para
     }
 
-    private static func makeOrderedTaskParagraph(_ orderedTask: (index: Int, checked: Bool, text: String), baseFont: NSFont) -> NSAttributedString {
+    private static func makeOrderedTaskParagraph(
+        _ orderedTask: (index: Int, checked: Bool, text: String),
+        indent: Int,
+        depth: Int,
+        baseFont: NSFont
+    ) -> NSAttributedString {
         let para = NSMutableAttributedString()
 
         let markerAttrs = baseAttributes(baseFont: baseFont).merging(
@@ -1199,6 +1306,8 @@ enum NativeMarkdownCodec {
         let content = parseInline(orderedTask.text, baseFont: baseFont)
         para.append(content)
 
+        para.addAttribute(.kernListIndent, value: max(0, indent), range: NSRange(location: 0, length: min(1, para.length)))
+        para.addAttribute(.kernListDepth, value: max(0, depth), range: NSRange(location: 0, length: min(1, para.length)))
         applyBlockAttributes(para, kind: .ordered, baseFont: baseFont, headingLevel: nil)
         para.addAttribute(.kernOrderedIndex, value: max(1, orderedTask.index), range: NSRange(location: 0, length: min(marker.count, para.length)))
         para.addAttribute(.kernOrderedIsTask, value: true, range: NSRange(location: 0, length: min(1, para.length)))
@@ -1215,6 +1324,7 @@ enum NativeMarkdownCodec {
     }
 
     private static func applyBlockAttributes(_ paragraph: NSMutableAttributedString, kind: KernBlockKind, baseFont: NSFont, headingLevel: Int?) {
+        guard paragraph.length > 0 else { return }
         let full = NSRange(location: 0, length: paragraph.length)
         paragraph.addAttribute(.kernBlockKind, value: kind.rawValue, range: full)
 
@@ -1254,6 +1364,11 @@ enum NativeMarkdownCodec {
             style.paragraphSpacingBefore = 2
             style.paragraphSpacing = 2
 
+            let listDepth = (paragraph.attribute(.kernListDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
+            let baseIndent = CGFloat(max(0, listDepth)) * 24
+            style.firstLineHeadIndent = baseIndent
+            style.headIndent = baseIndent
+
             // Align wrapped lines after the visible marker.
             let markerLen = markerPrefixLength(in: paragraph)
             if markerLen > 0 {
@@ -1263,7 +1378,7 @@ enum NativeMarkdownCodec {
                     with: NSSize(width: 1000, height: 1000),
                     options: [.usesFontLeading, .usesLineFragmentOrigin]
                 )
-                style.headIndent = max(24, ceil(rect.width) + 8)
+                style.headIndent = baseIndent + max(24, ceil(rect.width) + 8)
             }
 
             paragraph.addAttribute(.paragraphStyle, value: style, range: full)
@@ -1547,7 +1662,16 @@ enum NativeMarkdownCodec {
             softBreakKind = .codeBlock
         }
 
-        return serializeSoftLineBreaks(body: body, kind: softBreakKind)
+        let listIndent = (paragraph.attribute(.kernListIndent, at: 0, effectiveRange: nil) as? Int) ?? 0
+        let indentPrefix: String
+        switch kind {
+        case .bullet, .task, .ordered:
+            indentPrefix = String(repeating: " ", count: max(0, listIndent))
+        default:
+            indentPrefix = ""
+        }
+
+        return serializeSoftLineBreaks(body: indentPrefix + body, kind: softBreakKind)
     }
 
     private static func findFirstCheckboxState(in paragraph: NSAttributedString) -> Bool? {
@@ -1619,14 +1743,17 @@ enum NativeMarkdownCodec {
         let parts = body.split(separator: "\u{2028}", omittingEmptySubsequences: false).map(String.init)
         guard parts.count >= 2 else { return body.replacingOccurrences(of: "\u{2028}", with: "\n") }
 
+        let leadingSpaces = body.prefix { $0 == " " }.count
+        let trimmed = body.dropFirst(leadingSpaces)
+
         let continuationIndent: String
         switch kind {
         case .bullet, .task:
-            continuationIndent = "  "
+            continuationIndent = String(repeating: " ", count: leadingSpaces + 2)
         case .ordered:
-            let digitsCount = body.prefix { $0.isNumber }.count
+            let digitsCount = trimmed.prefix { $0.isNumber }.count
             let n = max(1, digitsCount)
-            continuationIndent = String(repeating: " ", count: n + 2) // ". "
+            continuationIndent = String(repeating: " ", count: leadingSpaces + n + 2) // ". "
         case .heading, .paragraph, .tableCell, .codeBlock:
             continuationIndent = ""
         }
