@@ -11,10 +11,13 @@ extension NSAttributedString.Key {
     static let kernTaskStyle = NSAttributedString.Key("kern.taskStyle") // Int
     static let kernListIndent = NSAttributedString.Key("kern.listIndent") // Int (leading spaces to export)
     static let kernListDepth = NSAttributedString.Key("kern.listDepth") // Int (nesting depth for rendering)
+    static let kernQuoteDepth = NSAttributedString.Key("kern.quoteDepth") // Int
 
     static let kernStrong = NSAttributedString.Key("kern.strong") // Bool
     static let kernEmphasis = NSAttributedString.Key("kern.emphasis") // Bool
     static let kernInlineCode = NSAttributedString.Key("kern.inlineCode") // Bool
+    static let kernStrikethrough = NSAttributedString.Key("kern.strikethrough") // Bool
+    static let kernAutolink = NSAttributedString.Key("kern.autolink") // Bool
 
     static let kernCheckbox = NSAttributedString.Key("kern.checkbox") // Bool
     static let kernCheckboxChecked = NSAttributedString.Key("kern.checkboxChecked") // Bool
@@ -26,6 +29,9 @@ extension NSAttributedString.Key {
     static let kernTableIsHeader = NSAttributedString.Key("kern.tableIsHeader") // Bool
     static let kernTableColumnAlignment = NSAttributedString.Key("kern.tableColumnAlignment") // Int
     static let kernTableColumnCount = NSAttributedString.Key("kern.tableColumnCount") // Int
+
+    // Thematic breaks (horizontal rules)
+    static let kernThematicBreakMarker = NSAttributedString.Key("kern.thematicBreakMarker") // String (e.g. "---", "***")
 }
 
 enum KernBlockKind: Int {
@@ -36,6 +42,7 @@ enum KernBlockKind: Int {
     case codeBlock = 4
     case ordered = 5
     case tableCell = 6
+    case thematicBreak = 7
 }
 
 enum KernTaskStyle: Int {

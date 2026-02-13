@@ -4,6 +4,12 @@ import ApplicationServices
 import CoreGraphics
 
 final class NativeEditorE2ETests: XCTestCase {
+    // Accessibility trust checks can be surprisingly slow when permission isn't granted.
+    // Cache the result so we don't pay the cost once per test.
+    private enum UIAutomationPreflightCache {
+        nonisolated(unsafe) static var didRun = false
+        nonisolated(unsafe) static var skipMessage: String?
+    }
 
     func testTodoShortcutConvertsAndExportsMarkdown() throws {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-todo")
@@ -962,18 +968,39 @@ final class NativeEditorE2ETests: XCTestCase {
     }
 
     private func preflightCanRunUIAutomation() throws {
+        if UIAutomationPreflightCache.didRun {
+            if let msg = UIAutomationPreflightCache.skipMessage {
+                throw XCTSkip(msg)
+            }
+            return
+        }
+        UIAutomationPreflightCache.didRun = true
+
         // When the screen is locked or a screen saver is active, launching/activating apps can hang
         // for a long time in XCUITest. Skip early with a clear message instead of burning minutes.
         if let dict = CGSessionCopyCurrentDictionary() as? [String: Any] {
             if (dict["CGSessionScreenIsLocked"] as? Bool) == true {
-                throw XCTSkip("UI tests skipped: screen is locked. Unlock the Mac and rerun.")
+                let msg = "UI tests skipped: screen is locked. Unlock the Mac and rerun."
+                UIAutomationPreflightCache.skipMessage = msg
+                throw XCTSkip(msg)
             }
         }
 
-        // UI automation requires Accessibility trust. If this isn't granted, tests can hang waiting
-        // for system prompts. Skipping is better than producing false failures.
-        if !AXIsProcessTrusted() {
-            throw XCTSkip("UI tests skipped: Accessibility permission not granted. Enable Accessibility/Automation for Xcode and rerun.")
+        // UI automation requires Accessibility trust. Prompt once, then skip with a clear message
+        // if permission isn't granted (tests are not meaningful without it).
+        // Avoid referencing `kAXTrustedCheckOptionPrompt` directly: under Swift 6 strict concurrency,
+        // importing that global CFString can trigger "not concurrency-safe" compile failures.
+        let opts: CFDictionary = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        if !AXIsProcessTrustedWithOptions(opts) {
+            let msg = """
+            UI tests skipped: Accessibility permission not granted.
+            Enable it in System Settings > Privacy & Security > Accessibility for:
+            - Xcode
+            - KernTextKitUITests-Runner
+            Then rerun UI tests.
+            """
+            UIAutomationPreflightCache.skipMessage = msg
+            throw XCTSkip(msg)
         }
     }
 

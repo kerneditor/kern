@@ -321,6 +321,41 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         updateCodeCopyButtonVisibilityAndPosition()
     }
 
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        guard let anchor = internalAnchor(from: link) else { return false }
+        guard jumpToAnchor(anchor) else { return false }
+        showJumpToast(anchor: anchor)
+        return true
+    }
+
+    private func internalAnchor(from link: Any) -> String? {
+        if let url = link as? URL {
+            // `URL(string: "#section")` commonly arrives here as an URL whose absoluteString is "#section".
+            let abs = url.absoluteString
+            if abs.hasPrefix("#") {
+                return String(abs.dropFirst()).removingPercentEncoding ?? String(abs.dropFirst())
+            }
+        }
+        if let s = link as? String, s.hasPrefix("#") {
+            return String(s.dropFirst()).removingPercentEncoding ?? String(s.dropFirst())
+        }
+        return nil
+    }
+
+    private func jumpToAnchor(_ slug: String) -> Bool {
+        guard let storage = textView.textStorage else { return false }
+        let index = HeadingAnchorIndex.make(from: storage)
+        guard let loc = index[slug] else { return false }
+
+        let ns = storage.string as NSString
+        let paraRange = ns.paragraphRange(for: NSRange(location: loc, length: 0))
+
+        // Move the caret so the jump is visible (and testable), and scroll the destination into view.
+        textView.setSelectedRange(NSRange(location: paraRange.location, length: 0))
+        textView.scrollRangeToVisible(paraRange)
+        return true
+    }
+
     // MARK: - Export
 
     private func scheduleExport() {
@@ -1261,21 +1296,37 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var toastView: NSView?
 
     func showReloadToast() {
+        showToast(
+            message: "File reloaded from disk",
+            labelIdentifier: "NativeEditor.ReloadToast",
+            containerIdentifier: "NativeEditor.ReloadToast.Container"
+        )
+    }
+
+    private func showJumpToast(anchor: String) {
+        showToast(
+            message: "Jumped to #\(anchor)",
+            labelIdentifier: "NativeEditor.JumpToast",
+            containerIdentifier: "NativeEditor.JumpToast.Container"
+        )
+    }
+
+    private func showToast(message: String, labelIdentifier: String, containerIdentifier: String) {
         toastView?.removeFromSuperview()
 
         let container = NSView()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(white: 0, alpha: 0.7).cgColor
         container.layer?.cornerRadius = 8
-        container.setAccessibilityIdentifier("NativeEditor.ReloadToast.Container")
+        container.setAccessibilityIdentifier(containerIdentifier)
 
-        let label = NSTextField(labelWithString: "File reloaded from disk")
+        let label = NSTextField(labelWithString: message)
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .white
         label.backgroundColor = .clear
         label.isBezeled = false
         label.isEditable = false
-        label.setAccessibilityIdentifier("NativeEditor.ReloadToast")
+        label.setAccessibilityIdentifier(labelIdentifier)
         label.sizeToFit()
 
         let hPad: CGFloat = 12

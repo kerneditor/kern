@@ -187,6 +187,22 @@ if [ "$RUN_UI" = true ]; then
     echo "  ✓ UI tests passed"
   fi
 
+  # Xcode reports success even when all UI tests are skipped, which is misleading for an "exhaustive"
+  # suite. Treat "all skipped" as a failure so we don't get green runs without coverage.
+  if [ $UI_STATUS -eq 0 ]; then
+    SKIP_SUMMARY_LINE="$(grep -E "Executed [0-9]+ tests, with [0-9]+ tests skipped" "$OUT_DIR/ui.log" | tail -1 || true)"
+    if [ -n "$SKIP_SUMMARY_LINE" ]; then
+      EXECUTED_COUNT="$(echo "$SKIP_SUMMARY_LINE" | sed -E 's/.*Executed ([0-9]+) tests.*/\1/')"
+      SKIPPED_COUNT="$(echo "$SKIP_SUMMARY_LINE" | sed -E 's/.*with ([0-9]+) tests skipped.*/\1/')"
+      if [ "${EXECUTED_COUNT:-0}" -gt 0 ] && [ "${SKIPPED_COUNT:-0}" -eq "${EXECUTED_COUNT:-0}" ]; then
+        echo "UI tests did not actually run (all tests were skipped)." >&2
+        echo "See: $OUT_DIR/ui.log" >&2
+        echo "Common fixes: unlock the Mac; grant Accessibility/Automation permissions to Xcode and KernTextKitUITests-Runner." >&2
+        exit 3
+      fi
+    fi
+  fi
+
   echo ""
   ALWAYS_EXPORT_ATTACHMENTS=false
   if [ "${KERN_EXPORT_UI_ATTACHMENTS:-}" = "1" ] || [ "$EXPORT_UI_ATTACHMENTS" = true ]; then

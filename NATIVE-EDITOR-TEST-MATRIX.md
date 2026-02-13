@@ -27,6 +27,7 @@ Smoke / always-on (fast correctness for supported subset):
 - `KernTests/NativeMarkdownCodecIdempotencyTests.swift` (property-style stability across option permutations)
 - `KernTests/NativeFindEngineTests.swift` (native find/replace engine)
 - `KernTests/EditorDocumentTests.swift` (document/file IO)
+- `KernTests/AnchorNavigationTests.swift` (in-document `#anchor` click/jump behavior)
 - `KernTests/StressFixturesSanityTests.swift` (fixtures contain required feature sections + local assets exist)
 
 Exhaustive / expected-to-fail until full spec is implemented:
@@ -79,6 +80,7 @@ Preferences are controlled via:
 | Code chrome (full spec) | Language label, syntax highlighting, copy feedback, correct placement | `NativeEditorCodeBlockChromeSpecTests` (gated) | None yet | Expected-failure until implemented |
 | Tables (GFM) | `| a | b |` imports as real table (borders + alignment); export canonical table markdown | `tables.*` fixture | `testTypedTableConvertsAndExportsGfmTable`, `testOpenFileWithGfmTableRendersWysiwygAndExportsStable` (+ matrix includes table round-trip) | Rendered via TextKit `NSTextTableBlock` |
 | File reload on disk change | External write triggers reload + toast; editor updates content | (N/A) | `testReloadOnDiskChangeShowsToastAndUpdatesContent` | Toast is labeled `NativeEditor.ReloadToast` for UI assertions |
+| In-document anchors | Clicking `[Text](#anchor)` jumps within the document (no OSStatus errors) | `AnchorNavigationTests` | (optional; UI later) | Jump toast uses `NativeEditor.JumpToast` |
 | Find / Replace | Find bar is native + testable; replace mutates document deterministically | (N/A) | `testFindReplaceReplacesMatchesInOrder` | Find UI is `NativeEditor.FindBar` (no system Find panel dependency) |
 | Checkbox click hit-target | Clicking checkbox glyph toggles; optional marker-region toggles | options tests | `testCheckboxHitTargetGlyphTogglesByClick` (gated), `testCheckboxHitTargetMarkerTogglesWhenEnabled` (gated) | Coordinate-based clicks can be flaky; gated behind exhaustive UI |
 | Visual regression | Stable rendering across changes | Snapshot tests (gated) | UI screenshots attached always | Enable with `./scripts/test-native-editor.sh --unit-only --snapshots` |
@@ -93,9 +95,7 @@ These are called out in `docs/plans/native-editor-test-suite.md` and should grad
 
 - Backspace at start-of-list/task/ordered should “unlist” the block (`todos/017-*` tracks this)
 - Undo/redo correctness across conversions and checkbox toggles (unit + UI)
-- Link clicking behavior:
-  - in-document anchors (`#section`) should scroll/jump within the document (no OSStatus errors)
-  - external links should open via a safe policy (likely behind a preference)
+- External link clicking behavior should open via a safe policy (likely behind a preference)
 - Table editing navigation (arrow keys, tab/shift-tab, enter, selection across cells)
 - Copy button UX (language label, “Copied” feedback, placement) is covered by full-spec tests but not implemented
 - Syntax highlighting for code blocks (full-spec test exists; implementation missing)

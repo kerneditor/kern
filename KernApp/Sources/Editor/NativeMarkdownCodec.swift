@@ -102,26 +102,54 @@ enum NativeMarkdownCodec {
 
         var i = 0
         while i < lines.count {
-            let line = lines[i]
+            let rawLine = lines[i]
+            let quote = parseBlockquotePrefix(rawLine)
+            let quoteDepth = quote?.depth ?? 0
+            let line = quote?.text ?? rawLine
+
+            // Preserve an explicit empty blockquote line (`>` or `> `) as a blank line that still
+            // round-trips with `>` on export.
+            if quoteDepth > 0, line.isEmpty {
+                if i < lines.count - 1 {
+                    var attrs = baseAttributes(baseFont: baseFont)
+                    attrs[.kernQuoteDepth] = quoteDepth
+                    result.append(NSAttributedString(string: "\n", attributes: attrs))
+                }
+                i += 1
+                prevWasOrdered = false
+                continue
+            }
 
             // Code block (```lang ... ```)
             if let fence = parseFenceStart(line) {
                 var codeLines: [String] = []
                 i += 1
                 while i < lines.count {
-                    if isFenceEnd(lines[i]) {
+                    var nextLine = lines[i]
+                    if quoteDepth > 0 {
+                        guard let q = parseBlockquotePrefix(nextLine), q.depth >= quoteDepth else { break }
+                        nextLine = q.text
+                    }
+                    if isFenceEnd(nextLine) {
                         break
                     }
-                    codeLines.append(lines[i])
+                    codeLines.append(nextLine)
                     i += 1
                 }
                 // Skip closing fence if present
-                if i < lines.count, isFenceEnd(lines[i]) {
-                    i += 1
+                if i < lines.count {
+                    var endLine = lines[i]
+                    if quoteDepth > 0, let q = parseBlockquotePrefix(endLine), q.depth >= quoteDepth {
+                        endLine = q.text
+                    }
+                    if isFenceEnd(endLine) {
+                        i += 1
+                    }
                 }
 
                 let codeText = codeLines.joined(separator: "\n")
-                let codeAttr = makeCodeBlockAttributed(codeText, baseFont: baseFont, language: fence.language)
+                let codeAttr = NSMutableAttributedString(attributedString: makeCodeBlockAttributed(codeText, baseFont: baseFont, language: fence.language))
+                applyQuoteAttributes(codeAttr, quoteDepth: quoteDepth)
                 result.append(codeAttr)
                 if i < lines.count {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -149,16 +177,30 @@ enum NativeMarkdownCodec {
                 continue
             }
 
+            // Thematic break (horizontal rule)
+            if let marker = parseThematicBreak(line) {
+                let para = NSMutableAttributedString(attributedString: makeThematicBreakAttributed(baseFont: baseFont, marker: marker))
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
+                result.append(para)
+                if i < lines.count - 1 {
+                    result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
+                }
+                i += 1
+                prevWasOrdered = false
+                continue
+            }
+
             // Heading
             if let heading = parseHeading(line) {
                 // Kern extension: checkbox headings like `## [ ] Heading`.
                 if options.headingCheckboxesEnabled, let headingTask = parseHeadingCheckbox(heading.text) {
-                    let para = makeHeadingWithCheckbox(
+                    let para = NSMutableAttributedString(attributedString: makeHeadingWithCheckbox(
                         level: heading.level,
                         checked: headingTask.checked,
                         text: headingTask.text,
                         baseFont: baseFont
-                    )
+                    ))
+                    applyQuoteAttributes(para, quoteDepth: quoteDepth)
                     result.append(para)
                     if i < lines.count - 1 {
                         result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -176,6 +218,7 @@ enum NativeMarkdownCodec {
                     baseFont: baseFont,
                     headingLevel: heading.level
                 )
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -214,13 +257,14 @@ enum NativeMarkdownCodec {
                     j += 1
                 }
 
-                let para = makeTaskParagraph(
+                let para = NSMutableAttributedString(attributedString: makeTaskParagraph(
                     (task.style, task.checked, combined),
                     indent: task.indent,
                     depth: task.depth,
                     baseFont: baseFont,
                     options: options
-                )
+                ))
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -271,12 +315,13 @@ enum NativeMarkdownCodec {
                     }
                 }
 
-                let para = makeOrderedTaskParagraph(
+                let para = NSMutableAttributedString(attributedString: makeOrderedTaskParagraph(
                     (normalizedIndex, orderedTask.checked, combined),
                     indent: orderedTask.indent,
                     depth: orderedTask.depth,
                     baseFont: baseFont
-                )
+                ))
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -327,12 +372,13 @@ enum NativeMarkdownCodec {
                     }
                 }
 
-                let para = makeOrderedParagraph(
+                let para = NSMutableAttributedString(attributedString: makeOrderedParagraph(
                     (normalizedIndex, combined),
                     indent: ordered.indent,
                     depth: ordered.depth,
                     baseFont: baseFont
-                )
+                ))
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -368,7 +414,8 @@ enum NativeMarkdownCodec {
                     j += 1
                 }
 
-                let para = makeBulletParagraph(combined, indent: bullet.indent, depth: bullet.depth, baseFont: baseFont)
+                let para = NSMutableAttributedString(attributedString: makeBulletParagraph(combined, indent: bullet.indent, depth: bullet.depth, baseFont: baseFont))
+                applyQuoteAttributes(para, quoteDepth: quoteDepth)
                 result.append(para)
                 if i < lines.count - 1 {
                     result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -393,6 +440,7 @@ enum NativeMarkdownCodec {
 
             let para = NSMutableAttributedString(attributedString: parseInline(combined, baseFont: baseFont))
             applyBlockAttributes(para, kind: .paragraph, baseFont: baseFont, headingLevel: nil)
+            applyQuoteAttributes(para, quoteDepth: quoteDepth)
             result.append(para)
             if j - 1 < lines.count - 1 {
                 result.append(NSAttributedString(string: "\n", attributes: baseAttributes(baseFont: baseFont)))
@@ -441,6 +489,8 @@ enum NativeMarkdownCodec {
                     language = lang.isEmpty ? nil : String(lang)
                 }
 
+                let quoteDepth = (para.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
+
                 while j < ns.length {
                     let r = ns.paragraphRange(for: NSRange(location: j, length: 0))
                     let p = attributed.attributedSubstring(from: r)
@@ -449,15 +499,34 @@ enum NativeMarkdownCodec {
                     let k = KernBlockKind(rawValue: kRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
                     guard k == .codeBlock else { break }
 
+                    let qd = (p.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
+                    if qd != quoteDepth { break }
+
                     let lineText = p.string.hasSuffix("\n") ? String(p.string.dropLast()) : p.string
                     codeLines.append(lineText)
                     j = r.location + r.length
                 }
 
                 let fence = "```" + (language.map { "\($0)" } ?? "")
-                let block = ([fence] + codeLines + ["```"]).joined(separator: "\n")
-                outBlocks.append(block)
+                var blockLines = [fence] + codeLines + ["```"]
+                if quoteDepth > 0 {
+                    let prefix = String(repeating: "> ", count: quoteDepth)
+                    blockLines = blockLines.map { prefix + $0 }
+                }
+                outBlocks.append(blockLines.joined(separator: "\n"))
                 idx = j
+                continue
+            }
+
+            if kind == .thematicBreak {
+                let marker = (para.attribute(.kernThematicBreakMarker, at: 0, effectiveRange: nil) as? String) ?? "---"
+                let quoteDepth = (para.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
+                if quoteDepth > 0 {
+                    outBlocks.append(String(repeating: "> ", count: quoteDepth) + marker)
+                } else {
+                    outBlocks.append(marker)
+                }
+                idx = paraRange.location + paraRange.length
                 continue
             }
 
@@ -466,6 +535,7 @@ enum NativeMarkdownCodec {
                 // - Normalize to sequential numbering starting at the first marker
                 var j = idx
                 var currentN: Int?
+                let initialQuoteDepth = (para.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
                 while j < ns.length {
                     let r = ns.paragraphRange(for: NSRange(location: j, length: 0))
                     let p = attributed.attributedSubstring(from: r)
@@ -474,9 +544,16 @@ enum NativeMarkdownCodec {
                     let k = KernBlockKind(rawValue: kRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
                     guard k == .ordered else { break }
 
+                    let quoteDepth = (p.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
+                    if quoteDepth != initialQuoteDepth { break }
+
                     let storedN = (p.attribute(.kernOrderedIndex, at: 0, effectiveRange: nil) as? Int) ?? 1
                     if currentN == nil { currentN = max(1, storedN) }
-                    outBlocks.append(exportOrderedParagraphGfmNumbering(p, outputIndex: currentN ?? 1, options: options))
+                    var line = exportOrderedParagraphGfmNumbering(p, outputIndex: currentN ?? 1, options: options)
+                    if quoteDepth > 0 {
+                        line = String(repeating: "> ", count: quoteDepth) + line
+                    }
+                    outBlocks.append(line)
                     currentN = (currentN ?? 1) + 1
                     j = r.location + r.length
                 }
@@ -990,6 +1067,44 @@ enum NativeMarkdownCodec {
         return (level, text)
     }
 
+    /// Returns the marker that should be used when exporting this thematic break, or nil if the line
+    /// isn't a thematic break.
+    private static func parseThematicBreak(_ line: String) -> String? {
+        // Preserve exact "---", "***", "___" (no leading/trailing whitespace).
+        if line == "---" || line == "***" || line == "___" { return line }
+
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+
+        // CommonMark allows spaces/tabs between markers. Normalize those variants to "---".
+        let compact = trimmed.filter { !$0.isWhitespace }
+        guard compact.count >= 3, let first = compact.first, ["-", "*", "_"].contains(first) else { return nil }
+        guard compact.allSatisfy({ $0 == first }) else { return nil }
+        return "---"
+    }
+
+    private static func parseBlockquotePrefix(_ line: String) -> (depth: Int, text: String)? {
+        // CommonMark: up to 3 leading spaces are allowed before the '>' marker.
+        var idx = line.startIndex
+        var leading = 0
+        while idx < line.endIndex, leading < 3, line[idx] == " " {
+            leading += 1
+            idx = line.index(after: idx)
+        }
+
+        var depth = 0
+        while idx < line.endIndex, line[idx] == ">" {
+            depth += 1
+            idx = line.index(after: idx)
+            if idx < line.endIndex, line[idx] == " " {
+                idx = line.index(after: idx)
+            }
+        }
+
+        guard depth > 0 else { return nil }
+        return (depth: depth, text: String(line[idx...]))
+    }
+
     private struct FenceStart {
         let language: String?
     }
@@ -1256,6 +1371,18 @@ enum NativeMarkdownCodec {
         return para
     }
 
+    private static func makeThematicBreakAttributed(baseFont: NSFont, marker: String) -> NSAttributedString {
+        let attachment = ThematicBreakAttachment()
+        let para = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
+        if para.length > 0 {
+            let full = NSRange(location: 0, length: para.length)
+            para.addAttribute(.font, value: baseFont, range: full)
+            para.addAttribute(.kernThematicBreakMarker, value: marker, range: full)
+        }
+        applyBlockAttributes(para, kind: .thematicBreak, baseFont: baseFont, headingLevel: nil)
+        return para
+    }
+
     private static func makeOrderedParagraph(_ ordered: (index: Int, text: String), indent: Int, depth: Int, baseFont: NSFont) -> NSAttributedString {
         let para = NSMutableAttributedString()
 
@@ -1359,6 +1486,12 @@ enum NativeMarkdownCodec {
             style.paragraphSpacing = 0
             paragraph.addAttribute(.paragraphStyle, value: style, range: full)
 
+        case .thematicBreak:
+            let style = NSMutableParagraphStyle()
+            style.paragraphSpacingBefore = 10
+            style.paragraphSpacing = 10
+            paragraph.addAttribute(.paragraphStyle, value: style, range: full)
+
         case .bullet, .task, .ordered, .paragraph:
             let style = NSMutableParagraphStyle()
             style.paragraphSpacingBefore = 2
@@ -1385,6 +1518,20 @@ enum NativeMarkdownCodec {
         }
     }
 
+    private static func applyQuoteAttributes(_ paragraph: NSMutableAttributedString, quoteDepth: Int) {
+        guard quoteDepth > 0, paragraph.length > 0 else { return }
+        let full = NSRange(location: 0, length: paragraph.length)
+        paragraph.addAttribute(.kernQuoteDepth, value: quoteDepth, range: full)
+
+        let quoteIndent: CGFloat = CGFloat(quoteDepth) * 16
+        let style = ((paragraph.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)?
+            .mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+
+        style.firstLineHeadIndent += quoteIndent
+        style.headIndent += quoteIndent
+        paragraph.addAttribute(.paragraphStyle, value: style, range: full)
+    }
+
     private static func markerPrefixLength(in paragraph: NSAttributedString) -> Int {
         var len = 0
         while len < paragraph.length {
@@ -1407,12 +1554,30 @@ enum NativeMarkdownCodec {
     private struct InlineStyle: Equatable {
         var strong: Bool = false
         var emphasis: Bool = false
+        var strike: Bool = false
         var code: Bool = false
         var link: URL? = nil
+        var autolink: Bool = false
     }
 
     private static func parseInline(_ text: String, baseFont: NSFont) -> NSAttributedString {
         parseInline(text, baseFont: baseFont, style: InlineStyle())
+    }
+
+    private static func parseAutolinkURL(_ inner: String) -> URL? {
+        // CommonMark autolinks disallow whitespace.
+        if inner.contains(where: { $0.isWhitespace }) { return nil }
+
+        if inner.hasPrefix("http://") || inner.hasPrefix("https://") {
+            return URL(string: inner)
+        }
+
+        // Email autolink: <me@example.com>
+        if inner.contains("@"), !inner.contains(":") {
+            return URL(string: "mailto:\(inner)")
+        }
+
+        return nil
     }
 
     private static func parseInline(_ text: String, baseFont: NSFont, style: InlineStyle) -> NSAttributedString {
@@ -1420,7 +1585,9 @@ enum NativeMarkdownCodec {
         // - `code`
         // - **strong**
         // - *emphasis*
+        // - ~~strikethrough~~
         // - [text](url)
+        // - <https://example.com> / <me@example.com>
         let out = NSMutableAttributedString()
         let chars = Array(text)
         var i = 0
@@ -1439,6 +1606,21 @@ enum NativeMarkdownCodec {
                 continue
             }
 
+            // Autolink: <https://...> or <me@example.com>
+            if ch == "<" {
+                if let end = indexOf(">", in: chars, start: i + 1) {
+                    let inner = String(chars[(i + 1)..<end])
+                    if let url = parseAutolinkURL(inner) {
+                        var nextStyle = style
+                        nextStyle.link = url
+                        nextStyle.autolink = true
+                        appendLiteral(inner, style: nextStyle)
+                        i = end + 1
+                        continue
+                    }
+                }
+            }
+
             // Code span
             if ch == "`" {
                 if let end = indexOf("`", in: chars, start: i + 1) {
@@ -1447,7 +1629,9 @@ enum NativeMarkdownCodec {
                     nextStyle.code = true
                     nextStyle.strong = false
                     nextStyle.emphasis = false
+                    nextStyle.strike = false
                     nextStyle.link = nil
+                    nextStyle.autolink = false
                     appendLiteral(inner, style: nextStyle)
                     i = end + 1
                     continue
@@ -1477,6 +1661,18 @@ enum NativeMarkdownCodec {
                     let inner = String(chars[(i + 2)..<end])
                     var nextStyle = style
                     nextStyle.strong.toggle()
+                    out.append(parseInline(inner, baseFont: baseFont, style: nextStyle))
+                    i = end + 2
+                    continue
+                }
+            }
+
+            // Strikethrough
+            if ch == "~", i + 1 < chars.count, chars[i + 1] == "~" {
+                if let end = indexOf("~~", in: chars, start: i + 2) {
+                    let inner = String(chars[(i + 2)..<end])
+                    var nextStyle = style
+                    nextStyle.strike.toggle()
                     out.append(parseInline(inner, baseFont: baseFont, style: nextStyle))
                     i = end + 2
                     continue
@@ -1519,10 +1715,17 @@ enum NativeMarkdownCodec {
                 attrs[.kernEmphasis] = true
                 font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
             }
+            if style.strike {
+                attrs[.kernStrikethrough] = true
+                attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+            }
             if let link = style.link {
                 attrs[.link] = link
                 attrs[.foregroundColor] = NSColor.linkColor
                 attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                if style.autolink {
+                    attrs[.kernAutolink] = true
+                }
             }
         }
 
@@ -1540,11 +1743,14 @@ enum NativeMarkdownCodec {
             return nil
         }
 
-        // needle is "**"
-        guard needle == "**" else { return nil }
+        // needle is "**" or "~~"
+        guard needle == "**" || needle == "~~" else { return nil }
         if start >= chars.count { return nil }
         for i in start..<(chars.count - 1) {
-            if chars[i] == "*", chars[i + 1] == "*" {
+            if needle == "**", chars[i] == "*", chars[i + 1] == "*" {
+                return i
+            }
+            if needle == "~~", chars[i] == "~", chars[i + 1] == "~" {
                 return i
             }
         }
@@ -1557,11 +1763,16 @@ enum NativeMarkdownCodec {
         // Drop trailing newline for analysis.
         let text = paragraphWithNewline.string
         let paraText = text.hasSuffix("\n") ? String(text.dropLast()) : text
+        let quoteDepth = (paragraphWithNewline.attribute(.kernQuoteDepth, at: 0, effectiveRange: nil) as? Int) ?? 0
         let paraRange = NSRange(location: 0, length: min(paragraphWithNewline.length, (paraText as NSString).length))
         let paragraph = paragraphWithNewline.attributedSubstring(from: paraRange)
 
         // Empty line
         if paraText.isEmpty {
+            if quoteDepth > 0 {
+                // Represent an empty blockquote line as `>` / `> >` etc.
+                return String(repeating: "> ", count: quoteDepth).trimmingCharacters(in: .whitespaces)
+            }
             return ""
         }
 
@@ -1660,6 +1871,9 @@ enum NativeMarkdownCodec {
         case .codeBlock:
             body = paraText
             softBreakKind = .codeBlock
+        case .thematicBreak:
+            body = (paragraph.attribute(.kernThematicBreakMarker, at: 0, effectiveRange: nil) as? String) ?? "---"
+            softBreakKind = .paragraph
         }
 
         let listIndent = (paragraph.attribute(.kernListIndent, at: 0, effectiveRange: nil) as? Int) ?? 0
@@ -1671,7 +1885,13 @@ enum NativeMarkdownCodec {
             indentPrefix = ""
         }
 
-        return serializeSoftLineBreaks(body: indentPrefix + body, kind: softBreakKind)
+        var out = serializeSoftLineBreaks(body: indentPrefix + body, kind: softBreakKind)
+        if quoteDepth > 0 {
+            let prefix = String(repeating: "> ", count: quoteDepth)
+            let parts = out.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            out = parts.map { prefix + $0 }.joined(separator: "\n")
+        }
+        return out
     }
 
     private static func findFirstCheckboxState(in paragraph: NSAttributedString) -> Bool? {
@@ -1695,9 +1915,11 @@ enum NativeMarkdownCodec {
             if next.code { out += "`" }
             if next.strong { out += "**" }
             if next.emphasis { out += "*" }
+            if next.strike { out += "~~" }
         }
 
         func close(_ prev: InlineStyle) {
+            if prev.strike { out += "~~" }
             if prev.emphasis { out += "*" }
             if prev.strong { out += "**" }
             if prev.code { out += "`" }
@@ -1709,8 +1931,10 @@ enum NativeMarkdownCodec {
             let next = InlineStyle(
                 strong: (attrs[.kernStrong] as? Bool) ?? false,
                 emphasis: (attrs[.kernEmphasis] as? Bool) ?? false,
+                strike: (attrs[.kernStrikethrough] as? Bool) ?? false,
                 code: (attrs[.kernInlineCode] as? Bool) ?? false,
-                link: attrs[.link] as? URL
+                link: attrs[.link] as? URL,
+                autolink: (attrs[.kernAutolink] as? Bool) ?? false
             )
 
             // Links: serialize as [text](url) for contiguous runs with same URL.
@@ -1718,7 +1942,11 @@ enum NativeMarkdownCodec {
                 // Close any previous style first.
                 close(current)
                 current = InlineStyle()
-                out += "[\(escapeInline(text))](\(link.absoluteString))"
+                if next.autolink {
+                    out += "<\(text)>"
+                } else {
+                    out += "[\(escapeInline(text))](\(link.absoluteString))"
+                }
                 return
             }
 
@@ -1755,6 +1983,8 @@ enum NativeMarkdownCodec {
             let n = max(1, digitsCount)
             continuationIndent = String(repeating: " ", count: leadingSpaces + n + 2) // ". "
         case .heading, .paragraph, .tableCell, .codeBlock:
+            continuationIndent = ""
+        case .thematicBreak:
             continuationIndent = ""
         }
 
