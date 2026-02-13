@@ -1,5 +1,7 @@
 import AppKit
 import XCTest
+import ApplicationServices
+import CoreGraphics
 
 final class NativeEditorE2ETests: XCTestCase {
 
@@ -7,7 +9,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-todo")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -43,7 +45,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_EXPORT_DIALECT": "kern",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -69,7 +71,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-ordered")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -96,7 +98,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_TASK_RENDERING": "kern",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -123,7 +125,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_TASK_RENDERING": "gfm",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -148,7 +150,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-heading")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -180,7 +182,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_ORDERED_TASKS": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -209,7 +211,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_HEADING_CHECKBOXES": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -235,7 +237,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-bullets")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -261,7 +263,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-shift-enter")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -291,7 +293,7 @@ final class NativeEditorE2ETests: XCTestCase {
         """.write(to: tmp, atomically: true, encoding: .utf8)
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -319,7 +321,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-table-typed")
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -358,7 +360,7 @@ final class NativeEditorE2ETests: XCTestCase {
         """.write(to: tmp, atomically: true, encoding: .utf8)
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -391,7 +393,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_GFM_EXTENSION_EXPORT": "lint",
             "KERN_NATIVE_HEADING_CHECKBOXES": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -422,7 +424,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_GFM_EXTENSION_EXPORT": "portable",
             "KERN_NATIVE_HEADING_CHECKBOXES": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -456,7 +458,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_GFM_EXTENSION_EXPORT": "portable",
             "KERN_NATIVE_ORDERED_TASKS": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -492,7 +494,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_GFM_EXTENSION_EXPORT": "lint",
             "KERN_NATIVE_ORDERED_TASKS": "1",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -526,7 +528,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_ORDERED_NUMBERING": "preserveTyped",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         attachScreenshot(name: "ordered-numbering-preserve-open", element: app.windows.firstMatch)
         try save(app: app)
@@ -547,7 +549,7 @@ final class NativeEditorE2ETests: XCTestCase {
         let app = makeApp(opening: tmp, env: [
             "KERN_NATIVE_ORDERED_NUMBERING": "gfmDefault",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         attachScreenshot(name: "ordered-numbering-gfm-default-open", element: app.windows.firstMatch)
         try save(app: app)
@@ -570,7 +572,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_TASK_RENDERING": "kern",
             "KERN_NATIVE_CHECKBOX_HIT_TARGET": "marker",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -606,7 +608,7 @@ final class NativeEditorE2ETests: XCTestCase {
         try "Before.\n".write(to: tmp, atomically: true, encoding: .utf8)
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -637,7 +639,7 @@ final class NativeEditorE2ETests: XCTestCase {
         try "alpha beta alpha\n".write(to: tmp, atomically: true, encoding: .utf8)
 
         let app = makeApp(opening: tmp)
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -699,7 +701,7 @@ final class NativeEditorE2ETests: XCTestCase {
             "KERN_NATIVE_TASK_RENDERING": "gfm",
             "KERN_NATIVE_CHECKBOX_HIT_TARGET": "glyph",
         ])
-        launchAndWaitForeground(app)
+        try launchAndWaitForeground(app)
 
         let textView = app.textViews["NativeEditor.TextView"]
         XCTAssertTrue(textView.waitForExistence(timeout: 10))
@@ -823,7 +825,7 @@ final class NativeEditorE2ETests: XCTestCase {
             try scenario.input.write(to: tmp, atomically: true, encoding: .utf8)
 
             let app = makeApp(opening: tmp, env: scenario.env)
-            launchAndWaitForeground(app)
+            try launchAndWaitForeground(app)
             defer { app.terminate() }
 
             let textView = app.textViews["NativeEditor.TextView"]
@@ -879,16 +881,15 @@ final class NativeEditorE2ETests: XCTestCase {
         return app
     }
 
-    private func launchAndWaitForeground(_ app: XCUIApplication) {
+    private func launchAndWaitForeground(_ app: XCUIApplication, timeout: TimeInterval = 8) throws {
+        try preflightCanRunUIAutomation()
         app.launch()
-        app.activate()
-        _ = app.wait(for: .runningForeground, timeout: 5)
+        try ensureRunningForeground(app, timeout: timeout)
     }
 
     private func save(app: XCUIApplication) throws {
         // Ensure the app is in the foreground; menu bar interactions are not reliable otherwise.
-        app.activate()
-        _ = app.wait(for: .runningForeground, timeout: 5)
+        try ensureRunningForeground(app, timeout: 5)
 
         // Prefer the menu item to avoid key event flakiness.
         let fileMenu = app.menuBars.menuBarItems["File"]
@@ -903,8 +904,7 @@ final class NativeEditorE2ETests: XCTestCase {
     }
 
     private func openFindReplaceViaMenu(app: XCUIApplication) throws {
-        app.activate()
-        _ = app.wait(for: .runningForeground, timeout: 5)
+        try ensureRunningForeground(app, timeout: 5)
 
         let editMenu = app.menuBars.menuBarItems["Edit"]
         XCTAssertTrue(editMenu.waitForExistence(timeout: 5))
@@ -949,6 +949,32 @@ final class NativeEditorE2ETests: XCTestCase {
         }
         XCTFail("Timed out waiting for text view value: \(description). Last=\(last)")
         return last
+    }
+
+    private func ensureRunningForeground(_ app: XCUIApplication, timeout: TimeInterval) throws {
+        if app.state == .runningForeground { return }
+        _ = app.wait(for: .runningForeground, timeout: timeout)
+        if app.state == .runningForeground { return }
+
+        // Avoid `app.activate()` here: on some macOS setups it can hang for a long time when the
+        // system is locked or focus cannot be stolen, which makes the whole UI suite unusably slow.
+        throw XCTSkip("UI tests require KernTextKit to become the foreground app. Unlock the Mac, stop using the mouse/keyboard during the run, and ensure Xcode has Automation permissions.")
+    }
+
+    private func preflightCanRunUIAutomation() throws {
+        // When the screen is locked or a screen saver is active, launching/activating apps can hang
+        // for a long time in XCUITest. Skip early with a clear message instead of burning minutes.
+        if let dict = CGSessionCopyCurrentDictionary() as? [String: Any] {
+            if (dict["CGSessionScreenIsLocked"] as? Bool) == true {
+                throw XCTSkip("UI tests skipped: screen is locked. Unlock the Mac and rerun.")
+            }
+        }
+
+        // UI automation requires Accessibility trust. If this isn't granted, tests can hang waiting
+        // for system prompts. Skipping is better than producing false failures.
+        if !AXIsProcessTrusted() {
+            throw XCTSkip("UI tests skipped: Accessibility permission not granted. Enable Accessibility/Automation for Xcode and rerun.")
+        }
     }
 
     private func attachScreenshot(name: String, element: XCUIElement? = nil) {
