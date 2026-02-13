@@ -191,6 +191,11 @@ if [ "$RUN_UI" = true ]; then
       --path "$OUT_DIR/KernTextKitUI.xcresult" \
       --output-path "$ATT_DIR" \
       2>&1 | tee "$OUT_DIR/xcresult-attachments.log" >/dev/null || true
+    # xcresulttool can export screenshots as HEIC depending on Xcode/macOS.
+    # Convert to PNG for tooling compatibility (keeps original .heic files).
+    if ls "$ATT_DIR"/*.heic "$ATT_DIR"/*.HEIC >/dev/null 2>&1; then
+      "$(pwd)/scripts/convert-heic-to-png.sh" "$ATT_DIR" >/dev/null || true
+    fi
     echo "  Attachments: $ATT_DIR"
   else
     echo "▸ Skipping UI attachment export (set KERN_EXPORT_UI_ATTACHMENTS=1 or pass --export-ui-attachments)"
