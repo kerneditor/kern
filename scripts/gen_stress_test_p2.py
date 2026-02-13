@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Append sections 3-7 to mega-stress-test.md"""
 
-OUT = "/Users/aaaaa/Projects/Kern/test-fixtures/mega-stress-test.md"
+import os
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUT = os.path.join(ROOT, "test-fixtures", "mega-stress-test.md")
 lines = []
 def w(s=""): lines.append(s)
 

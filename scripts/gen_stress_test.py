@@ -2,7 +2,8 @@
 """Generate mega-stress-test.md — 5000+ lines covering all edge cases."""
 import os
 
-OUT = "/Users/aaaaa/Projects/Kern/test-fixtures/mega-stress-test.md"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+OUT = os.path.join(ROOT, "test-fixtures", "mega-stress-test.md")
 lines = []
 def w(s=""): lines.append(s)
 

@@ -1,16 +1,14 @@
 import XCTest
 @testable import KernTextKit
 
-/// Forward-looking spec tests for Markdown features not yet implemented by the native TextKit codec.
+/// Full-spec tests for Markdown features the native TextKit codec must support for a "real" editor.
 ///
-/// These are gated behind `KERN_ENABLE_EXHAUSTIVE_TESTS=1` and use `XCTExpectFailure` so they can
-/// live in-tree without breaking the default test run. As features land, remove `XCTExpectFailure`
-/// and/or the gate for that test.
+/// These are gated behind `KERN_ENABLE_EXHAUSTIVE_TESTS=1` and are intentionally allowed to FAIL
+/// until the corresponding features are implemented (so we don't end up with "green tests, broken app").
 final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testBlockquoteRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("Blockquotes not supported yet (spec placeholder)")
 
         let md = """
         > quote line 1
@@ -29,7 +27,6 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testThematicBreakRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("Thematic breaks not supported yet (spec placeholder)")
 
         let md = """
         Before
@@ -50,7 +47,6 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testImagesRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("Images not supported yet (spec placeholder)")
 
         let md = "![alt](https://example.com/image.png)"
         let attr = NativeMarkdownCodec.importMarkdown(md)
@@ -74,7 +70,6 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testStrikethroughRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("GFM strikethrough syntax not supported yet (spec placeholder)")
 
         let md = "This is ~~deleted~~ text."
         let attr = NativeMarkdownCodec.importMarkdown(md)
@@ -93,7 +88,6 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testAutolinksRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("Autolinks not supported yet (spec placeholder)")
 
         let md = "Visit <https://example.com>."
         let attr = NativeMarkdownCodec.importMarkdown(md)
@@ -112,7 +106,6 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
     @MainActor
     func testNestedListsRoundTrip() throws {
         try TestGates.skipUnlessExhaustive()
-        XCTExpectFailure("Nested lists not supported yet (spec placeholder)")
 
         let md = """
         - one
@@ -127,5 +120,83 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
 
         let out = NativeMarkdownCodec.exportMarkdown(attr)
         XCTAssertTrue(out.contains("nested"))
+    }
+
+    @MainActor
+    func testNestedOrderedListsRenderWithDepthAwareMarkers_FullSpec() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let md = """
+        1. Top
+           1. Nested
+        2. Top2
+        """
+
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+
+        // Full-spec: nested ordered lists should be represented as nested list items in WYSIWYG.
+        // For readability, we want depth-aware marker styles (Notion-like): 1. -> a. -> i. ...
+        XCTAssertTrue(attr.string.contains("1. Top"))
+        XCTAssertTrue(attr.string.contains("a. Nested"), "Nested ordered items should render with a letter marker at depth 1")
+
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+        XCTAssertTrue(out.contains("1. Top"))
+        XCTAssertTrue(out.contains("   1. Nested"))
+        XCTAssertTrue(out.contains("2. Top2"))
+    }
+
+    @MainActor
+    func testMathInlineAndBlockRoundTrip() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let md = """
+        Inline math $E = mc^2$ should render.
+
+        $$
+        \\int_0^1 x^2 \\, dx
+        $$
+        """
+
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+
+        // Full-spec: WYSIWYG should hide raw `$` delimiters (render math as a semantic unit).
+        XCTAssertFalse(attr.string.contains("$E = mc^2$"))
+        XCTAssertFalse(attr.string.contains("$$"))
+
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+        XCTAssertTrue(out.contains("$E = mc^2$"))
+        XCTAssertTrue(out.contains("$$"))
+    }
+
+    @MainActor
+    func testMermaidFenceRendersAsDiagramAndExportsMarkdown() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let md = """
+        ```mermaid
+        graph TD
+          A[Start] --> B{Decision}
+          B -->|Yes| C[OK]
+          B -->|No| D[Retry]
+        ```
+        """
+
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+
+        // Full-spec: mermaid blocks should be rendered as a diagram attachment (or other non-syntax placeholder),
+        // not shown as raw mermaid source in the editor.
+        var hasAttachment = false
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { value, _, stop in
+            if value != nil {
+                hasAttachment = true
+                stop.pointee = true
+            }
+        }
+        XCTAssertTrue(hasAttachment, "Expected mermaid to render as an attachment/diagram placeholder")
+
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+        XCTAssertTrue(out.contains("```mermaid"))
+        XCTAssertTrue(out.contains("graph TD"))
+        XCTAssertTrue(out.contains("```"))
     }
 }

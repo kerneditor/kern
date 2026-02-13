@@ -2,7 +2,8 @@
 """Generate 55 unique test files for tab testing."""
 import os
 
-DIR = "/Users/aaaaa/Projects/Kern/test-fixtures/tabs"
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DIR = os.path.join(ROOT, "test-fixtures", "tabs")
 os.makedirs(DIR, exist_ok=True)
 
 def write_file(num, title, content):
