@@ -20,7 +20,6 @@ Defaults (per your prefs):
 Preferences are controlled via:
 - Unit tests: `NativeMarkdownCodec.Options(...)`
 - UI tests: env vars consumed in `KernApp/Sources/App/main.swift`
-  - `KERN_USE_NATIVE_EDITOR=1`
   - `KERN_NATIVE_EXPORT_DIALECT=gfm|kern`
   - `KERN_NATIVE_GFM_EXTENSION_EXPORT=preserve|portable|lint`
   - `KERN_NATIVE_TASK_RENDERING=gfm|kern`
@@ -43,7 +42,7 @@ Preferences are controlled via:
 | Heading checkboxes (Kern option) | `## [ ]` treated as heading checkbox when enabled | `extensions.*` fixture + options tests | `testHeadingCheckboxesEnabledRendersAndExportsHeadingTasks` | Toggle-by-click for heading checkboxes is not fully covered yet |
 | Soft line breaks | Shift+Enter creates in-item line break (export uses hard breaks + indents) | `soft-breaks.*` fixture | `testShiftEnterInBulletDoesNotContinueList` | |
 | Code fences | Fenced blocks render monospaced + background; export fences | `basic.*` fixture | `testCodeBlockCopyButtonCopiesWholeBlock` | Copy button tested; styling snapshot gated |
-| Tables (GFM) | `| a | b |` imports as real table (borders + alignment); export canonical table markdown | `tables.*` fixture | (TODO) | Rendered via TextKit `NSTextTableBlock` |
+| Tables (GFM) | `| a | b |` imports as real table (borders + alignment); export canonical table markdown | `tables.*` fixture | `testTypedTableConvertsAndExportsGfmTable` (+ matrix includes table round-trip) | Rendered via TextKit `NSTextTableBlock` |
 | Visual regression | Stable rendering across changes | Snapshot tests (gated) | UI screenshots attached always | Enable with `KERN_ENABLE_SNAPSHOT_TESTS=1` |
 | Future Markdown features | Blockquotes, images, strikethrough, autolinks, nested lists, etc. | `KernTests/NativeMarkdownCodecFutureSpecTests.swift` (gated + expected-failure) | None yet | Enable with `KERN_ENABLE_EXHAUSTIVE_TESTS=1` |
 

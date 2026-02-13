@@ -93,8 +93,7 @@ Coverage:
   - `KERN_UI_SCREENSHOTS=always|failure|off` (default: `always`)
   - `KERN_UI_SCREENSHOT_DIR=/path` (write PNGs to disk; runner sets this automatically)
 
-The tests currently force the native editor via env var:
-- `KERN_USE_NATIVE_EDITOR=1` (handled by `KernApp/Sources/App/main.swift`)
+KernTextKit is native-only (TextKit). There is no WebView editor path to force in tests.
 
 ### 5) Visual Confirmation
 

@@ -266,6 +266,36 @@ final class NativeEditorE2ETests: XCTestCase {
         XCTAssertTrue(copied.contains("console.log(2)"))
     }
 
+    func testTypedTableConvertsAndExportsGfmTable() throws {
+        let tmp = try makeTempMarkdownFile(name: "kern-ui-table-typed")
+
+        let app = makeApp(opening: tmp)
+        app.launch()
+
+        let textView = app.textViews["NativeEditor.TextView"]
+        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        textView.click()
+
+        // Type a minimal GFM table and press Enter after the first body row to trigger conversion.
+        textView.typeText("| A | B |\n| --- | --- |\n| c | d |\n")
+
+        let value = waitForTextViewValue(
+            textView,
+            timeout: 2.0,
+            description: "table conversion hides delimiter row"
+        ) { v in
+            v.contains("A") && v.contains("B") && v.contains("c") && v.contains("d") && !v.contains("| ---")
+        }
+        XCTAssertFalse(value.contains("|"), "WYSIWYG should hide table pipe syntax after conversion")
+        attachScreenshot(name: "typed-table-converted", element: textView)
+
+        try save(app: app)
+
+        let saved = try waitForFileContains(tmp, substring: "| A | B |", timeout: 5)
+        XCTAssertTrue(saved.contains("| --- | --- |"))
+        XCTAssertTrue(saved.contains("| c | d |"))
+    }
+
     func testGfmLintRewritesHeadingCheckboxesOnSave() throws {
         let tmp = try makeTempMarkdownFile(name: "kern-ui-gfm-lint-heading-task")
         try "## [x] Heading todo\n".write(to: tmp, atomically: true, encoding: .utf8)
@@ -467,6 +497,10 @@ final class NativeEditorE2ETests: XCTestCase {
         - [ ] todo
         1. [ ] ordered task
 
+        | TblLeft | TblRight |
+        | --- | --- |
+        | cellL | cellR |
+
         1. one
         5. five
         """
@@ -482,9 +516,9 @@ final class NativeEditorE2ETests: XCTestCase {
                     "KERN_NATIVE_ORDERED_NUMBERING": "gfmDefault",
                 ],
                 input: input,
-                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task"],
+                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task", "TblLeft", "TblRight", "cellL", "cellR"],
                 waitSubstring: "## [x] Heading todo",
-                expectDiskContains: ["## [x] Heading todo", "- [ ] todo", "1. [ ] ordered task", "1. one", "2. five"],
+                expectDiskContains: ["## [x] Heading todo", "- [ ] todo", "1. [ ] ordered task", "| TblLeft | TblRight |", "| --- | --- |", "| cellL | cellR |", "1. one", "2. five"],
                 expectDiskNotContains: ["## ☑ Heading todo", "- [x] Heading todo"]
             ),
             .init(
@@ -497,9 +531,9 @@ final class NativeEditorE2ETests: XCTestCase {
                     "KERN_NATIVE_ORDERED_NUMBERING": "gfmDefault",
                 ],
                 input: input,
-                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task"],
+                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task", "TblLeft", "TblRight", "cellL", "cellR"],
                 waitSubstring: "## ☑ Heading todo",
-                expectDiskContains: ["## ☑ Heading todo", "- [ ] todo", "1. ☐ ordered task", "1. one", "2. five"],
+                expectDiskContains: ["## ☑ Heading todo", "- [ ] todo", "1. ☐ ordered task", "| TblLeft | TblRight |", "| --- | --- |", "| cellL | cellR |", "1. one", "2. five"],
                 expectDiskNotContains: ["## [x] Heading todo", "- [x] Heading todo"]
             ),
             .init(
@@ -512,9 +546,9 @@ final class NativeEditorE2ETests: XCTestCase {
                     "KERN_NATIVE_ORDERED_NUMBERING": "gfmDefault",
                 ],
                 input: input,
-                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task"],
+                expectUIContains: ["☑ Heading todo", "☐ todo", "1. ☐ ordered task", "TblLeft", "TblRight", "cellL", "cellR"],
                 waitSubstring: "- [x] Heading todo",
-                expectDiskContains: ["- [x] Heading todo", "- [ ] todo", "- [ ] 1. ordered task", "1. one", "2. five"],
+                expectDiskContains: ["- [x] Heading todo", "- [ ] todo", "- [ ] 1. ordered task", "| TblLeft | TblRight |", "| --- | --- |", "| cellL | cellR |", "1. one", "2. five"],
                 expectDiskNotContains: ["## [x] Heading todo", "1. [ ] ordered task"]
             ),
             .init(
@@ -609,6 +643,23 @@ final class NativeEditorE2ETests: XCTestCase {
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         }
+        return last
+    }
+
+    private func waitForTextViewValue(
+        _ textView: XCUIElement,
+        timeout: TimeInterval,
+        description: String,
+        predicate: (String) -> Bool
+    ) -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = ""
+        while Date() < deadline {
+            last = (textView.value as? String) ?? ""
+            if predicate(last) { return last }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTFail("Timed out waiting for text view value: \(description). Last=\(last)")
         return last
     }
 
