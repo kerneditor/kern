@@ -20,7 +20,7 @@ final class NativeEditorE2ETests: XCTestCase {
         defer { app.terminate() }
 
         let textView = app.textViews["NativeEditor.TextView"]
-        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertTrue(textView.waitForExistence(timeout: 4))
         textView.click()
 
         try XCTContext.runActivity(named: "Todo shortcut converts + toggles + exports") { _ in
@@ -29,7 +29,7 @@ final class NativeEditorE2ETests: XCTestCase {
 
             let value = waitForTextViewValue(
                 textView,
-                timeout: 5.0,
+                timeout: 2.0,
                 description: "todo shortcut should render as checkbox glyph"
             ) { v in
                 v.contains("☐ todo")
@@ -40,7 +40,7 @@ final class NativeEditorE2ETests: XCTestCase {
             toggleCheckboxAtLineStart(textView)
             let toggled = waitForTextViewValue(
                 textView,
-                timeout: 5.0,
+                timeout: 2.0,
                 description: "toggling checkbox should show checked glyph"
             ) { v in
                 v.contains("☑ todo")
@@ -51,8 +51,8 @@ final class NativeEditorE2ETests: XCTestCase {
             // Exit list/item context.
             textView.typeText("\n\n")
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "- [x] todo", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "- [x] todo", timeout: 2)
             XCTAssertTrue(saved.contains("- [x] todo"))
             XCTAssertFalse(saved.contains("- [ ] \n"), "Should not persist an empty marker-only task item")
         }
@@ -67,8 +67,8 @@ final class NativeEditorE2ETests: XCTestCase {
             XCTAssertTrue(value.contains("Body"))
             attachScreenshot(name: "smoke-heading-exit", element: textView)
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "# Title", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "# Title", timeout: 2)
             XCTAssertTrue(saved.contains("# Title"))
             XCTAssertTrue(saved.contains("Body"))
         }
@@ -79,8 +79,8 @@ final class NativeEditorE2ETests: XCTestCase {
             textView.typeText("two\n\n")
             attachScreenshot(name: "smoke-ordered-exit", element: textView)
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "1. one", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "1. one", timeout: 2)
             XCTAssertTrue(saved.contains("1. one"))
             XCTAssertTrue(saved.contains("2. two"))
             XCTAssertFalse(saved.contains("3. \n"), "Should not persist an empty marker-only ordered item")
@@ -96,8 +96,8 @@ final class NativeEditorE2ETests: XCTestCase {
             XCTAssertTrue(value.contains("• two"))
             attachScreenshot(name: "smoke-bullet-exit", element: textView)
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "- one", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "- one", timeout: 2)
             XCTAssertTrue(saved.contains("- one"))
             XCTAssertTrue(saved.contains("- two"))
             XCTAssertFalse(saved.contains("\n- \n"), "Should not persist an empty marker-only bullet item")
@@ -111,8 +111,8 @@ final class NativeEditorE2ETests: XCTestCase {
 
             attachScreenshot(name: "smoke-shift-enter-bullet", element: textView)
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "- one", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "- one", timeout: 2)
             XCTAssertTrue(saved.contains("- one\\\n  two"))
             XCTAssertFalse(saved.contains("- two"))
         }
@@ -125,7 +125,7 @@ final class NativeEditorE2ETests: XCTestCase {
 
             let value = waitForTextViewValue(
                 textView,
-                timeout: 2.0,
+                timeout: 3.0,
                 description: "table conversion should hide delimiter row"
             ) { v in
                 v.contains("A") && v.contains("B") && v.contains("c") && v.contains("d") && !v.contains("| ---")
@@ -133,8 +133,8 @@ final class NativeEditorE2ETests: XCTestCase {
             XCTAssertFalse(value.contains("|"), "WYSIWYG should hide table pipe syntax after conversion")
             attachScreenshot(name: "smoke-typed-table", element: textView)
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "| A | B |", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "| A | B |", timeout: 2)
             XCTAssertTrue(saved.contains("| --- | --- |"))
             XCTAssertTrue(saved.contains("| c | d |"))
         }
@@ -181,20 +181,20 @@ final class NativeEditorE2ETests: XCTestCase {
             clearDocument(textView)
             textView.typeText("alpha beta alpha")
 
-            try openFindReplaceViaMenu(app: app)
+            try openFindReplaceViaShortcut(focused: textView)
 
             let findField = app.searchFields["NativeEditor.FindField"]
-            XCTAssertTrue(findField.waitForExistence(timeout: 5))
+            XCTAssertTrue(findField.waitForExistence(timeout: 3))
             findField.click()
             findField.typeText("alpha")
 
             let replaceField = app.textFields["NativeEditor.ReplaceField"]
-            XCTAssertTrue(replaceField.waitForExistence(timeout: 5))
+            XCTAssertTrue(replaceField.waitForExistence(timeout: 3))
             replaceField.click()
             replaceField.typeText("ALPHA")
 
             let replaceButton = app.buttons["NativeEditor.ReplaceButton"]
-            XCTAssertTrue(replaceButton.waitForExistence(timeout: 5))
+            XCTAssertTrue(replaceButton.waitForExistence(timeout: 3))
             replaceButton.click()
 
             attachScreenshot(name: "smoke-find-replace-once", element: textView)
@@ -204,8 +204,8 @@ final class NativeEditorE2ETests: XCTestCase {
             attachScreenshot(name: "smoke-find-replace-twice", element: textView)
             XCTAssertTrue(((textView.value as? String) ?? "").contains("ALPHA beta ALPHA"))
 
-            try save(app: app)
-            let saved = try waitForFileContains(tmp, substring: "ALPHA beta ALPHA", timeout: 5)
+            try save(app: app, focused: textView)
+            let saved = try waitForFileContains(tmp, substring: "ALPHA beta ALPHA", timeout: 2)
             XCTAssertTrue(saved.contains("ALPHA beta ALPHA"))
         }
     }
@@ -227,11 +227,11 @@ final class NativeEditorE2ETests: XCTestCase {
         defer { app.terminate() }
 
         let textView = app.textViews["NativeEditor.TextView"]
-        XCTAssertTrue(textView.waitForExistence(timeout: 10))
+        XCTAssertTrue(textView.waitForExistence(timeout: 4))
 
         let before = waitForTextViewValue(
             textView,
-            timeout: 5.0,
+            timeout: 3.0,
             description: "marker-mode task rendering should show bullet+checkbox"
         ) { v in
             v.contains("• ☐ item")
@@ -244,7 +244,7 @@ final class NativeEditorE2ETests: XCTestCase {
 
         let after = waitForTextViewValue(
             textView,
-            timeout: 5.0,
+            timeout: 3.0,
             description: "clicking marker prefix should toggle checkbox"
         ) { v in
             v.contains("• ☑ item")
@@ -252,8 +252,8 @@ final class NativeEditorE2ETests: XCTestCase {
         XCTAssertTrue(after.contains("• ☑ item"))
         attachScreenshot(name: "exhaustive-hit-target-marker-after", element: textView)
 
-        try save(app: app)
-        let saved = try waitForFileContains(tmp, substring: "- [x] item", timeout: 5)
+        try save(app: app, focused: textView)
+        let saved = try waitForFileContains(tmp, substring: "- [x] item", timeout: 2)
         XCTAssertTrue(saved.contains("- [x] item"))
     }
 
@@ -288,42 +288,23 @@ final class NativeEditorE2ETests: XCTestCase {
         return app
     }
 
-    private func launchAndWaitForeground(_ app: XCUIApplication, timeout: TimeInterval = 8) throws {
+    private func launchAndWaitForeground(_ app: XCUIApplication, timeout: TimeInterval = 4) throws {
         try preflightCanRunUIAutomation()
         app.launch()
         try ensureRunningForeground(app, timeout: timeout)
     }
 
-    private func save(app: XCUIApplication) throws {
-        // Ensure the app is in the foreground; menu bar interactions are not reliable otherwise.
-        try ensureRunningForeground(app, timeout: 5)
+    private func save(app: XCUIApplication, focused: XCUIElement) throws {
+        // Ensure the app is in the foreground; key equivalents won't route correctly otherwise.
+        try ensureRunningForeground(app, timeout: 2)
 
-        // Prefer the menu item to avoid key event flakiness.
-        let fileMenu = app.menuBars.menuBarItems["File"]
-        XCTAssertTrue(fileMenu.waitForExistence(timeout: 5))
-
-        fileMenu.click()
-
-        let saveItem = fileMenu.menus.menuItems["Save"]
-        XCTAssertTrue(saveItem.waitForExistence(timeout: 5))
-        XCTAssertTrue(saveItem.isEnabled, "Save menu item should be enabled")
-        saveItem.click()
+        // Cmd+S is significantly faster than menu traversal (which triggers multiple accessibility waits).
+        focused.typeKey("s", modifierFlags: [.command])
     }
 
-    private func openFindReplaceViaMenu(app: XCUIApplication) throws {
-        try ensureRunningForeground(app, timeout: 5)
-
-        let editMenu = app.menuBars.menuBarItems["Edit"]
-        XCTAssertTrue(editMenu.waitForExistence(timeout: 5))
-        editMenu.click()
-
-        let findSubmenu = editMenu.menus.menuItems["Find"]
-        XCTAssertTrue(findSubmenu.waitForExistence(timeout: 5))
-        findSubmenu.hover()
-
-        let findReplace = findSubmenu.menus.menuItems["Find and Replace\u{2026}"]
-        XCTAssertTrue(findReplace.waitForExistence(timeout: 5))
-        findReplace.click()
+    private func openFindReplaceViaShortcut(focused: XCUIElement) throws {
+        // Cmd+Shift+H (as configured in AppDelegate) is far faster than menu traversal.
+        focused.typeKey("h", modifierFlags: [.command, .shift])
     }
 
     private func waitForFileContains(_ url: URL, substring: String, timeout: TimeInterval) throws -> String {
@@ -336,7 +317,7 @@ final class NativeEditorE2ETests: XCTestCase {
             } catch {
                 // Ignore transient read errors while the file is being written.
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         }
         return last
     }
@@ -352,7 +333,7 @@ final class NativeEditorE2ETests: XCTestCase {
         while Date() < deadline {
             last = (textView.value as? String) ?? ""
             if predicate(last) { return last }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         }
         XCTFail("Timed out waiting for text view value: \(description). Last=\(last)")
         return last
