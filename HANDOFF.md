@@ -10,7 +10,7 @@ This is the only file a new agent needs to read first.
 - Path: `/Users/aaaaa/Projects/Kern-textkit`
 - Branch: `main`
 - Product: native TextKit app (no WebView)
-- Primary app identity: `Kern` (bundle id `com.kern.textkit`)
+- Primary app identity: `Kern` (bundle id `com.gradigit.kern`)
 
 ### Legacy archive repo (WebKit/CoreEditor)
 - Path: `/Users/aaaaa/Projects/Kern-webkit`
@@ -42,7 +42,7 @@ This is the only file a new agent needs to read first.
 5. Legacy WebKit app preserved as:
    - `/Users/aaaaa/Applications/Kern-webkit.app`
 6. Markdown default app association set to TextKit:
-   - `duti -s com.kern.textkit net.daringfireball.markdown all`
+   - `duti -s com.gradigit.kern net.daringfireball.markdown all`
 7. Launch behavior verified:
    - `open -a Kern <file.md>` opens `/Users/aaaaa/Applications/Kern.app`
    - `open <file.md>` opens `/Users/aaaaa/Applications/Kern.app`
@@ -97,7 +97,7 @@ open -a Kern-webkit /Users/aaaaa/Projects/Kern-textkit/test-fixtures/stress-test
 ```
 
 Expected:
-- `duti -x md` points to `/Users/aaaaa/Applications/Kern.app` and `com.kern.textkit`.
+- `duti -x md` points to `/Users/aaaaa/Applications/Kern.app` and `com.gradigit.kern`.
 
 ## 6) Test/Fixture Assets (Primary)
 
@@ -145,7 +145,7 @@ Rollback options:
 2. If you must restore old path naming:
    - move `/Users/aaaaa/Projects/Kern-webkit` back to `/Users/aaaaa/Projects/Kern` and remove symlink.
 3. Re-point markdown association back to legacy (if needed):
-   - `duti -s com.kern.app net.daringfireball.markdown all`
+   - `duti -s com.gradigit.kern.webkit net.daringfireball.markdown all`
 
 ## 10) Completion Checklist For This Migration
 
