@@ -936,7 +936,7 @@ enum NativeMarkdownCodec {
                 }
 
                 let (nextText, nextHardBreak) = stripHardBreakMarker(nextLine)
-                combined += (pendingHardBreak != nil ? "\u{2028}" : " ") + nextText
+                combined += (pendingHardBreak != nil ? "\u{2028}" : "\n") + nextText
                 pendingHardBreak = nextHardBreak
                 j += 1
             }
