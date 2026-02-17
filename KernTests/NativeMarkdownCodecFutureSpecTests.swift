@@ -54,14 +54,25 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
         // A native WYSIWYG import should not show the raw image syntax; it should create an attachment
         // or a non-syntax placeholder.
         XCTAssertFalse(attr.string.contains("![alt]("))
-        var hasAttachment = false
-        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { value, _, stop in
+        var firstAttachment: NSTextAttachment?
+        var firstAttachmentRange: NSRange?
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { value, range, stop in
             if value != nil {
-                hasAttachment = true
+                firstAttachment = value as? NSTextAttachment
+                firstAttachmentRange = range
                 stop.pointee = true
             }
         }
-        XCTAssertTrue(hasAttachment)
+        XCTAssertTrue(firstAttachment is MarkdownImageAttachment, "Image markdown should import to MarkdownImageAttachment")
+        if let image = firstAttachment as? MarkdownImageAttachment {
+            XCTAssertEqual(image.destination, "https://example.com/image.png")
+            XCTAssertNotNil(image.resolvedURL)
+            XCTAssertTrue(image.resolvedURL?.absoluteString.contains("example.com/image.png") == true)
+        }
+        if let range = firstAttachmentRange {
+            let kind = attr.attribute(.kernAttachmentKind, at: range.location, effectiveRange: nil) as? String
+            XCTAssertEqual(kind, "image")
+        }
 
         let out = NativeMarkdownCodec.exportMarkdown(attr)
         XCTAssertTrue(out.contains("![alt]("))
@@ -163,6 +174,27 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
         XCTAssertFalse(attr.string.contains("$E = mc^2$"))
         XCTAssertFalse(attr.string.contains("$$"))
 
+        var inlineMathRuns = 0
+        attr.enumerateAttribute(.kernInlineMath, in: NSRange(location: 0, length: attr.length), options: []) { value, _, _ in
+            if (value as? Bool) == true {
+                inlineMathRuns += 1
+            }
+        }
+        XCTAssertGreaterThan(inlineMathRuns, 0, "Inline math should be tagged semantically")
+
+        var hasMathBlockAttachment = false
+        var hasMathBlockKind = false
+        attr.enumerateAttributes(in: NSRange(location: 0, length: attr.length), options: []) { attrs, _, _ in
+            if attrs[.attachment] is MarkdownMathBlockAttachment {
+                hasMathBlockAttachment = true
+            }
+            if (attrs[.kernAttachmentKind] as? String) == "mathBlock" {
+                hasMathBlockKind = true
+            }
+        }
+        XCTAssertTrue(hasMathBlockAttachment, "Block math should import to MarkdownMathBlockAttachment")
+        XCTAssertTrue(hasMathBlockKind, "Block math attachments should be tagged with kernAttachmentKind=mathBlock")
+
         let out = NativeMarkdownCodec.exportMarkdown(attr)
         XCTAssertTrue(out.contains("$E = mc^2$"))
         XCTAssertTrue(out.contains("$$"))
@@ -185,18 +217,68 @@ final class NativeMarkdownCodecFutureSpecTests: XCTestCase {
 
         // Full-spec: mermaid blocks should be rendered as a diagram attachment (or other non-syntax placeholder),
         // not shown as raw mermaid source in the editor.
-        var hasAttachment = false
-        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { value, _, stop in
-            if value != nil {
-                hasAttachment = true
+        var mermaidAttachment: MarkdownMermaidAttachment?
+        var mermaidRange: NSRange?
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length), options: []) { value, range, stop in
+            if let attachment = value as? MarkdownMermaidAttachment {
+                mermaidAttachment = attachment
+                mermaidRange = range
                 stop.pointee = true
             }
         }
-        XCTAssertTrue(hasAttachment, "Expected mermaid to render as an attachment/diagram placeholder")
+        XCTAssertNotNil(mermaidAttachment, "Expected mermaid to render as MarkdownMermaidAttachment")
+        if let mermaidAttachment {
+            XCTAssertGreaterThan(mermaidAttachment.debugNodeCount, 1, "Mermaid parser should emit nodes")
+            XCTAssertGreaterThan(mermaidAttachment.debugEdgeCount, 0, "Mermaid parser should emit edges")
+        }
+        if let range = mermaidRange {
+            let kind = attr.attribute(.kernAttachmentKind, at: range.location, effectiveRange: nil) as? String
+            XCTAssertEqual(kind, "mermaid")
+        }
 
         let out = NativeMarkdownCodec.exportMarkdown(attr)
         XCTAssertTrue(out.contains("```mermaid"))
         XCTAssertTrue(out.contains("graph TD"))
         XCTAssertTrue(out.contains("```"))
+    }
+
+    @MainActor
+    func testImageAttachmentResolvesRelativePathAgainstBaseURLAndRespectsRemoteLoadingOption() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kern-image-fixture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let assetsDir = tempDir.appendingPathComponent("assets", isDirectory: true)
+        try FileManager.default.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+        let localImageURL = assetsDir.appendingPathComponent("pixel.png")
+        try Data().write(to: localImageURL)
+
+        let documentURL = tempDir.appendingPathComponent("note.md")
+        try Data("# temp".utf8).write(to: documentURL)
+
+        let localAttr = NativeMarkdownCodec.importMarkdown("![local](assets/pixel.png)", baseURL: documentURL)
+        var localAttachment: MarkdownImageAttachment?
+        localAttr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: localAttr.length), options: []) { value, _, stop in
+            if let attachment = value as? MarkdownImageAttachment {
+                localAttachment = attachment
+                stop.pointee = true
+            }
+        }
+        XCTAssertNotNil(localAttachment)
+        XCTAssertEqual(localAttachment?.resolvedURL?.standardizedFileURL.path, localImageURL.standardizedFileURL.path)
+
+        var options = NativeMarkdownCodec.Options()
+        options.remoteImageLoadingEnabled = false
+        let remoteAttr = NativeMarkdownCodec.importMarkdown("![remote](https://example.com/r.png)", options: options)
+        var remoteAttachment: MarkdownImageAttachment?
+        remoteAttr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: remoteAttr.length), options: []) { value, _, stop in
+            if let attachment = value as? MarkdownImageAttachment {
+                remoteAttachment = attachment
+                stop.pointee = true
+            }
+        }
+        XCTAssertNotNil(remoteAttachment)
+        XCTAssertEqual(remoteAttachment?.allowsRemoteLoading, false)
     }
 }

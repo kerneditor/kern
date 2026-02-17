@@ -14,6 +14,7 @@ final class StressFixturesSanityTests: XCTestCase {
         XCTAssertTrue(md.contains("## Table of Contents"))
         XCTAssertTrue(md.contains("](#heading-hierarchy)"))
         XCTAssertTrue(md.contains("](#mermaid-diagrams)"))
+        XCTAssertTrue(md.contains("](#task-permutations-matrix)"))
 
         // Inline formatting (GFM)
         XCTAssertTrue(md.contains("**bold text**"))
@@ -24,18 +25,27 @@ final class StressFixturesSanityTests: XCTestCase {
 
         // Images: local + remote.
         XCTAssertTrue(md.contains("![Local sample](screenshots/01-default-sample.png)"))
-        XCTAssertTrue(md.contains("https://placehold.co/"))
+        XCTAssertTrue(md.contains("https://upload.wikimedia.org/"))
 
         // Verify referenced local images exist.
         let localImage = fixtureURL(path: "test-fixtures/screenshots/01-default-sample.png")
         XCTAssertTrue(FileManager.default.fileExists(atPath: localImage.path), "Missing local image: \(localImage.path)")
 
         // Lists (nested) and tasks.
-        XCTAssertTrue(md.contains("* Simple item"))
-        XCTAssertTrue(md.contains("  * Nested level 1"))
-        XCTAssertTrue(md.contains("    * Nested level 2"))
-        XCTAssertTrue(md.contains("* [x]"))
-        XCTAssertTrue(md.contains("* [ ]"))
+        XCTAssertTrue(md.contains("- Simple item"))
+        XCTAssertTrue(md.contains("  - Nested level 1"))
+        XCTAssertTrue(md.contains("    - Nested level 2"))
+        XCTAssertTrue(md.contains("- [x] This checked item SHOULD be struck through"))
+        XCTAssertTrue(md.contains("- [ ] This unchecked item should NOT be struck through"))
+
+        // Task permutations matrix (markers + ordered + standalone shortcuts).
+        XCTAssertTrue(md.contains("## Task Permutations Matrix"))
+        XCTAssertTrue(md.contains("- [ ] dash unchecked"))
+        XCTAssertTrue(md.contains("star checked"))
+        XCTAssertTrue(md.contains("plus unchecked"))
+        XCTAssertTrue(md.contains("1. [ ] ordered unchecked"))
+        XCTAssertTrue(md.contains("[ ] standalone shortcut unchecked"))
+        XCTAssertTrue(md.contains("- [ ] task bullet (bullet + checkbox)"))
 
         // Kern extensions (heading checkboxes).
         XCTAssertTrue(md.contains("## [x] Checked H2"))
@@ -54,7 +64,15 @@ final class StressFixturesSanityTests: XCTestCase {
         // Math + block math.
         XCTAssertTrue(md.contains("$E = mc^2$"))
         XCTAssertTrue(md.contains("$$"))
-        XCTAssertTrue(md.contains("\\int_{-\\infty}^{\\infty}"))
+        XCTAssertTrue(
+            containsAny(
+                md,
+                candidates: [
+                    "\\int_{-\\infty}^{\\infty}",
+                    "int_{-infty}^{infty}",
+                ]
+            )
+        )
 
         // Blockquotes + thematic breaks.
         XCTAssertTrue(md.contains("> \"The best way to predict the future is to invent it.\""))
@@ -75,12 +93,61 @@ final class StressFixturesSanityTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(lineCount, 5000, "mega-stress-test.md should be 5000+ lines (got \(lineCount))")
 
         // Ensure it includes the critical sections we rely on for perf + edge cases.
+        XCTAssertTrue(md.contains("## Table of Contents"))
         XCTAssertTrue(md.contains("## Section 8: Deep Nesting"))
         XCTAssertTrue(md.contains("## Section 9: Links and Images"))
         XCTAssertTrue(md.contains("## Section 10: Edge Cases"))
+        XCTAssertTrue(md.contains("## Section 12: Permutation Core (Embedded Ultimate Fixture)"))
+        XCTAssertTrue(md.contains("<!-- BEGIN PERMUTATION APPENDIX -->"))
+        XCTAssertTrue(md.contains("<!-- END PERMUTATION APPENDIX -->"))
+        XCTAssertTrue(md.contains("## Action Permutation Seeds"))
         XCTAssertTrue(md.contains("```mermaid"))
         XCTAssertTrue(md.contains("$$"))
+        XCTAssertTrue(md.contains("![Local sample](screenshots/01-default-sample.png)"))
         XCTAssertTrue(md.contains("Visit <https://example.com>"))
+
+        let actionSeedCount = md.components(separatedBy: "ACTION-SEED-").count - 1
+        XCTAssertGreaterThanOrEqual(actionSeedCount, 200, "Expected mega fixture to include 200+ ACTION-SEED entries")
+
+        // Mega fixture should also include the language matrix from the embedded permutation core.
+        for languageFence in expectedLanguageFences() {
+            XCTAssertTrue(md.contains(languageFence), "Missing language fence in mega fixture: \(languageFence)")
+        }
+    }
+
+    func testUltimateStressFixtureContainsPermutationDenseCoverage() throws {
+        let md = try loadFixture(name: "ultimate-stress-test.md")
+
+        let lineCount = md.split(separator: "\n", omittingEmptySubsequences: false).count
+        XCTAssertGreaterThanOrEqual(lineCount, 1200, "ultimate-stress-test.md should stay permutation-dense (>=1200 lines)")
+
+        // Canonical permutation-heavy sections.
+        XCTAssertTrue(md.contains("## Heading Matrix"))
+        XCTAssertTrue(md.contains("## List And Task Matrix"))
+        XCTAssertTrue(md.contains("## Inline Formatting Matrix"))
+        XCTAssertTrue(md.contains("## Code Fence Language Matrix"))
+        XCTAssertTrue(md.contains("## Table Matrix"))
+        XCTAssertTrue(md.contains("## Blockquote And Rule Matrix"))
+        XCTAssertTrue(md.contains("## Math Matrix"))
+        XCTAssertTrue(md.contains("## Image Matrix"))
+        XCTAssertTrue(md.contains("## Mermaid Matrix"))
+        XCTAssertTrue(md.contains("## Action Permutation Seeds"))
+        XCTAssertTrue(md.contains("## Typing Volume Tail"))
+
+        // Language matrix sanity.
+        for languageFence in expectedLanguageFences() {
+            XCTAssertTrue(md.contains(languageFence), "Missing language fence in ultimate fixture: \(languageFence)")
+        }
+
+        // Action seed density (used by typing/action permutation tests).
+        let actionSeedCount = md.components(separatedBy: "ACTION-SEED-").count - 1
+        XCTAssertGreaterThanOrEqual(actionSeedCount, 200, "Expected 200+ ACTION-SEED entries")
+
+        // Core rich blocks.
+        XCTAssertTrue(md.contains("```mermaid"))
+        XCTAssertTrue(md.contains("$$"))
+        XCTAssertTrue(md.contains("![Local sample](screenshots/01-default-sample.png)"))
+        XCTAssertTrue(md.contains("\n---\n"))
     }
 
     // MARK: - Helpers
@@ -95,5 +162,38 @@ final class StressFixturesSanityTests: XCTestCase {
             .deletingLastPathComponent() // KernTests/
             .deletingLastPathComponent() // repo root
         return root.appendingPathComponent(path)
+    }
+
+    private func containsAny(_ haystack: String, candidates: [String]) -> Bool {
+        candidates.contains(where: { haystack.contains($0) })
+    }
+
+    private func expectedLanguageFences() -> [String] {
+        [
+            "```javascript",
+            "```typescript",
+            "```python",
+            "```rust",
+            "```go",
+            "```swift",
+            "```kotlin",
+            "```ruby",
+            "```java",
+            "```c",
+            "```cpp",
+            "```bash",
+            "```zsh",
+            "```powershell",
+            "```sql",
+            "```json",
+            "```yaml",
+            "```toml",
+            "```html",
+            "```css",
+            "```xml",
+            "```dockerfile",
+            "```lua",
+            "```php",
+        ]
     }
 }

@@ -5,7 +5,7 @@ import XCTest
 final class NativeMarkdownCodecPerformanceTests: XCTestCase {
     @MainActor
     func testImportExportBenchmarkFilePerformance() throws {
-        guard ProcessInfo.processInfo.environment["KERN_ENABLE_PERF_TESTS"] == "1" else {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 

@@ -34,11 +34,98 @@ final class AnchorNavigationTests: XCTestCase {
         XCTAssertNotEqual(targetLoc, NSNotFound)
 
         // Jump should move the caret into the destination heading paragraph.
+        XCTAssertTrue(waitUntil(timeout: 1.0) { editorTextView.selectedRange().location == targetLoc })
         XCTAssertEqual(editorTextView.selectedRange().location, targetLoc)
 
         // A toast makes the jump visible (and testable) without relying on scroll state.
         XCTAssertNotNil(findView(withAccessibilityIdentifier: "NativeEditor.JumpToast", in: vc.view))
     }
+
+    @MainActor
+    func testClickedAnchorLinkWithFileURLFragment_JumpsAndShowsToast() {
+        let vc = NativeEditorViewController()
+        _ = vc.view
+
+        // Anchor links can arrive resolved against a base file URL, producing a file:// URL with a fragment.
+        vc.documentURL = URL(fileURLWithPath: "/tmp/doc.md")
+
+        vc.stringValue = """
+        # Doc
+
+        ## Table of Contents
+
+        - [Jump](#target)
+
+        ## Target
+
+        Hello
+        """
+
+        XCTAssertTrue(vc.textView(NSTextView(), clickedOnLink: URL(string: "file:///tmp/doc.md#target")!, at: 0))
+
+        guard let editorTextView = findFirstTextView(in: vc.view) else {
+            XCTFail("Failed to locate editor text view in view hierarchy")
+            return
+        }
+
+        let text = editorTextView.string as NSString
+        let targetLoc = text.range(of: "Target").location
+        XCTAssertNotEqual(targetLoc, NSNotFound)
+
+        XCTAssertTrue(waitUntil(timeout: 1.0) { editorTextView.selectedRange().location == targetLoc })
+        XCTAssertEqual(editorTextView.selectedRange().location, targetLoc)
+        XCTAssertNotNil(findView(withAccessibilityIdentifier: "NativeEditor.JumpToast", in: vc.view))
+    }
+
+    @MainActor
+    func testAnchorJumpGuard_RejumpsIfSelectionSnapsBackToLink() {
+        let vc = NativeEditorViewController()
+        _ = vc.view
+
+        vc.stringValue = """
+        # Doc
+
+        ## Table of Contents
+
+        - [Jump](#target)
+
+        \(Array(repeating: "Filler paragraph.", count: 40).joined(separator: "\n\n"))
+
+        ## Target
+
+        Hello
+        """
+
+        guard let editorTextView = findFirstTextView(in: vc.view) else {
+            XCTFail("Failed to locate editor text view in view hierarchy")
+            return
+        }
+
+        let text = editorTextView.string as NSString
+        let linkLoc = text.range(of: "Jump").location
+        let targetLoc = text.range(of: "Target").location
+        XCTAssertNotEqual(linkLoc, NSNotFound)
+        XCTAssertNotEqual(targetLoc, NSNotFound)
+
+        XCTAssertTrue(vc.textView(NSTextView(), clickedOnLink: URL(string: "#target")!, at: linkLoc))
+        XCTAssertTrue(waitUntil(timeout: 1.0) { editorTextView.selectedRange().location == targetLoc })
+        XCTAssertEqual(editorTextView.selectedRange().location, targetLoc)
+
+        // Simulate NSTextView selecting the clicked link later (snap-back). The guard should re-jump.
+        editorTextView.setSelectedRange(NSRange(location: linkLoc, length: 0))
+        XCTAssertTrue(waitUntil(timeout: 1.0) { editorTextView.selectedRange().location == targetLoc })
+        XCTAssertEqual(editorTextView.selectedRange().location, targetLoc)
+    }
+}
+
+@MainActor
+private func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    return condition()
 }
 
 // MARK: - View tree helpers
@@ -60,4 +147,3 @@ private func findView(withAccessibilityIdentifier ident: String, in view: NSView
     }
     return nil
 }
-

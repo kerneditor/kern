@@ -418,23 +418,24 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
         ))
 
         // ── Emphasis / strong / code (inline)
-        let emphasisCases: [(String, String, [String], [String])] = [
-            ("em-asterisk", "*italic*", ["italic"], ["*italic*"]),
-            ("em-underscore", "_italic_", ["italic"], ["_italic_"]),
-            ("strong-asterisk", "**bold**", ["bold"], ["**bold**"]),
-            ("strong-underscore", "__bold__", ["bold"], ["__bold__"]),
-            ("strong-em", "***both***", ["both"], ["***both***"]),
-            ("nested-strong-em", "**bold *italic* bold**", ["bold", "italic"], ["**bold *italic* bold**"]),
-            ("inline-code", "`code`", ["code"], ["`code`"]),
-            ("inline-code-double-backtick", "``code with `tick` inside``", ["code with `tick` inside"], ["``code with `tick` inside``"]),
+        let emphasisCases: [(name: String, md: String, contains: [String], notContains: [String], expectExport: String)] = [
+            ("em-asterisk", "*italic*", ["italic"], ["*italic*"], "*italic*"),
+            // Canonical export uses asterisks even if the input used underscores.
+            ("em-underscore", "_italic_", ["italic"], ["_italic_"], "*italic*"),
+            ("strong-asterisk", "**bold**", ["bold"], ["**bold**"], "**bold**"),
+            ("strong-underscore", "__bold__", ["bold"], ["__bold__"], "**bold**"),
+            ("strong-em", "***both***", ["both"], ["***both***"], "***both***"),
+            ("nested-strong-em", "**bold *italic* bold**", ["bold", "italic"], ["**bold *italic* bold**"], "**bold *italic* bold**"),
+            ("inline-code", "`code`", ["code"], ["`code`"], "`code`"),
+            ("inline-code-double-backtick", "``code with `tick` inside``", ["code with `tick` inside"], ["``code with `tick` inside``"], "``code with `tick` inside``"),
         ]
-        for (name, md, contains, notContains) in emphasisCases {
+        for c in emphasisCases {
             cases.append(.init(
-                name: "inline-\(name)",
-                markdown: "\(md)\n",
-                expectWysiwygContains: contains,
-                expectWysiwygNotContains: notContains,
-                expectExportContains: [md]
+                name: "inline-\(c.name)",
+                markdown: "\(c.md)\n",
+                expectWysiwygContains: c.contains,
+                expectWysiwygNotContains: c.notContains,
+                expectExportContains: [c.expectExport]
             ))
         }
 
@@ -527,7 +528,11 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
         ))
         cases.append(.init(
             name: "math-block",
-            markdown: "$$\\n\\\\int_0^1 x^2 \\\\, dx\\n$$\\n",
+            markdown: #"""
+            $$
+            \int_0^1 x^2 \, dx
+            $$
+            """#,
             expectWysiwygNotContains: ["$$"],
             expectExportContains: ["$$"]
         ))
@@ -550,7 +555,12 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
 
         cases.append(.init(
             name: "math-block-multiline",
-            markdown: "$$\\n\\\\frac{1}{2}\\\\n\\\\sqrt{2}\\\\n$$\\n",
+            markdown: #"""
+            $$
+            \frac{1}{2}
+            \sqrt{2}
+            $$
+            """#,
             expectWysiwygNotContains: ["$$"],
             expectExportContains: ["$$"]
         ))
@@ -566,29 +576,47 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
         // ── Tables (escape + alignment edge cases)
         cases.append(.init(
             name: "table-minimal",
-            markdown: "| A | B |\\n| --- | --- |\\n| c | d |\\n",
+            markdown: """
+            | A | B |
+            | --- | --- |
+            | c | d |
+            """,
             expectWysiwygContains: ["A", "B", "c", "d"],
             expectWysiwygNotContains: ["| ---"],
             expectExportContains: ["| A | B |", "| --- | --- |", "| c | d |"]
         ))
         cases.append(.init(
             name: "table-escape-pipe",
-            markdown: "| A | B |\\n| --- | --- |\\n| a\\\\|b | c |\\n",
+            markdown: #"""
+            | A | B |
+            | --- | --- |
+            | a\|b | c |
+            """#,
             expectWysiwygContains: ["a|b", "c"],
-            expectExportContains: ["a\\\\|b"]
+            // Export should re-escape the literal pipe so the table stays structurally valid.
+            expectExportContains: ["a\\|b"]
         ))
 
         cases.append(.init(
             name: "table-alignment-left-right",
-            markdown: "| A | B |\\n| :-- | --: |\\n| c | d |\\n",
+            markdown: """
+            | A | B |
+            | :-- | --: |
+            | c | d |
+            """,
             expectWysiwygContains: ["A", "B", "c", "d"],
             expectWysiwygNotContains: ["| :--", "| --:"],
-            expectExportContains: ["| :-- | --: |"]
+            // Canonical delimiter cells require >=3 dashes.
+            expectExportContains: ["| :--- | ---: |"]
         ))
 
         cases.append(.init(
             name: "table-no-leading-trailing-pipes",
-            markdown: "A | B\\n---|---\\nc|d\\n",
+            markdown: """
+            A | B
+            ---|---
+            c|d
+            """,
             expectWysiwygContains: ["A", "B", "c", "d"],
             expectWysiwygNotContains: ["---|---"],
             expectExportContains: ["| A | B |"]
@@ -596,14 +624,22 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
 
         cases.append(.init(
             name: "table-empty-cell",
-            markdown: "| A | B |\\n| --- | --- |\\n|  | d |\\n",
+            markdown: """
+            | A | B |
+            | --- | --- |
+            |  | d |
+            """,
             expectWysiwygContains: ["A", "B", "d"],
             expectExportContains: ["|  | d |"]
         ))
 
         cases.append(.init(
             name: "table-inline-formatting",
-            markdown: "| A | B |\\n| --- | --- |\\n| **bold** | `code` |\\n",
+            markdown: """
+            | A | B |
+            | --- | --- |
+            | **bold** | `code` |
+            """,
             expectWysiwygContains: ["bold", "code"],
             expectWysiwygNotContains: ["**bold**", "`code`"],
             expectExportContains: ["**bold**", "`code`"]
@@ -611,7 +647,11 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
 
         cases.append(.init(
             name: "table-wide-6-cols",
-            markdown: "| A | B | C | D | E | F |\\n| --- | --- | --- | --- | --- | --- |\\n| 1 | 2 | 3 | 4 | 5 | 6 |\\n",
+            markdown: """
+            | A | B | C | D | E | F |
+            | --- | --- | --- | --- | --- | --- |
+            | 1 | 2 | 3 | 4 | 5 | 6 |
+            """,
             expectWysiwygContains: ["A", "F", "1", "6"],
             expectExportContains: ["| A | B | C | D | E | F |"]
         ))
@@ -619,21 +659,33 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
         // ── Nested lists (bullet + ordered)
         cases.append(.init(
             name: "nested-bullet",
-            markdown: "- one\\n  - nested\\n- two\\n",
+            markdown: """
+            - one
+              - nested
+            - two
+            """,
             expectWysiwygContains: ["nested"],
             expectWysiwygNotContains: ["- nested"],
             expectExportContains: ["  - nested"]
         ))
         cases.append(.init(
             name: "nested-ordered-depth-aware-rendering",
-            markdown: "1. Top\\n   1. Nested\\n",
+            markdown: """
+            1. Top
+               1. Nested
+            """,
             expectWysiwygContains: ["a. Nested"],
             expectExportContains: ["   1. Nested"]
         ))
 
         cases.append(.init(
             name: "nested-bullet-deep-3",
-            markdown: "- a\\n  - b\\n    - c\\n      - d\\n",
+            markdown: """
+            - a
+              - b
+                - c
+                  - d
+            """,
             expectWysiwygContains: ["a", "b", "c", "d"],
             expectWysiwygNotContains: ["- b", "- c", "- d"],
             expectExportContains: ["  - b", "    - c", "      - d"]
@@ -644,7 +696,10 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
             opt.orderedListNumbering = .gfmDefault
             cases.append(.init(
                 name: "ordered-numbering-gfmdefault-normalizes",
-                markdown: "5. five\\n9. nine\\n",
+                markdown: """
+                5. five
+                9. nine
+                """,
                 options: opt,
                 expectWysiwygContains: ["5. five", "6. nine"],
                 expectExportContains: ["5. five", "6. nine"],
@@ -657,7 +712,10 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
             opt.orderedListNumbering = .preserveTyped
             cases.append(.init(
                 name: "ordered-numbering-preserve-typed",
-                markdown: "5. five\\n9. nine\\n",
+                markdown: """
+                5. five
+                9. nine
+                """,
                 options: opt,
                 expectWysiwygContains: ["5. five", "9. nine"],
                 expectExportContains: ["5. five", "9. nine"]
@@ -666,7 +724,11 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
 
         cases.append(.init(
             name: "mixed-ordered-with-nested-bullet",
-            markdown: "1. one\\n   - child\\n2. two\\n",
+            markdown: """
+            1. one
+               - child
+            2. two
+            """,
             expectWysiwygContains: ["one", "child", "two"],
             expectExportContains: ["1. one", "   - child", "2. two"]
         ))
@@ -729,9 +791,17 @@ final class NativeMarkdownCodecFullSpecCaseMatrixTests: XCTestCase {
                                     expectWysiwygContains.append("\u{2610} ordered task")
                                     expectWysiwygNotContains.append("[ ] ordered task")
 
-                                    if dialect == .gfm && strat == .portable {
-                                        expectExportContains.append("1. \u{2610} ordered task")
-                                        expectExportNotContains.append("1. [ ] ordered task")
+                                    if dialect == .gfm {
+                                        switch strat {
+                                        case .portable:
+                                            expectExportContains.append("1. \u{2610} ordered task")
+                                            expectExportNotContains.append("1. [ ] ordered task")
+                                        case .lint:
+                                            expectExportContains.append("- [ ] 1. ordered task")
+                                            expectExportNotContains.append("1. [ ] ordered task")
+                                        case .preserve:
+                                            expectExportContains.append("1. [ ] ordered task")
+                                        }
                                     } else {
                                         expectExportContains.append("1. [ ] ordered task")
                                     }

@@ -39,6 +39,32 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
     }
 
     @MainActor
+    func testCheckedTaskCheckboxIsVerticallyCenteredWithText_FullSpec() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let md = "- [x] item\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+
+        let textView = makeLaidOutTextView(attr: attr, width: 600, height: 120)
+
+        guard let checkboxIndex = firstIndex(with: .kernCheckbox, in: textView) else {
+            XCTFail("Expected a checkbox glyph for GFM task list")
+            return
+        }
+
+        let ns = textView.string as NSString
+        let r = ns.range(of: "item")
+        XCTAssertNotEqual(r.location, NSNotFound)
+        let letterIndex = r.location
+
+        let checkboxRect = glyphRect(atCharIndex: checkboxIndex, in: textView)
+        let letterRect = glyphRect(atCharIndex: letterIndex, in: textView)
+
+        let deltaMidY = abs(checkboxRect.midY - letterRect.midY)
+        XCTAssertLessThan(deltaMidY, 2.0, "Checked checkbox glyph should be vertically centered with adjacent text (deltaMidY=\(deltaMidY))")
+    }
+
+    @MainActor
     func testHeadingCheckboxIsVerticallyCenteredWithHeadingText_FullSpec() throws {
         try TestGates.skipUnlessExhaustive()
 
@@ -63,6 +89,33 @@ final class NativeEditorCheckboxLayoutMetricSpecTests: XCTestCase {
 
         let deltaMidY = abs(checkboxRect.midY - letterRect.midY)
         XCTAssertLessThan(deltaMidY, 2.0, "Heading checkbox glyph should be vertically centered with heading text (deltaMidY=\(deltaMidY))")
+    }
+
+    @MainActor
+    func testCheckedHeadingCheckboxIsVerticallyCenteredWithHeadingText_FullSpec() throws {
+        try TestGates.skipUnlessExhaustive()
+
+        let md = "## [x] Heading done\n"
+        let opt = NativeMarkdownCodec.Options(headingCheckboxesEnabled: true)
+        let attr = NativeMarkdownCodec.importMarkdown(md, options: opt)
+
+        let textView = makeLaidOutTextView(attr: attr, width: 800, height: 140)
+
+        guard let checkboxIndex = firstIndex(with: .kernCheckbox, in: textView) else {
+            XCTFail("Expected a checkbox glyph for heading checkbox syntax when enabled")
+            return
+        }
+
+        let ns = textView.string as NSString
+        let r = ns.range(of: "Heading")
+        XCTAssertNotEqual(r.location, NSNotFound)
+        let letterIndex = r.location
+
+        let checkboxRect = glyphRect(atCharIndex: checkboxIndex, in: textView)
+        let letterRect = glyphRect(atCharIndex: letterIndex, in: textView)
+
+        let deltaMidY = abs(checkboxRect.midY - letterRect.midY)
+        XCTAssertLessThan(deltaMidY, 2.0, "Checked heading checkbox glyph should be vertically centered with heading text (deltaMidY=\(deltaMidY))")
     }
 
     // MARK: - TextKit helpers

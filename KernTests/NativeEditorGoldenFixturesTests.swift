@@ -136,6 +136,7 @@ final class NativeEditorGoldenFixturesTests: XCTestCase {
         let nActual = normalize(actual)
         let nExpected = normalize(expected)
         guard nActual != nExpected else { return }
+        let diffSummary = firstDiffSummary(actual: nActual, expected: nExpected)
 
         // Attach actual output for debugging.
         let actualAttachment = XCTAttachment(string: nActual)
@@ -148,12 +149,12 @@ final class NativeEditorGoldenFixturesTests: XCTestCase {
         expectedAttachment.lifetime = .keepAlways
         add(expectedAttachment)
 
-        let diffAttachment = XCTAttachment(string: firstDiffSummary(actual: nActual, expected: nExpected))
+        let diffAttachment = XCTAttachment(string: diffSummary)
         diffAttachment.name = "diff.txt"
         diffAttachment.lifetime = .keepAlways
         add(diffAttachment)
 
-        XCTFail(message)
+        XCTFail("\(message)\n\(diffSummary)")
     }
 
     private func firstDiffSummary(actual: String, expected: String) -> String {

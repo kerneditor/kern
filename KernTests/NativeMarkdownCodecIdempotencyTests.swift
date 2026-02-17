@@ -51,7 +51,16 @@ final class NativeMarkdownCodecIdempotencyTests: XCTestCase {
                             diff.lifetime = .keepAlways
                             add(diff)
 
-                            XCTFail("Export is not idempotent for fixture=\(inputName) options=\(optName)")
+                            XCTFail(
+                                """
+                                Export is not idempotent for fixture=\(inputName) options=\(optName)
+                                \(firstDiffSummary(actual: n2, expected: n1))
+                                --- export-1 ---
+                                \(n1)
+                                --- export-2 ---
+                                \(n2)
+                                """
+                            )
                         }
                     }
                 }
