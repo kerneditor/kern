@@ -37,18 +37,11 @@ Fast unit tests:
 ./scripts/test-native-editor.sh --unit-only
 ```
 
-Full default suite (unit + UI):
-
-```bash
-./scripts/test-native-editor.sh
-```
-
 Exhaustive suites:
 
 ```bash
 ./scripts/test-native-editor.sh --exhaustive
-./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive
-./scripts/test-native-editor.sh --ui-only --exhaustive
+./scripts/test-native-editor.sh --snapshots --exhaustive
 ```
 
 Strict markdown conformance:
@@ -83,11 +76,9 @@ Strict markdown conformance:
 
 ## Key Environment Flags
 
-- `KERN_UI_TESTING=1`: enables UI test mode (fixed window size, toast duration)
 - `KERN_ENABLE_EXHAUSTIVE_TESTS=1`: unlocks exhaustive test gates
 - `KERN_ENABLE_PERF_TESTS=1`: unlocks performance benchmarks
 - `KERN_ENABLE_SPEC_CONFORMANCE_TESTS=1`: unlocks strict CommonMark/GFM oracle
-- `KERN_TEST_APPEARANCE=dark|light`: UI test appearance mode
 
 ## Known Issues (from 2026-02-17 review)
 

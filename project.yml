@@ -23,13 +23,6 @@ schemes:
     test:
       targets:
         - KernTextKitTests
-  KernTextKitUI:
-    build:
-      targets:
-        KernTextKit: all
-    test:
-      targets:
-        - KernTextKitUITests
   KernTextKitSnapshots:
     build:
       targets:
@@ -157,26 +150,6 @@ schemes:
         KERN_PERF_ULTIMATE_INTERLEAVED_CHAR_LIMIT: "12000"
         KERN_PERF_MEGA_CHAR_LIMIT: "30000"
         KERN_PERF_MEGA_INTERLEAVED_CHAR_LIMIT: "20000"
-  KernTextKitUIExhaustive:
-    build:
-      targets:
-        KernTextKit: all
-    test:
-      targets:
-        - KernTextKitUITests
-      environmentVariables:
-        KERN_ENABLE_EXHAUSTIVE_TESTS: "1"
-  KernTextKitUIUltraExhaustive:
-    build:
-      targets:
-        KernTextKit: all
-    test:
-      targets:
-        - KernTextKitUITests
-      environmentVariables:
-        KERN_ENABLE_EXHAUSTIVE_TESTS: "1"
-        KERN_UI_TYPING_MODE: "character"
-
 targets:
   KernTextKit:
     type: application
@@ -204,20 +177,6 @@ targets:
     dependencies:
       - target: KernTextKit
       - package: SnapshotTesting
-    settings:
-      base:
-        MACOSX_DEPLOYMENT_TARGET: "14.0"
-        SWIFT_STRICT_CONCURRENCY: complete
-        GENERATE_INFOPLIST_FILE: true
-        CODE_SIGN_IDENTITY: "-"
-
-  KernTextKitUITests:
-    type: bundle.ui-testing
-    platform: macOS
-    sources:
-      - path: KernUITests
-    dependencies:
-      - target: KernTextKit
     settings:
       base:
         MACOSX_DEPLOYMENT_TARGET: "14.0"

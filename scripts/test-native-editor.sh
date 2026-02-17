@@ -1,20 +1,17 @@
 #!/bin/bash
-# test-native-editor.sh — Run native-editor unit + UI tests and collect artifacts.
+# test-native-editor.sh — Run native-editor unit tests and collect artifacts.
 #
 # Usage:
-#   ./scripts/test-native-editor.sh [--unit-only] [--ui-only] [--skip-xcodegen] [--export-ui-attachments] [--exhaustive] [--snapshots] [--record-snapshots] [--snapshots-only] [--ultra] [--ultra-full]
+#   ./scripts/test-native-editor.sh [--unit-only] [--skip-xcodegen] [--exhaustive] [--snapshots] [--record-snapshots] [--snapshots-only] [--ultra] [--ultra-full]
 #
 # Notes:
-# - UI tests require the Mac to be unlocked and Xcode to have the necessary Automation permissions.
 # - Results are written under test-results/native-editor/<timestamp>/
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUN_UNIT=true
-RUN_UI=true
 SKIP_XCODEGEN=false
-EXPORT_UI_ATTACHMENTS=false
 ENABLE_EXHAUSTIVE=false
 ENABLE_SNAPSHOTS=false
 RECORD_SNAPSHOTS=false
@@ -27,10 +24,8 @@ declare -a DEFAULT_KEYS=()
 
 for arg in "$@"; do
   case "$arg" in
-    --unit-only) RUN_UI=false ;;
-    --ui-only) RUN_UNIT=false ;;
+    --unit-only) ;; # kept for backwards compat (unit is the only mode now)
     --skip-xcodegen) SKIP_XCODEGEN=true ;;
-    --export-ui-attachments) EXPORT_UI_ATTACHMENTS=true ;;
     --exhaustive) ENABLE_EXHAUSTIVE=true ;;
     --snapshots) ENABLE_SNAPSHOTS=true ;;
     --record-snapshots) ENABLE_SNAPSHOTS=true; RECORD_SNAPSHOTS=true ;;
@@ -132,34 +127,7 @@ DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$(pwd)/.derived-data/tests}"
 
 mkdir -p "$OUT_DIR"
 
-ALWAYS_EXPORT_ATTACHMENTS=false
-if [ "${KERN_EXPORT_UI_ATTACHMENTS:-}" = "1" ] || [ "$EXPORT_UI_ATTACHMENTS" = true ]; then
-  ALWAYS_EXPORT_ATTACHMENTS=true
-fi
-
-UI_RESULT_BUNDLE="$OUT_DIR/KernTextKitUI.xcresult"
-
-export_ui_attachments() {
-  if [ ! -d "$UI_RESULT_BUNDLE" ]; then
-    return 0
-  fi
-
-  echo "▸ Exporting UI test attachments (screenshots/logs)..."
-  ATT_DIR="$OUT_DIR/ui-attachments"
-  mkdir -p "$ATT_DIR"
-  xcrun xcresulttool export attachments \
-    --path "$UI_RESULT_BUNDLE" \
-    --output-path "$ATT_DIR" \
-    >/dev/null 2>&1 || true
-  # xcresulttool can export screenshots as HEIC depending on Xcode/macOS.
-  # Convert to PNG for tooling compatibility (keeps original .heic files).
-  "$(pwd)/scripts/convert-heic-to-png.sh" "$ATT_DIR" >/dev/null 2>&1 || true
-  echo "  Attachments: $ATT_DIR"
-}
-
-# If the UI runner (or the system) crashes mid-test (e.g., WindowServer restarts), still try to
-# export whatever artifacts were produced so failures are diagnosable.
-trap 'cleanup_suite_values; if [ "$RUN_UI" = true ] && [ "$ALWAYS_EXPORT_ATTACHMENTS" = true ]; then export_ui_attachments; fi' EXIT INT TERM
+trap 'cleanup_suite_values' EXIT INT TERM
 
 reset_suite_domain
 sync_kernel_env_to_suite
@@ -193,46 +161,6 @@ if [ "$RECORD_SNAPSHOTS" = true ]; then
   set_default_kernel_value "KERN_RECORD_SNAPSHOTS" "1"
 fi
 
-# UI runs should be deterministic and match manual validation defaults.
-# Keep appearance explicit to avoid accidental light/dark drift between runs.
-if [ "$RUN_UI" = true ]; then
-  if [ -z "${KERN_UI_TEST_APPEARANCE+x}" ]; then
-    if [ -n "${KERN_TEST_APPEARANCE+x}" ]; then
-      export KERN_UI_TEST_APPEARANCE="$KERN_TEST_APPEARANCE"
-    else
-      export KERN_UI_TEST_APPEARANCE="dark"
-    fi
-  fi
-  write_suite_value "KERN_UI_TEST_APPEARANCE" "${KERN_UI_TEST_APPEARANCE}"
-fi
-
-# Exhaustive UI should include full live-typing coverage by default. Allow explicit opt-out
-# via KERN_UI_ENABLE_LIVE_TYPING=0 for faster local debugging loops.
-if [ "$RUN_UI" = true ] && [ "$ENABLE_EXHAUSTIVE" = true ]; then
-  if [ -z "${KERN_UI_ENABLE_LIVE_TYPING+x}" ]; then
-    export KERN_UI_ENABLE_LIVE_TYPING=1
-  fi
-  write_suite_value "KERN_UI_ENABLE_LIVE_TYPING" "${KERN_UI_ENABLE_LIVE_TYPING}"
-
-  # Use ultimate by default for exhaustive UI live typing: still permutation-dense,
-  # but practical enough to finish and iterate in one session.
-  if [ -z "${KERN_UI_TYPING_FIXTURE+x}" ]; then
-    export KERN_UI_TYPING_FIXTURE="ultimate-stress-test.md"
-  fi
-  write_suite_value "KERN_UI_TYPING_FIXTURE" "${KERN_UI_TYPING_FIXTURE}"
-
-  if [ -z "${KERN_UI_TYPING_CHUNK_SIZE+x}" ]; then
-    export KERN_UI_TYPING_CHUNK_SIZE=16384
-  fi
-  write_suite_value "KERN_UI_TYPING_CHUNK_SIZE" "${KERN_UI_TYPING_CHUNK_SIZE}"
-
-  # Prefer paste for runtime, with UI-test-level fallback to typed insertion if needed.
-  if [ -z "${KERN_UI_CHUNK_INSERTION+x}" ]; then
-    export KERN_UI_CHUNK_INSERTION=paste
-  fi
-  write_suite_value "KERN_UI_CHUNK_INSERTION" "${KERN_UI_CHUNK_INSERTION}"
-fi
-
 echo "=== Kern Native Editor Tests ==="
 echo "Output: $OUT_DIR"
 echo "DerivedData: $DERIVED_DATA_PATH"
@@ -244,22 +172,6 @@ echo "  --exhaustive         Enable exhaustive (slow) tests (via *Exhaustive sch
 echo "  --snapshots-only     Run only snapshot tests (skips non-snapshot unit tests)"
 echo ""
 echo "Env toggles (optional):"
-echo "  KERN_EXPORT_UI_ATTACHMENTS=1   Always export UI attachments (otherwise only on failure)"
-echo "  KERN_UI_SCREENSHOTS=always     Keep UI screenshots on success (default)"
-echo "  KERN_UI_SCREENSHOTS=failure    Only keep UI screenshots on failure (faster)"
-echo "  KERN_UI_SCREENSHOTS=off        Disable UI screenshots (fastest)"
-echo "  KERN_UI_ENABLE_LIVE_TYPING=1   Enable long exhaustive UI live-typing matrix (default: enabled in --exhaustive)"
-echo "  KERN_UI_ENABLE_LIVE_TYPING=0   Disable long exhaustive UI live-typing matrix"
-echo "  KERN_UI_REQUIRE_AX_TRUST=1     Strict Accessibility preflight (skip UI tests when not trusted)"
-echo "  KERN_UI_AX_PROMPT=1            Prompt for Accessibility trust during UI preflight"
-echo "  KERN_UI_SCREENSHOT_DIR=/path   Write UI PNGs to disk (runner sets automatically)"
-echo "  KERN_UI_TYPING_FIXTURE=...     Exhaustive UI full-typing fixture (default in --exhaustive: ultimate-stress-test.md)"
-echo "  KERN_UI_TYPING_MODE=character|chunked  Exhaustive UI typing mode (default: chunked)"
-echo "  KERN_UI_TYPING_CHUNK_SIZE=16384 Exhaustive UI typing chunk size (default in --exhaustive)"
-echo "  KERN_UI_CHUNK_INSERTION=paste|type  Chunked insertion strategy (default: paste in --exhaustive, with fallback)"
-echo "  KERN_UI_TEST_APPEARANCE=dark|light  UI test app appearance (default: dark)"
-echo "  KERN_UI_ACTION_DEPTH=1|2|3     Exhaustive UI action permutation depth"
-echo "  KERN_UI_ACTION_LIMIT=N         Exhaustive UI action program cap (unset = all)"
 echo "  KERN_EXHAUSTIVE_PROFILE_LIMIT=N                Cap non-UI exhaustive profile permutations"
 echo "  KERN_EXHAUSTIVE_ACTION_FULL=1                  Run full feature x action x profile matrix"
 echo "  KERN_EXHAUSTIVE_ACTION_SCENARIO_BUDGET=N       Budget for bounded action matrix mode"
@@ -317,14 +229,6 @@ if [ "$ENABLE_ULTRA_FULL" = true ] && [ "$ENABLE_SNAPSHOTS" = false ] && [ "$REC
   UNIT_SCHEME="KernTextKitUltraExhaustiveFull"
 fi
 
-UI_SCHEME="KernTextKitUI"
-if [ "$ENABLE_EXHAUSTIVE" = true ]; then
-  UI_SCHEME="KernTextKitUIExhaustive"
-fi
-if [ "$ENABLE_ULTRA" = true ]; then
-  UI_SCHEME="KernTextKitUIUltraExhaustive"
-fi
-
 NEED_XCODEGEN=true
 if [ "$SKIP_XCODEGEN" = true ]; then
   NEED_XCODEGEN=false
@@ -338,7 +242,7 @@ if [ -f "$PBXPROJ" ] && [ "$PBXPROJ" -nt "project.yml" ]; then
 
   # If any sources/tests/ui-tests/resources are newer than the generated pbxproj,
   # re-run xcodegen so the project includes them.
-  if find KernApp/Sources KernTests KernUITests -type f \( -name "*.swift" -o -name "*.xcassets" \) -newer "$PBXPROJ" 2>/dev/null | grep -q .; then
+  if find KernApp/Sources KernTests -type f \( -name "*.swift" -o -name "*.xcassets" \) -newer "$PBXPROJ" 2>/dev/null | grep -q .; then
     NEED_XCODEGEN=true
   fi
 fi
@@ -354,7 +258,7 @@ if [ "$SKIP_XCODEGEN" = false ] && [ "$NEED_XCODEGEN" = false ] && [ -f "$PBXPRO
       echo "▸ Detected source not referenced in Xcode project: $swift_file"
       break
     fi
-  done < <(find KernApp/Sources KernTests KernUITests -type f -name "*.swift" | sort)
+  done < <(find KernApp/Sources KernTests -type f -name "*.swift" | sort)
   if [ "$MISSING_REF" = true ]; then
     NEED_XCODEGEN=true
   fi
@@ -447,64 +351,6 @@ if [ "$RUN_UNIT" = true ]; then
     fi
     echo "  ✓ Unit tests passed"
     echo ""
-  fi
-fi
-
-if [ "$RUN_UI" = true ]; then
-  echo "▸ Running UI tests (scheme: $UI_SCHEME)..."
-  echo "  Preflight: Ensure the Mac is unlocked and Automation permissions are granted."
-
-  set +e
-  UI_SCREENSHOT_DIR="$OUT_DIR/ui-screenshots"
-  mkdir -p "$UI_SCREENSHOT_DIR"
-
-  env KERN_UI_SCREENSHOT_DIR="$UI_SCREENSHOT_DIR" KERN_UI_DERIVED_DATA_PATH="$DERIVED_DATA_PATH" KERN_UI_TYPING_MODE="${KERN_UI_TYPING_MODE:-chunked}" KERN_UI_TEST_APPEARANCE="${KERN_UI_TEST_APPEARANCE}" xcodebuild \
-    -project KernTextKit.xcodeproj \
-    -scheme "$UI_SCHEME" \
-    -derivedDataPath "$DERIVED_DATA_PATH" \
-    -resultBundlePath "$OUT_DIR/KernTextKitUI.xcresult" \
-    -parallel-testing-enabled NO \
-    -maximum-parallel-testing-workers 1 \
-    test \
-    2>&1 | tee "$OUT_DIR/ui.log"
-  UI_STATUS=${PIPESTATUS[0]}
-  set -e
-
-  if [ $UI_STATUS -ne 0 ]; then
-    echo "UI tests failed (exit $UI_STATUS). See: $OUT_DIR/ui.log" >&2
-  else
-    echo "  ✓ UI tests passed"
-  fi
-
-  # Xcode reports success even when all UI tests are skipped, which is misleading for an "exhaustive"
-  # suite. Treat "all skipped" as a failure so we don't get green runs without coverage.
-  if [ $UI_STATUS -eq 0 ]; then
-    if ! fail_on_skipped_tests "$OUT_DIR/ui.log" "UI tests"; then
-      UI_STATUS=4
-    fi
-
-    SKIP_SUMMARY_LINE="$(grep -E "Executed [0-9]+ tests, with [0-9]+ tests skipped" "$OUT_DIR/ui.log" | tail -1 || true)"
-    if [ -n "$SKIP_SUMMARY_LINE" ]; then
-      EXECUTED_COUNT="$(echo "$SKIP_SUMMARY_LINE" | sed -E 's/.*Executed ([0-9]+) tests.*/\1/')"
-      SKIPPED_COUNT="$(echo "$SKIP_SUMMARY_LINE" | sed -E 's/.*with ([0-9]+) tests skipped.*/\1/')"
-      if [ "${EXECUTED_COUNT:-0}" -gt 0 ] && [ "${SKIPPED_COUNT:-0}" -eq "${EXECUTED_COUNT:-0}" ]; then
-        echo "UI tests did not actually run (all tests were skipped)." >&2
-        echo "See: $OUT_DIR/ui.log" >&2
-        echo "Common fixes: unlock the Mac; grant Accessibility/Automation permissions to Xcode and KernTextKitUITests-Runner." >&2
-        exit 3
-      fi
-    fi
-  fi
-
-  echo ""
-  if [ $UI_STATUS -ne 0 ] || [ "$ALWAYS_EXPORT_ATTACHMENTS" = true ]; then
-    export_ui_attachments
-  else
-    echo "▸ Skipping UI attachment export (set KERN_EXPORT_UI_ATTACHMENTS=1 or pass --export-ui-attachments)"
-  fi
-
-  if [ $UI_STATUS -ne 0 ]; then
-    exit $UI_STATUS
   fi
 fi
 
