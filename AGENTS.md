@@ -7,13 +7,16 @@ This repository is **KernTextKit**: a fully native macOS WYSIWYG Markdown editor
 Read and follow:
 
 - `docs/plans/native-editor-test-suite.md`
+- `docs/plans/native-editor-missing-features-implementation-plan.md`
+- `docs/plans/markdown-spec-failure-tracker.md`
 
 This plan is the source of truth for what “exhaustive” means. If tests are green but the app is missing features, the plan requires adding tests that fail until the feature is implemented.
 
 ## Where To Work
 
 - Work only in this repo: `/Users/aaaaa/Projects/Kern-textkit`
-- Do not modify the legacy repo at `/Users/aaaaa/Projects/Kern` unless explicitly requested.
+- Do not modify the legacy repo at `/Users/aaaaa/Projects/Kern-webkit` unless explicitly requested.
+  - Compatibility symlink currently exists at `/Users/aaaaa/Projects/Kern -> /Users/aaaaa/Projects/Kern-textkit`.
 
 ## Core Commands
 
@@ -35,6 +38,9 @@ Tests:
 # Exhaustive (expected to fail until full-spec features are implemented)
 ./scripts/test-native-editor.sh --exhaustive
 
+# Strict official CommonMark/GFM conformance (Kern extensions disabled)
+./scripts/test-markdown-spec-conformance.sh
+
 # Pixel-level snapshots
 ./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive
 ```
@@ -45,4 +51,3 @@ Tests:
 - Use **UI tests** only for interaction behaviors that can’t be validated otherwise.
 - Prefer **generator-backed matrices** (preferences, fixtures, edge cases) over hand-written repetition.
 - Always attach artifacts that an agent can use to self-repair: screenshots, snapshot diffs, markdown outputs, and minimal diffs.
-
