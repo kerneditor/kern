@@ -4333,6 +4333,8 @@ enum NativeMarkdownCodec {
             || hasUnescapedUnbalancedParens(destination)
         guard needsAngles else { return destination }
         let escaped = destination
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "<", with: "\\<")
             .replacingOccurrences(of: ">", with: "\\>")
         return "<\(escaped)>"
     }
