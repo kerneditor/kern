@@ -77,12 +77,12 @@ run_step() {
       case "$name" in
         spec_conformance|unit_*|perf_bench|ui_*)
           local skipped_count
-          skipped_count="$(rg -c "Test skipped -" "$log_file" || true)"
+          skipped_count="$(grep -c "Test skipped -" "$log_file" || true)"
           if [ "${skipped_count:-0}" -gt 0 ]; then
             FAILURES+=("$name (contains $skipped_count skipped tests)")
             log "status: FAIL (skipped tests detected: $skipped_count)"
             log "first skipped lines:"
-            rg -n "Test skipped -" "$log_file" | head -20 | tee -a "$SUMMARY" || true
+            grep -n "Test skipped -" "$log_file" | head -20 | tee -a "$SUMMARY" || true
             return
           fi
           ;;

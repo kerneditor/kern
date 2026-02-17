@@ -8,11 +8,11 @@
 # Usage: ./scripts/test-autosave-debounce.sh
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -uo pipefail
+set -euo pipefail
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
-KERN_APP_PATH=$(find /Users/aaaaa/Library/Developer/Xcode/DerivedData/KernTextKit-*/Build/Products/Debug/KernTextKit.app -maxdepth 0 2>/dev/null | head -1)
+KERN_APP_PATH=$(find "$HOME/Library/Developer/Xcode/DerivedData/KernTextKit-"*/Build/Products/Debug/KernTextKit.app -maxdepth 0 2>/dev/null | head -1)
 
 if [ -z "$KERN_APP_PATH" ]; then
     echo "ERROR: Cannot find KernTextKit.app in DerivedData."

@@ -10,7 +10,7 @@
 # Results are saved to: test-fixtures/benchmark-results.md
 # ═══════════════════════════════════════════════════════════════════════════════
 
-set -uo pipefail
+set -euo pipefail
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ STRESS_FILE="$FIXTURES_DIR/stress-test.md"
 MEGA_STRESS_FILE="$FIXTURES_DIR/mega-stress-test.md"
 
 # Find KernTextKit.app from DerivedData
-KERN_APP_PATH=$(find /Users/aaaaa/Library/Developer/Xcode/DerivedData/KernTextKit-*/Build/Products/Debug/KernTextKit.app -maxdepth 0 2>/dev/null | head -1)
+KERN_APP_PATH=$(find "$HOME/Library/Developer/Xcode/DerivedData/KernTextKit-"*/Build/Products/Debug/KernTextKit.app -maxdepth 0 2>/dev/null | head -1)
 
 if [ -z "$KERN_APP_PATH" ]; then
     echo "ERROR: Cannot find KernTextKit.app in DerivedData."

@@ -84,9 +84,11 @@ if [[ "$SKIP_FIXTURE_UPDATE" = false ]]; then
 fi
 
 echo "▸ Preparing python oracle environment..."
-python3 -m venv "$VENV_PATH"
-"$VENV_PATH/bin/python3" -m pip install --upgrade pip >/dev/null
-"$VENV_PATH/bin/python3" -m pip install --quiet cmarkgfm
+if [[ ! -f "$VENV_PATH/bin/python3" ]]; then
+  python3 -m venv "$VENV_PATH"
+  "$VENV_PATH/bin/python3" -m pip install --upgrade pip >/dev/null
+  "$VENV_PATH/bin/python3" -m pip install --quiet cmarkgfm
+fi
 
 ONLY_TESTING_ARGS=()
 case "$MODE" in
