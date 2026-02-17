@@ -29,6 +29,7 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         case insertASCII
         case insertMarkdownInline
         case newline
+        case lineBreak   // Shift+Enter — soft break
         case backspace
         case deleteForward
         case moveLeft
@@ -65,6 +66,7 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         .insertASCII,
         .insertMarkdownInline,
         .newline,
+        .lineBreak,
         .backspace,
         .deleteForward,
         .moveLeft,
@@ -596,7 +598,9 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
             case .insertMarkdownInline:
                 textView.insertText(" **b** `c` ", replacementRange: textView.selectedRange())
             case .newline:
-                textView.insertText("\n", replacementRange: textView.selectedRange())
+                textView.insertNewline(nil)
+            case .lineBreak:
+                textView.insertLineBreak(nil)
             case .backspace:
                 if textView.selectedRange().location > 0 {
                     let handled = controller.textView(textView, doCommandBy: #selector(NSResponder.deleteBackward(_:)))
@@ -987,7 +991,11 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
     @MainActor
     private func typeCharacterByCharacter(_ markdown: String, in textView: NativeMarkdownTextView) {
         for ch in markdown {
-            textView.insertText(String(ch), replacementRange: textView.selectedRange())
+            if ch == "\n" {
+                textView.insertNewline(nil)
+            } else {
+                textView.insertText(String(ch), replacementRange: textView.selectedRange())
+            }
         }
     }
 
@@ -1009,7 +1017,11 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         var programIndex = 0
 
         for ch in markdown {
-            textView.insertText(String(ch), replacementRange: textView.selectedRange())
+            if ch == "\n" {
+                textView.insertNewline(nil)
+            } else {
+                textView.insertText(String(ch), replacementRange: textView.selectedRange())
+            }
             typedChars += 1
 
             if typedChars % interval == 0 {
@@ -1027,6 +1039,7 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
             [.moveDocumentStart, .moveDocumentEnd],
             [.insertASCII, .backspace],
             [.newline, .backspace],
+            [.lineBreak, .newline],
             [.selectWordAroundCaret, .replaceSelectionPreservingText],
             [.selectCurrentLine, .replaceSelectionPreservingText],
             [.selectWordAroundCaret, .cutSelection, .pasteClipboard],
