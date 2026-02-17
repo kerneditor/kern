@@ -1,7 +1,7 @@
 # Documentation manifest for KernTextKit
 # Tracks docs, ownership intent, and primary code references
 
-last_synced: "2026-02-17T12:20:23Z"
+last_synced: "2026-02-17T13:55:00Z"
 
 files:
   - path: README.md
@@ -64,3 +64,8 @@ files:
     type: spec
     last_updated: "2026-02-07T03:40:00Z"
     description: Kern markdown behavior notes and profile expectations
+
+  - path: docs/reviews/codebase-review-2026-02-17.md
+    type: review
+    last_updated: "2026-02-17T13:55:00Z"
+    description: Comprehensive codebase review covering editor core, codec, tests, scripts, and architecture

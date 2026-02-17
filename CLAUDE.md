@@ -15,6 +15,7 @@ Primary goal: true WYSIWYG editing with deterministic Markdown round-trip (defau
 3. docs/plans/markdown-spec-failure-tracker.md
 4. docs/plans/native-editor-missing-features-implementation-plan.md
 5. NATIVE-EDITOR-TEST-MATRIX.md
+6. docs/reviews/codebase-review-2026-02-17.md
 
 ## Build And Run
 
@@ -79,6 +80,30 @@ Strict markdown conformance:
   - `NSCache.countLimit = 256`
   - `setObject(..., cost: estimatedImageCostBytes(...))`
 - Packaging script avoids broad `rm -rf` patterns; use guarded directory deletion helper in `scripts/package-kern-app.sh`.
+
+## Key Environment Flags
+
+- `KERN_UI_TESTING=1`: enables UI test mode (fixed window size, toast duration)
+- `KERN_ENABLE_EXHAUSTIVE_TESTS=1`: unlocks exhaustive test gates
+- `KERN_ENABLE_PERF_TESTS=1`: unlocks performance benchmarks
+- `KERN_ENABLE_SPEC_CONFORMANCE_TESTS=1`: unlocks strict CommonMark/GFM oracle
+- `KERN_TEST_APPEARANCE=dark|light`: UI test appearance mode
+
+## Known Issues (from 2026-02-17 review)
+
+See full report: docs/reviews/codebase-review-2026-02-17.md
+
+Critical data-loss paths:
+- `windowWillClose` does not flush the 150ms export debounce — stale saves possible
+- `applicationShouldTerminate` background-mode path drops unflushed edits
+- `lastKnownFileModDate` has a data race (background `writeSafely` vs main queue)
+- Reference definitions inside blockquotes silently missed during import pre-scan
+
+Key codec/editor bugs:
+- `NSTextStorage` mutations lack `beginEditing`/`endEditing` grouping
+- No `undoManager.beginUndoGrouping()` anywhere — input rules create multiple undo steps
+- `toggleInlineAttribute` hardcodes 16pt base font, losing heading size
+- Soft line break join uses `"\n"` which corrupts export round-trip
 
 ## Swift 6 Concurrency Notes
 
