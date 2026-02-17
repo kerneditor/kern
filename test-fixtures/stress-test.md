@@ -8,6 +8,7 @@
 - [Bullet Lists](#bullet-lists)
 - [Ordered Lists](#ordered-lists)
 - [Task Lists](#task-lists-checklists)
+- [Task Permutations Matrix](#task-permutations-matrix)
 - [Heading Checkboxes (Kern Extension)](#heading-checkboxes-kern-extension)
 - [Code Blocks](#code-blocks)
 - [Tables](#tables)
@@ -31,7 +32,7 @@
 
 This is **bold text**, *italic text*, ~~strikethrough text~~, and `inline code`.
 
-Combined styles: ***bold italic***, ~~**bold strikethrough**~~, *~~italic strikethrough~~*
+Combined styles: **\*bold italic***, ~~bold strikethrough~~, *~~italic strikethrough~~\*
 
 Here is a [link to Milkdown](https://milkdown.dev) and a [link to GitHub](https://github.com).
 
@@ -43,19 +44,25 @@ Local image that should load without network access:
 
 Remote images that should load if network access works:
 
-![Remote 1](https://placehold.co/600x150/007aff/ffffff?text=Kern+Editor+Image+Test)
+![Remote 1](https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/640px-Fronalpstock_big.jpg)
 
-![Remote 2](https://placehold.co/400x100/34c759/ffffff?text=Second+Image)
+![Remote 2](https://upload.wikimedia.org/wikipedia/commons/thumb/0/02/Oia%2C_Santorini_HDR_sunset.jpg/640px-Oia%2C_Santorini_HDR_sunset.jpg)
 
 ## Bullet Lists
 
-* Simple item
-* Another item
-  * Nested level 1
-  * Nested level 1b
-    * Nested level 2
-      * Nested level 3 (deep)
-* Back to top level
+- Simple item
+- Another item
+  - Nested level 1
+  - Nested level 1b
+    - Nested level 2
+      - Nested level 3 (deep)
+- Back to top level
+
+### Bullet Marker Variant (\*)
+
+- Simple item
+  - Nested level 1
+    - Nested level 2
 
 ## Ordered Lists
 
@@ -71,40 +78,70 @@ Nested numbering style test: 1 -> a -> i (Notion-like).
       1. Deep item should show as "i"
       2. Deep item should show as "ii"
       3. Deep item should show as "iii"
-3. Third item at top level
-4. Fourth item at top level
+1. Third item at top level
+2. Fourth item at top level
 
 ## Task Lists (Checklists)
 
 Only checked items should have strikethrough:
 
-* [x] This checked item SHOULD be struck through
-* [ ] This unchecked item should NOT be struck through
-* [x] Another checked — struck through
-* [ ] Another unchecked — normal text
+- [x] This checked item SHOULD be struck through
+- [ ] This unchecked item should NOT be struck through
+- [x] Another checked — struck through
+- [ ] Another unchecked — normal text
 
 ## Nested Checklists — Cascade Bug Test
 
 Parent items should NOT inherit strikethrough from children:
 
-* Top-level bullet (should be NORMAL, not struck)
-  * [x] Nested checked task (struck through)
-  * [ ] Nested unchecked task (normal)
-* Another top-level bullet (should be NORMAL)
-  * [x] Done sub-task (struck through)
-  * Regular bullet (should be NORMAL)
+- Top-level bullet (should be NORMAL, not struck)
+  - [x] Nested checked task (struck through)
+  - [ ] Nested unchecked task (normal)
+- Another top-level bullet (should be NORMAL)
+  - [x] Done sub-task (struck through)
+  - Regular bullet (should be NORMAL)
 
 ## Mixed Ordered + Checklist
 
 1. First ordered item (should be NORMAL)
 
-   * [x] Checked sub-task (struck through)
-   * [ ] Unchecked sub-task (normal)
+   - [x] Checked sub-task (struck through)
+   - [ ] Unchecked sub-task (normal)
 2. Second ordered item (should be NORMAL)
 
-   * Bullet child (normal)
+   - Bullet child (normal)
 
-     * [x] Deep checked task (struck through)
+     - [x] Deep checked task (struck through)
+
+## Task Permutations Matrix
+
+This section exists to stress all supported task syntaxes and marker variants in one place.
+
+### Unordered Markers (-, \*, +)
+
+- [ ] dash unchecked
+- [x] dash checked
+- [ ] star unchecked
+- [x] star checked
+- [ ] plus unchecked
+- [x] plus checked
+
+### Ordered Tasks (Optional)
+
+1. [ ] ordered unchecked
+2. [x] ordered checked
+
+### Standalone Task Shortcuts (Kern Extension Input)
+
+[ ] standalone unchecked
+[x] standalone checked
+[ ] standalone shortcut unchecked
+[ ] standalone shortcut unchecked
+
+### Bulleted + Standalone Task (Kern-style "task bullet")
+
+- [ ] task bullet (bullet + checkbox)
+- [x] task bullet checked (GFM marker; should still render as a task)
 
 ## Heading Checkboxes (Kern Extension)
 
@@ -153,7 +190,6 @@ function greet(name) {
 
 const result = greet("World");
 ```
-
 ```python
 # Python with type hints
 def fibonacci(n: int) -> list[int]:
@@ -186,7 +222,11 @@ const config: EditorConfig = {
   fontFamily: "SF Pro Text",
   features: { mermaid: true, latex: true },
 };
+
+
+ 
 ```
+
 
 ```bash
 # Shell script
@@ -217,18 +257,18 @@ done
 
 ## Math (LaTeX)
 
-Inline: The equation $E = mc^2$ is famous. Also $\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$.
+Inline: The equation $E = mc^2$ is famous. Also $sum_{i=1}^{n} i = frac{n(n+1)}{2}$.
 
 Block equation:
 
 $$
-\int_{-\infty}^{\infty} e^{-x^2} \, dx = \sqrt{\pi}
+int_{-infty}^{infty} e^{-x^2} , dx = sqrt{pi}
 $$
 
 Another block equation:
 
 $$
-f(x) = \frac{1}{\sigma\sqrt{2\pi}} e^{-\frac{(x-\mu)^2}{2\sigma^2}}
+f(x) = frac{1}{sigmasqrt{2pi}} e^{-frac{(x-mu)^2}{2sigma^2}}
 $$
 
 ## Blockquotes
