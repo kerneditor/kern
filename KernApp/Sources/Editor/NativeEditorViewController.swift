@@ -984,6 +984,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             replacement = NSAttributedString()
         }
 
+        isApplyingInputRules = true
+        defer { isApplyingInputRules = false }
+
         storage.replaceCharacters(in: contentRange, with: replacement)
         textView.setSelectedRange(NSRange(location: min(contentRange.location, storage.length), length: 0))
         textView.didChangeText()
