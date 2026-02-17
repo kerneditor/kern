@@ -3,7 +3,7 @@ import os
 
 /// Monotonic process start time (nanoseconds) for perf logging.
 let processStartNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-private let signposter = OSSignposter(subsystem: "com.kern.textkit", category: "Launch")
+private let signposter = OSSignposter(subsystem: "com.gradigit.kern", category: "Launch")
 let launchInterval = signposter.beginInterval("AppLaunch")
 
 func msSinceStart() -> String {
@@ -45,6 +45,25 @@ if isUITesting {
     // without mutating the developer's preferences on disk.
     UserDefaults.standard.setVolatileDomain(overrides, forName: "NSArgumentDomain")
 } else {
+    // Runtime defaults for the native editor profile. Keep GFM export defaults, but enable
+    // Kern extension rendering features by default for WYSIWYG readability.
+    //
+    // One-time migration: older builds persisted these as `false`, which makes ordered
+    // and heading task checkboxes render literally in stress fixtures. Flip them to `true`
+    // once for existing installs, then preserve user preference afterward.
+    if !UserDefaults.standard.bool(forKey: "nativeEditor.didMigrateTaskDefaultsV1") {
+        UserDefaults.standard.set(true, forKey: "nativeEditor.orderedTasksEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeEditor.headingCheckboxesEnabled")
+        UserDefaults.standard.set(true, forKey: "nativeEditor.didMigrateTaskDefaultsV1")
+    }
+
+    if UserDefaults.standard.object(forKey: "nativeEditor.orderedTasksEnabled") == nil {
+        UserDefaults.standard.set(true, forKey: "nativeEditor.orderedTasksEnabled")
+    }
+    if UserDefaults.standard.object(forKey: "nativeEditor.headingCheckboxesEnabled") == nil {
+        UserDefaults.standard.set(true, forKey: "nativeEditor.headingCheckboxesEnabled")
+    }
+
     // Normal runs: allow env vars to override persisted defaults (useful for manual profiling/debugging).
     if let v = env["KERN_NATIVE_EXPORT_DIALECT"] {
         UserDefaults.standard.set(v, forKey: "nativeEditor.exportDialect") // gfm | kern

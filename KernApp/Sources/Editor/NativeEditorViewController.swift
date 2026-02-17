@@ -11,7 +11,45 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
     private let scrollView = NSScrollView()
     private let textView = NativeMarkdownTextView()
-    private let codeCopyButton = NSButton(title: "Copy", target: nil, action: nil)
+
+    // Code block chrome (two independent overlays):
+    // - caret chrome: shown when the caret is inside a code block
+    // - hover chrome: shown when the mouse hovers a (different) code block
+    private let caretCodeBlockChrome = CodeBlockChromeView(
+        copyButtonAccessibilityIdentifier: "NativeEditor.CodeCopyButton",
+        languageLabelAccessibilityIdentifier: "NativeEditor.CodeLanguageLabel"
+    )
+    private let hoverCodeBlockChrome = CodeBlockChromeView(
+        copyButtonAccessibilityIdentifier: "NativeEditor.CodeCopyButton.Hover",
+        languageLabelAccessibilityIdentifier: "NativeEditor.CodeLanguageLabel.Hover"
+    )
+    private var caretCodeCopyFeedbackWorkItem: DispatchWorkItem?
+    private var hoverCodeCopyFeedbackWorkItem: DispatchWorkItem?
+    private var hoveredCodeBlockRange: NSRange?
+    private var caretCodeCopyCharacterRange: NSRange?
+    private var hoverCodeCopyCharacterRange: NSRange?
+    private var caretLastCodeBlockBackgroundRect: NSRect?
+    private var hoverLastCodeBlockBackgroundRect: NSRect?
+    private var isUpdatingCodeBlockChrome = false
+    private var codeBlockChromeNeedsRefresh = false
+
+    private struct AnchorJumpGuard {
+        let anchor: String
+        let linkCharIndex: Int
+        var targetParagraphLocation: Int?
+        var lastJumpedAt: Date
+        var remainingRejumps: Int
+        let expiresAt: Date
+    }
+
+    private var pendingAnchorJumpWorkItem: DispatchWorkItem?
+    private var anchorJumpGuard: AnchorJumpGuard?
+
+    /// If this editor is hosted by an `NSDocument`, the owning document's URL.
+    /// Used to correctly handle in-document `#anchor` links that may arrive as `file:///path/to/doc.md#anchor`.
+    var documentURL: URL?
+    /// Test seam for external URL opening. When nil, uses `NSWorkspace.shared.open`.
+    var openExternalURLHandler: ((URL) -> Bool)?
 
     // Find / Replace (native, testable; avoids depending on the system Find panel UI).
     private let findBarView = NSView()
@@ -34,7 +72,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var isApplyingInputRules = false
     private var isApplyingAutoNewline = false
     private var exportWorkItem: DispatchWorkItem?
-    private var codeCopyCharacterRange: NSRange?
+    /// Avoid full-document layout forcing on very large files; it can stall UI on open/edit.
+    private let fullLayoutForceCharThreshold = 60_000
+    private var largeDocumentLightLayoutWorkItem: DispatchWorkItem?
+    /// Test seam: disables debounced background export work while keeping explicit flush/save behavior.
+    /// This avoids runaway async work during exhaustive non-UI typing matrices.
+    var disablesDebouncedExportsForTesting = false
 
     /// Markdown source (import/export). Setting this re-renders the text view.
     var stringValue: String = "" {
@@ -66,9 +109,11 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         textView.setAccessibilityIdentifier("NativeEditor.TextView")
         textView.isEditable = true
         textView.isSelectable = true
-        textView.allowsUndo = true
+        textView.allowsUndo = ProcessInfo.processInfo.environment["KERN_TEST_DISABLE_UNDO"] == "1" ? false : true
         textView.isRichText = true
-        textView.importsGraphics = false
+        // Required for NSTextAttachment rendering (images, mermaid, block math, thematic breaks).
+        // When false, TextKit shows fallback replacement glyphs instead of attachment cells.
+        textView.importsGraphics = true
         textView.usesFontPanel = false
         textView.usesRuler = false
         textView.drawsBackground = false
@@ -78,6 +123,17 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = true
         textView.isAutomaticLinkDetectionEnabled = false
+        textView.onHoverCodeBlockRangeChanged = { [weak self] range in
+            guard let self else { return }
+            self.hoveredCodeBlockRange = range
+            self.updateCodeBlockChrome()
+        }
+        // Ensure the document view grows with content (and provides bottom whitespace so anchor jumps can
+        // land headings near the top, even close to EOF).
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
 
         let baseFont = NSFont.systemFont(ofSize: 16)
         textView.typingAttributes = [
@@ -89,20 +145,24 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         scrollView.frame = container.bounds
         scrollView.autoresizingMask = [.width, .height]
         container.addSubview(scrollView)
+        syncTextContainerSizeToScrollViewWidth()
 
-        // Code block copy button (shown only when the caret is inside a code block).
-        codeCopyButton.target = self
-        codeCopyButton.action = #selector(copyActiveCodeBlock(_:))
-        codeCopyButton.setAccessibilityIdentifier("NativeEditor.CodeCopyButton")
-        codeCopyButton.bezelStyle = .rounded
-        codeCopyButton.controlSize = .small
-        codeCopyButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        codeCopyButton.isHidden = true
-        container.addSubview(codeCopyButton)
+        // Code-block chrome overlays (caret + hover).
+        caretCodeBlockChrome.setAccessibilityIdentifier("NativeEditor.CodeBlockChrome.Caret")
+        caretCodeBlockChrome.copyButton.target = self
+        caretCodeBlockChrome.copyButton.action = #selector(copyCaretCodeBlock(_:))
+        caretCodeBlockChrome.isHidden = true
+        container.addSubview(caretCodeBlockChrome)
+
+        hoverCodeBlockChrome.setAccessibilityIdentifier("NativeEditor.CodeBlockChrome.Hover")
+        hoverCodeBlockChrome.copyButton.target = self
+        hoverCodeBlockChrome.copyButton.action = #selector(copyHoveredCodeBlock(_:))
+        hoverCodeBlockChrome.isHidden = true
+        container.addSubview(hoverCodeBlockChrome)
 
         configureFindBar(container: container)
 
-        // Track scroll to keep the copy button positioned.
+        // Track scroll to keep the code-block chrome positioned.
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
@@ -110,14 +170,91 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(nativeEditorPreferencesDidChange(_:)),
+            name: .nativeEditorPreferencesDidChange,
+            object: nil
+        )
 
         view = container
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: .nativeEditorPreferencesDidChange, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+    }
+
     override func viewDidLayout() {
         super.viewDidLayout()
+        syncTextContainerSizeToScrollViewWidth()
+        adjustDocumentViewHeightToContent(forceFullLayout: false)
         layoutFindBar()
-        updateCodeCopyButtonVisibilityAndPosition()
+        updateCodeBlockChrome()
+    }
+
+    private func syncTextContainerSizeToScrollViewWidth() {
+        guard let tc = textView.textContainer else { return }
+        let width = max(0, scrollView.contentView.bounds.width)
+        // TextKit uses the text container size for layout; allow unlimited height and track width.
+        tc.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        tc.widthTracksTextView = true
+    }
+
+    /// Make the scroll view feel like a modern editor by ensuring there's always "breathing room" below
+    /// the last line. This enables table-of-contents navigation to land headings near the top even when
+    /// they are close to end-of-file.
+    private func adjustDocumentViewHeightToContent(forceFullLayout: Bool = false) {
+        guard
+            let lm = textView.layoutManager,
+            let tc = textView.textContainer,
+            let storage = textView.textStorage
+        else { return }
+
+        let canForceFullLayout = forceFullLayout && storage.length <= fullLayoutForceCharThreshold
+        // Force layout through the end of the document. TextKit can be lazy about layout when the
+        // container has "infinite" height; without this, `usedRect(for:)` can under-report and clamp
+        // scrolling (breaking anchor jumps on long docs).
+        if canForceFullLayout, storage.length > 0 {
+            let lastChar = max(0, storage.length - 1)
+            let glyphRange = lm.glyphRange(forCharacterRange: NSRange(location: lastChar, length: 1), actualCharacterRange: nil)
+            lm.ensureLayout(forGlyphRange: glyphRange)
+        } else if storage.length == 0 {
+            lm.ensureLayout(for: tc)
+        }
+
+        let used = lm.usedRect(for: tc)
+        let viewportH = max(0, scrollView.contentView.bounds.height)
+
+        // Provide at least one viewport of extra scroll space at the bottom (common in editors like Notion).
+        let bottomPad = viewportH
+        let insets = textView.textContainerInset.height * 2
+        // When we don't force full layout (large docs / per-keystroke edits), don't aggressively shrink
+        // based on partially-laid-out usedRect values.
+        let minimumBaseHeight = canForceFullLayout ? viewportH : max(viewportH, textView.frame.height)
+        let desiredH = max(minimumBaseHeight, ceil(used.maxY + insets + bottomPad))
+
+        if abs(textView.frame.height - desiredH) > 1 {
+            var f = textView.frame
+            f.size.height = desiredH
+            textView.frame = f
+        }
+    }
+
+    private func scheduleLargeDocumentLightLayoutIfNeeded(markdown: String) {
+        guard markdown.utf16.count > fullLayoutForceCharThreshold else {
+            largeDocumentLightLayoutWorkItem?.cancel()
+            largeDocumentLightLayoutWorkItem = nil
+            return
+        }
+        largeDocumentLightLayoutWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.viewIfLoaded != nil else { return }
+            self.adjustDocumentViewHeightToContent(forceFullLayout: false)
+            self.updateCodeBlockChrome()
+        }
+        largeDocumentLightLayoutWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     // MARK: - External Updates
@@ -144,19 +281,47 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
+    private func applyPreferencesAndRerender() {
+        guard viewIfLoaded != nil else { return }
+        renderMarkdown(stringValue, preserveSelection: true)
+        adjustDocumentViewHeightToContent()
+        updateCodeBlockChrome()
+        scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
+        scheduleExport()
+    }
+
+    @objc private func nativeEditorPreferencesDidChange(_ notification: Notification) {
+        applyPreferencesAndRerender()
+    }
+
+    func attributedTextForTesting() -> NSAttributedString {
+        textView.attributedString()
+    }
+
     private func renderMarkdown(_ markdown: String, preserveSelection: Bool) {
         let selection = preserveSelection ? textView.selectedRange() : nil
         let scrollOrigin = preserveSelection ? scrollView.contentView.bounds.origin : nil
 
         let opt = NativeMarkdownCodec.Options.fromUserDefaults()
-        let attr = NativeMarkdownCodec.importMarkdown(markdown, options: opt)
+        let attr = NativeMarkdownCodec.importMarkdown(markdown, options: opt, baseURL: documentURL)
         textView.textStorage?.setAttributedString(attr)
+        let forceFullLayout = markdown.utf16.count <= fullLayoutForceCharThreshold
+        adjustDocumentViewHeightToContent(forceFullLayout: forceFullLayout)
+        scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
 
         if let selection {
             let maxLocation = max(0, textView.string.count)
             let safeLoc = min(selection.location, maxLocation)
             textView.setSelectedRange(NSRange(location: safeLoc, length: 0))
+        } else {
+            // Deterministic initial view state for open/import/snapshot flows:
+            // start at top of document with caret at location 0 (Notion/GitHub-like).
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+            let top = NSPoint(x: 0, y: 0)
+            scrollView.contentView.scroll(to: top)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
+
         if let scrollOrigin {
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -180,22 +345,50 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let checked = (storage.attribute(.kernCheckboxChecked, at: characterIndex, effectiveRange: nil) as? Bool) ?? false
         let newChecked = !checked
 
-        // Preserve visual attributes (font/baseline) so toggling doesn't shrink/misalign the checkbox.
+        // Preserve visual attributes (color), but normalize checkbox font metrics so checked/unchecked
+        // glyphs don't come from different fallback fonts.
         let existingFont = storage.attribute(.font, at: characterIndex, effectiveRange: nil) as? NSFont
-        let existingBaseline = storage.attribute(.baselineOffset, at: characterIndex, effectiveRange: nil)
         let existingColor = storage.attribute(.foregroundColor, at: characterIndex, effectiveRange: nil) as? NSColor
+
+        // Determine the surrounding text font so we can compute an optical baseline offset that
+        // aligns the checkbox with the line's x-height center (Notion/GitHub-like).
+        let ns = storage.string as NSString
+        let paraRange = ns.paragraphRange(for: NSRange(location: characterIndex, length: 0))
+        let contentRange = paragraphContentRange(ns: ns, paraRange: paraRange)
+
+        var textFontForAlignment: NSFont = NSFont.systemFont(ofSize: 16)
+        if contentRange.length > 0 {
+            var i = contentRange.location
+            while i < contentRange.location + contentRange.length, i < storage.length {
+                let isMarker = (storage.attribute(.kernMarker, at: i, effectiveRange: nil) as? Bool) ?? false
+                if !isMarker, let f = storage.attribute(.font, at: i, effectiveRange: nil) as? NSFont {
+                    textFontForAlignment = f
+                    break
+                }
+                i += 1
+            }
+        }
+
+        // Choose a point size that matches our import renderer:
+        // - body/list tasks: checkbox slightly larger than text
+        // - headings: checkbox matches heading size (import does this for heading checkboxes)
+        let desiredPointSize: CGFloat
+        if let existingFont {
+            desiredPointSize = existingFont.pointSize
+        } else if textFontForAlignment.pointSize > 16 {
+            desiredPointSize = textFontForAlignment.pointSize
+        } else {
+            desiredPointSize = textFontForAlignment.pointSize + 4
+        }
+
+        let checkboxFont = CheckboxStyle.preferredFont(pointSize: desiredPointSize)
+        let baselineOffset = CheckboxStyle.baselineOffset(textFont: textFontForAlignment, checkboxFont: checkboxFont)
 
         let newChar = newChecked ? "\u{2611}" : "\u{2610}" // ☑ / ☐
         storage.replaceCharacters(in: NSRange(location: characterIndex, length: 1), with: newChar)
 
-        if let existingFont {
-            storage.addAttribute(.font, value: existingFont, range: NSRange(location: characterIndex, length: 1))
-        }
-        if let existingBaseline {
-            storage.addAttribute(.baselineOffset, value: existingBaseline, range: NSRange(location: characterIndex, length: 1))
-        } else {
-            storage.addAttribute(.baselineOffset, value: -1, range: NSRange(location: characterIndex, length: 1))
-        }
+        storage.addAttribute(.font, value: checkboxFont, range: NSRange(location: characterIndex, length: 1))
+        storage.addAttribute(.baselineOffset, value: baselineOffset, range: NSRange(location: characterIndex, length: 1))
         if let existingColor {
             storage.addAttribute(.foregroundColor, value: existingColor, range: NSRange(location: characterIndex, length: 1))
         }
@@ -271,7 +464,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         applyMarkdownInputRulesIfNeeded()
         handleNewlineContinuationIfNeeded()
-        updateCodeCopyButtonVisibilityAndPosition()
+        adjustDocumentViewHeightToContent(forceFullLayout: false)
+        updateCodeBlockChrome()
         scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
         scheduleExport()
     }
@@ -296,7 +490,16 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             }
         }
 
-        // Disallow edits that touch marker regions (bullet + checkbox prefix).
+        // Allow deletion/cut of selected ranges even when they include marker regions.
+        // Without this, basic "select all + delete/cut" can fail whenever a task/list marker
+        // is present in the document.
+        if affectedCharRange.length > 0 {
+            let replacement = replacementString ?? ""
+            let isDeletionLikeEdit = replacement.isEmpty
+            if isDeletionLikeEdit { return true }
+        }
+
+        // Disallow non-deletion edits that touch marker regions (bullet + checkbox prefix).
         if affectedCharRange.length == 0 {
             // Insertion: block if insertion point is on a marker character.
             if affectedCharRange.location < storage.length {
@@ -318,28 +521,196 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
-        updateCodeCopyButtonVisibilityAndPosition()
+        updateCodeBlockChrome()
+        maybeReapplyAnchorJumpIfNeeded()
     }
 
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-        guard let anchor = internalAnchor(from: link) else { return false }
-        guard jumpToAnchor(anchor) else { return false }
-        showJumpToast(anchor: anchor)
-        return true
+        if let anchor = internalAnchor(from: link) {
+            scheduleAnchorJump(anchor: anchor, linkCharIndex: charIndex)
+            return true
+        }
+        guard let url = externalURL(from: link) else { return false }
+        return openExternalURL(url)
+    }
+
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.deleteBackward(_:)) {
+            return handleBackspaceAtListStartIfNeeded()
+        }
+        return false
     }
 
     private func internalAnchor(from link: Any) -> String? {
         if let url = link as? URL {
-            // `URL(string: "#section")` commonly arrives here as an URL whose absoluteString is "#section".
-            let abs = url.absoluteString
-            if abs.hasPrefix("#") {
-                return String(abs.dropFirst()).removingPercentEncoding ?? String(abs.dropFirst())
+            // Common forms:
+            // - "#section" (pure fragment)
+            // - "file:///path/to/doc.md#section" (fragment resolved against base URL)
+            if let frag = url.fragment {
+                if url.scheme == nil, url.path.isEmpty {
+                    return frag.removingPercentEncoding ?? frag
+                }
+                if url.scheme == "file", isCurrentDocumentURL(url) {
+                    return frag.removingPercentEncoding ?? frag
+                }
             }
         }
-        if let s = link as? String, s.hasPrefix("#") {
-            return String(s.dropFirst()).removingPercentEncoding ?? String(s.dropFirst())
+        if let s = link as? String {
+            if s.hasPrefix("#") {
+                return String(s.dropFirst()).removingPercentEncoding ?? String(s.dropFirst())
+            }
+            if let url = URL(string: s), let frag = url.fragment, url.scheme == "file", isCurrentDocumentURL(url) {
+                return frag.removingPercentEncoding ?? frag
+            }
         }
         return nil
+    }
+
+    private func externalURL(from link: Any) -> URL? {
+        let url: URL?
+        if let u = link as? URL {
+            url = u
+        } else if let s = link as? String {
+            url = URL(string: s)
+        } else {
+            url = nil
+        }
+        guard let url else { return nil }
+        guard let scheme = url.scheme?.lowercased() else { return nil }
+        switch scheme {
+        case "http", "https", "mailto", "file":
+            return url
+        default:
+            return nil
+        }
+    }
+
+    private func openExternalURL(_ url: URL) -> Bool {
+        if let openExternalURLHandler {
+            return openExternalURLHandler(url)
+        }
+        return NSWorkspace.shared.open(url)
+    }
+
+    private func isCurrentDocumentURL(_ url: URL) -> Bool {
+        guard url.scheme == "file" else { return false }
+        guard let docURL = documentURL?.standardizedFileURL else { return false }
+
+        // Ignore fragments when comparing file URLs.
+        return URL(fileURLWithPath: url.path).standardizedFileURL == docURL
+    }
+
+    private func scheduleAnchorJump(anchor: String, linkCharIndex: Int) {
+        pendingAnchorJumpWorkItem?.cancel()
+
+        // Guard against NSTextView internal selection/scroll behaviors that can snap the viewport back
+        // to the clicked link shortly after we programmatically scroll to the destination.
+        anchorJumpGuard = AnchorJumpGuard(
+            anchor: anchor,
+            linkCharIndex: linkCharIndex,
+            targetParagraphLocation: nil,
+            lastJumpedAt: .distantPast,
+            // Allow a few attempts over a longer window: NSTextView can apply deferred "make selection
+            // visible" scroll adjustments well after the click event finishes (seen in TOC nav).
+            remainingRejumps: 6,
+            expiresAt: Date().addingTimeInterval(8.0)
+        )
+
+        // Perform the jump on the next run loop so it wins over NSTextView's default click/selection handling.
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.jumpToAnchor(anchor) else { return }
+            self.showJumpToast(anchor: anchor)
+        }
+        pendingAnchorJumpWorkItem = work
+        DispatchQueue.main.async(execute: work)
+    }
+
+    private func maybeReapplyAnchorJumpIfNeeded() {
+        guard var guardState = anchorJumpGuard else { return }
+
+        let now = Date()
+        if now >= guardState.expiresAt || guardState.remainingRejumps <= 0 {
+            anchorJumpGuard = nil
+            return
+        }
+
+        guard let storage = textView.textStorage,
+              let lm = textView.layoutManager,
+              let tc = textView.textContainer,
+              storage.length > 0 else { return }
+
+        let ns = storage.string as NSString
+        let visible = textView.visibleRect
+
+        let sel = textView.selectedRange()
+        let selLen = max(sel.length, 1) // treat a caret as a 1-char range for containment checks
+        let containsLinkIndex = sel.location <= guardState.linkCharIndex && guardState.linkCharIndex < sel.location + selLen
+
+        func paragraphRect(forCharIndex charIndex: Int) -> (para: NSRange, rect: NSRect)? {
+            guard ns.length > 0 else { return nil }
+            let safe = min(max(0, charIndex), ns.length - 1)
+            let para = ns.paragraphRange(for: NSRange(location: safe, length: 0))
+            let glyphRange = lm.glyphRange(forCharacterRange: para, actualCharacterRange: nil)
+            var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+            rect.origin.x += textView.textContainerOrigin.x
+            rect.origin.y += textView.textContainerOrigin.y
+            return (para, rect)
+        }
+
+        func distanceFromTop(targetRect: NSRect, visibleRect: NSRect) -> CGFloat {
+            if textView.isFlipped {
+                return targetRect.minY - visibleRect.minY
+            }
+            return visibleRect.maxY - targetRect.maxY
+        }
+
+        var shouldRejump = containsLinkIndex
+
+        // Handle a "scroll-only" snap-back where the viewport returns to the TOC, but the selection
+        // remains at the destination heading. We only fight this during a short stability window and
+        // only when the clicked link paragraph is actually visible again.
+        if let targetLoc = guardState.targetParagraphLocation {
+            let stabilityWindow: TimeInterval = 3.0
+            let withinStabilityWindow = now.timeIntervalSince(guardState.lastJumpedAt) <= stabilityWindow
+            if withinStabilityWindow {
+                let safeSel = min(max(0, sel.location), max(0, ns.length - 1))
+                let selPara = ns.paragraphRange(for: NSRange(location: safeSel, length: 0))
+                if selPara.location == targetLoc, let target = paragraphRect(forCharIndex: targetLoc) {
+                    let targetVisible = visible.intersects(target.rect)
+                    let targetDistanceFromTop = distanceFromTop(targetRect: target.rect, visibleRect: visible)
+                    let targetTooLow = targetVisible && targetDistanceFromTop > (visible.height * 0.35)
+
+                    // Even if the target is technically visible, enforce "land near top" behavior.
+                    // NSTextView can apply deferred minimal-scroll adjustments that leave the heading
+                    // mid-viewport; this re-jump restores deterministic TOC navigation.
+                    if !shouldRejump, targetTooLow {
+                        shouldRejump = true
+                    }
+
+                    if !shouldRejump, let link = paragraphRect(forCharIndex: guardState.linkCharIndex) {
+                        let linkVisible = visible.intersects(link.rect)
+                        if !targetVisible, linkVisible {
+                            shouldRejump = true
+                        }
+                    }
+                }
+            }
+        }
+
+        guard shouldRejump else { return }
+
+        guardState.remainingRejumps -= 1
+        anchorJumpGuard = guardState
+
+        pendingAnchorJumpWorkItem?.cancel()
+        let anchor = guardState.anchor
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            _ = self.jumpToAnchor(anchor)
+        }
+        pendingAnchorJumpWorkItem = work
+        DispatchQueue.main.async(execute: work)
     }
 
     private func jumpToAnchor(_ slug: String) -> Bool {
@@ -350,15 +721,76 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let ns = storage.string as NSString
         let paraRange = ns.paragraphRange(for: NSRange(location: loc, length: 0))
 
-        // Move the caret so the jump is visible (and testable), and scroll the destination into view.
+        if var guardState = anchorJumpGuard, guardState.anchor == slug {
+            guardState.targetParagraphLocation = paraRange.location
+            guardState.lastJumpedAt = Date()
+            anchorJumpGuard = guardState
+        }
+
+        // Move the caret so the jump is visible (and testable).
         textView.setSelectedRange(NSRange(location: paraRange.location, length: 0))
-        textView.scrollRangeToVisible(paraRange)
+
+        scrollParagraphNearTop(paraRange)
+
+        // Re-apply once on the next runloop. NSTextView can perform deferred, minimal visibility
+        // adjustments after link clicks and leave the target in mid-viewport.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.textView.selectedRange().location == paraRange.location else { return }
+            self.scrollParagraphNearTop(paraRange)
+        }
         return true
+    }
+
+    private func scrollParagraphNearTop(_ paraRange: NSRange) {
+        // Scroll so the destination heading lands near the top of the viewport (web/GitHub-style).
+        // `scrollRangeToVisible` is "minimal scroll" and can result in no scroll when the target is already
+        // visible, which feels unintuitive for table-of-contents navigation.
+        if let lm = textView.layoutManager, let tc = textView.textContainer {
+            // TextKit can be lazy about layout for far-down content. Ensure the document view has
+            // correct height + layout before we compute a rect to scroll to.
+            adjustDocumentViewHeightToContent()
+
+            let glyphRange = lm.glyphRange(forCharacterRange: paraRange, actualCharacterRange: nil)
+            lm.ensureLayout(forGlyphRange: glyphRange)
+            var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+            rect.origin.x += textView.textContainerOrigin.x
+            rect.origin.y += textView.textContainerOrigin.y
+
+            let clip = scrollView.contentView
+            let viewportH = clip.bounds.height
+            let topOffset: CGFloat = 24
+
+            var origin = clip.bounds.origin
+            origin.x = 0
+            if textView.isFlipped {
+                origin.y = rect.minY - topOffset
+            } else {
+                origin.y = rect.maxY + topOffset - viewportH
+            }
+
+            // Clamp only the minimum; NSClipView will clamp the maximum based on the document view size.
+            // This avoids subtle mismatches between text-layout height and view bounds that can prevent
+            // anchor jumps from reaching the desired position.
+            origin.y = max(0, origin.y)
+
+            // Use the clip view for deterministic, non-minimal scrolling. `NSView.scroll(_:)` is
+            // "make point visible" and may result in no movement when the target is already visible,
+            // which is unintuitive for table-of-contents navigation.
+            clip.scroll(to: origin)
+            scrollView.reflectScrolledClipView(clip)
+        } else {
+            textView.scrollRangeToVisible(paraRange)
+        }
     }
 
     // MARK: - Export
 
     private func scheduleExport() {
+        if disablesDebouncedExportsForTesting {
+            return
+        }
+
         exportWorkItem?.cancel()
 
         let workItem = DispatchWorkItem { [weak self] in
@@ -416,6 +848,78 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if kind == .codeBlock || kind == .tableCell { return }
 
         let line = storage.attributedSubstring(from: contentRange).string
+        let options = NativeMarkdownCodec.Options.fromUserDefaults()
+
+        // If the user already triggered bullet conversion ("- " -> "• "), allow typing a task marker
+        // at the start of the bullet body to convert it into a task list item ("task bullet").
+        // Example: type "- " -> bullet, then type "[ ] item" -> task.
+        if kind == .bullet {
+            var markerLen = 0
+            while markerLen < contentRange.length {
+                let idx = contentRange.location + markerLen
+                let isMarker = (storage.attribute(.kernMarker, at: idx, effectiveRange: nil) as? Bool) ?? false
+                if !isMarker { break }
+                markerLen += 1
+            }
+            let bodyRange = NSRange(location: contentRange.location + markerLen, length: max(0, contentRange.length - markerLen))
+            let body = bodyRange.length > 0 ? storage.attributedSubstring(from: bodyRange).string : ""
+
+            if let shortcut = parseTaskShortcutPrefix(body) {
+                isApplyingInputRules = true
+                defer { isApplyingInputRules = false }
+
+                let indent = (storage.attribute(.kernListIndent, at: contentRange.location, effectiveRange: nil) as? Int) ?? 0
+                let box = shortcut.checked ? "x" : " "
+                let mdLine = String(repeating: " ", count: max(0, indent)) + "- [\(box)] " + shortcut.text
+
+                let imported = NativeMarkdownCodec.importMarkdown(mdLine, options: options)
+                let delta = imported.length - contentRange.length
+                storage.replaceCharacters(in: contentRange, with: imported)
+
+                let newCaret = min(max(0, caret + delta), storage.length)
+                textView.setSelectedRange(NSRange(location: newCaret, length: 0))
+                return
+            }
+        }
+
+        // Ordered list: after `1. ` is converted, typing `[ ] text` / `[x] text` at the start of
+        // the body should convert this row into an ordered task item.
+        if kind == .ordered, options.orderedTasksEnabled {
+            var markerLen = 0
+            while markerLen < contentRange.length {
+                let idx = contentRange.location + markerLen
+                let isMarker = (storage.attribute(.kernMarker, at: idx, effectiveRange: nil) as? Bool) ?? false
+                if !isMarker { break }
+                markerLen += 1
+            }
+            let bodyRange = NSRange(location: contentRange.location + markerLen, length: max(0, contentRange.length - markerLen))
+            let body = bodyRange.length > 0 ? storage.attributedSubstring(from: bodyRange).string : ""
+
+            if let shortcut = parseTaskShortcutPrefix(body) {
+                isApplyingInputRules = true
+                defer { isApplyingInputRules = false }
+
+                let indent = (storage.attribute(.kernListIndent, at: contentRange.location, effectiveRange: nil) as? Int) ?? 0
+                let rawIndex = (storage.attribute(.kernOrderedIndex, at: contentRange.location, effectiveRange: nil) as? Int) ?? 1
+                let index = max(1, rawIndex)
+                let box = shortcut.checked ? "x" : " "
+                let mdLine = String(repeating: " ", count: max(0, indent)) + "\(index). [\(box)] " + shortcut.text
+
+                let imported = NativeMarkdownCodec.importMarkdown(mdLine, options: options)
+                let delta = imported.length - contentRange.length
+                storage.replaceCharacters(in: contentRange, with: imported)
+
+                let newCaret = min(max(0, caret + delta), storage.length)
+                textView.setSelectedRange(NSRange(location: newCaret, length: 0))
+                return
+            }
+        }
+
+        // For already-semantic list/heading/code paragraphs, avoid re-importing the whole line on
+        // every keystroke. Re-import here should only run for plain paragraph text that still
+        // contains literal markdown syntax.
+        guard kind == .paragraph else { return }
+
         guard shouldConvertTypedMarkdown(line) else { return }
 
         isApplyingInputRules = true
@@ -426,8 +930,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let headingLevel = typedHeadingLevel(line)
 
         // Reuse our importer to hide typed syntax and apply attributes deterministically.
-        let opt = NativeMarkdownCodec.Options.fromUserDefaults()
-        let imported = NativeMarkdownCodec.importMarkdown(line, options: opt)
+        let imported = NativeMarkdownCodec.importMarkdown(line, options: options)
         let delta = imported.length - contentRange.length
         storage.replaceCharacters(in: contentRange, with: imported)
 
@@ -438,6 +941,84 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if let headingLevel {
             setHeadingTypingAttributes(level: headingLevel)
         }
+    }
+
+    private func handleBackspaceAtListStartIfNeeded() -> Bool {
+        guard let storage = textView.textStorage else { return false }
+        let selection = textView.selectedRange()
+        guard selection.length == 0 else { return false }
+
+        let ns = storage.string as NSString
+        guard ns.length > 0 else { return false }
+        let caret = min(max(0, selection.location), ns.length)
+        let probe = min(max(0, caret), max(0, ns.length - 1))
+        let paraRange = ns.paragraphRange(for: NSRange(location: probe, length: 0))
+        guard paraRange.location < storage.length else { return false }
+
+        let kindRaw = storage.attribute(.kernBlockKind, at: paraRange.location, effectiveRange: nil) as? Int
+        let kind = KernBlockKind(rawValue: kindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+        guard kind == .bullet || kind == .task || kind == .ordered else { return false }
+
+        let contentRange = paragraphContentRange(ns: ns, paraRange: paraRange)
+        guard contentRange.length >= 0 else { return false }
+
+        let markerLen = markerPrefixLength(in: storage, contentRange: contentRange)
+        guard markerLen > 0 else { return false }
+
+        let contentStart = contentRange.location + markerLen
+        guard caret == contentStart else { return false }
+
+        let bodyRange = NSRange(
+            location: contentStart,
+            length: max(0, (contentRange.location + contentRange.length) - contentStart)
+        )
+
+        let opt = NativeMarkdownCodec.Options.fromUserDefaults()
+        let replacement: NSAttributedString
+        if bodyRange.length > 0 {
+            let body = NSMutableAttributedString(attributedString: storage.attributedSubstring(from: bodyRange))
+            clearBlockSemanticsKeepingInline(in: body)
+            let bodyMarkdown = NativeMarkdownCodec.exportMarkdown(body, options: opt)
+            replacement = NativeMarkdownCodec.importMarkdown(bodyMarkdown, options: opt)
+        } else {
+            replacement = NSAttributedString()
+        }
+
+        storage.replaceCharacters(in: contentRange, with: replacement)
+        textView.setSelectedRange(NSRange(location: min(contentRange.location, storage.length), length: 0))
+        textView.didChangeText()
+        return true
+    }
+
+    private func parseTaskShortcutPrefix(_ body: String) -> (checked: Bool, text: String)? {
+        if body.hasPrefix("[] ") {
+            return (false, String(body.dropFirst(3)))
+        }
+        if body.hasPrefix("[ ] ") {
+            return (false, String(body.dropFirst(4)))
+        }
+        if body.hasPrefix("[x] ") || body.hasPrefix("[X] ") {
+            return (true, String(body.dropFirst(4)))
+        }
+        return nil
+    }
+
+    private func isConvertibleBlockquoteLine(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix(">") else { return false }
+
+        var idx = trimmed.startIndex
+        while idx < trimmed.endIndex {
+            guard trimmed[idx] == ">" else { break }
+            idx = trimmed.index(after: idx)
+            while idx < trimmed.endIndex, trimmed[idx] == " " {
+                idx = trimmed.index(after: idx)
+            }
+        }
+
+        guard idx <= trimmed.endIndex else { return false }
+        let rest = String(trimmed[idx...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return !rest.isEmpty
     }
 
     private func shouldConvertTypedMarkdown(_ line: String) -> Bool {
@@ -467,6 +1048,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if line.hasPrefix("[] ") { return true }
         if line.hasPrefix("[ ] ") { return true }
         if line.hasPrefix("[x] ") || line.hasPrefix("[X] ") { return true }
+
+        // Blockquote
+        if isConvertibleBlockquoteLine(line) { return true }
 
         // Ordered list: "1. "
         if isOrderedListPrefix(line) { return true }
@@ -521,6 +1105,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let prevPara = ns.paragraphRange(for: NSRange(location: caret - 1, length: 0))
         let prevKindRaw = storage.attribute(.kernBlockKind, at: max(0, prevPara.location), effectiveRange: nil) as? Int
         let prevKind = KernBlockKind(rawValue: prevKindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+        let prevAttrLocation = max(0, min(prevPara.location, max(0, storage.length - 1)))
+        let prevQuoteDepth = (storage.attribute(.kernQuoteDepth, at: prevAttrLocation, effectiveRange: nil) as? Int) ?? 0
 
         let currPara = ns.paragraphRange(for: NSRange(location: caret, length: 0))
         let currContentRange = paragraphContentRange(ns: ns, paraRange: currPara)
@@ -533,6 +1119,24 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if prevKind == .heading {
             setBaseTypingAttributes()
             return
+        }
+
+        // Blockquotes: continue quote depth on Enter, exit on second Enter from an empty quoted line.
+        if prevQuoteDepth > 0, prevKind == .paragraph {
+            if prevContentIsEmpty {
+                isApplyingAutoNewline = true
+                defer { isApplyingAutoNewline = false }
+                clearQuoteAttributes(in: prevPara, storage: storage)
+                setBaseTypingAttributes()
+                return
+            }
+
+            if currContentRange.length == 0 {
+                isApplyingAutoNewline = true
+                defer { isApplyingAutoNewline = false }
+                setQuoteTypingAttributes(depth: prevQuoteDepth)
+                return
+            }
         }
 
         // Lists: continue on Enter; exit on empty item (i.e. second Enter).
@@ -556,18 +1160,23 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                 isApplyingAutoNewline = true
                 defer { isApplyingAutoNewline = false }
 
+                let indent = max(
+                    0,
+                    (storage.attribute(.kernListIndent, at: prevPara.location, effectiveRange: nil) as? Int) ?? 0
+                )
+                let indentPrefix = String(repeating: " ", count: indent)
                 let markerLine: String
                 switch prevKind {
                 case .bullet:
-                    markerLine = "- "
+                    markerLine = indentPrefix + "- "
                 case .task:
                     let styleRaw = storage.attribute(.kernTaskStyle, at: prevPara.location, effectiveRange: nil) as? Int
                     let style = KernTaskStyle(rawValue: styleRaw ?? KernTaskStyle.bulleted.rawValue) ?? .bulleted
-                    markerLine = style == .standalone ? "[] " : "- [ ] "
+                    markerLine = indentPrefix + (style == .standalone ? "[] " : "- [ ] ")
                 case .ordered:
                     let prevN = (storage.attribute(.kernOrderedIndex, at: prevPara.location, effectiveRange: nil) as? Int) ?? 1
                     let orderedIsTask = (storage.attribute(.kernOrderedIsTask, at: prevPara.location, effectiveRange: nil) as? Bool) ?? false
-                    markerLine = orderedIsTask ? "\(max(1, prevN + 1)). [ ] " : "\(max(1, prevN + 1)). "
+                    markerLine = indentPrefix + (orderedIsTask ? "\(max(1, prevN + 1)). [ ] " : "\(max(1, prevN + 1)). ")
                 default:
                     markerLine = ""
                 }
@@ -770,12 +1379,87 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         return len
     }
 
+    private func markerPrefixLength(in storage: NSTextStorage, contentRange: NSRange) -> Int {
+        guard contentRange.length > 0 else { return 0 }
+        var len = 0
+        while len < contentRange.length {
+            let idx = contentRange.location + len
+            let isMarker = (storage.attribute(.kernMarker, at: idx, effectiveRange: nil) as? Bool) ?? false
+            if !isMarker { break }
+            len += 1
+        }
+        return len
+    }
+
+    private func clearBlockSemanticsKeepingInline(in attributed: NSMutableAttributedString) {
+        guard attributed.length > 0 else { return }
+        let full = NSRange(location: 0, length: attributed.length)
+
+        let blockKeys: [NSAttributedString.Key] = [
+            .kernBlockKind,
+            .kernHeadingLevel,
+            .kernListIndent,
+            .kernListDepth,
+            .kernTaskStyle,
+            .kernOrderedIndex,
+            .kernOrderedIsTask,
+            .kernMarker,
+            .kernCheckbox,
+            .kernCheckboxChecked,
+            .kernCodeLanguage,
+            .kernCodeBlockID,
+            .kernQuoteDepth,
+        ]
+        for key in blockKeys {
+            attributed.removeAttribute(key, range: full)
+        }
+
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = 0
+        style.paragraphSpacing = 0
+        attributed.addAttribute(.paragraphStyle, value: style, range: full)
+    }
+
     private func setBaseTypingAttributes() {
         let baseFont = NSFont.systemFont(ofSize: 16)
         textView.typingAttributes = [
             .font: baseFont,
             .foregroundColor: NSColor.labelColor,
         ]
+    }
+
+    private func setQuoteTypingAttributes(depth: Int) {
+        let baseFont = NSFont.systemFont(ofSize: 16)
+        let safeDepth = max(1, depth)
+        let style = NSMutableParagraphStyle()
+        let quoteIndent: CGFloat = CGFloat(safeDepth) * 16
+        style.firstLineHeadIndent = quoteIndent
+        style.headIndent = quoteIndent
+        style.paragraphSpacingBefore = 0
+        style.paragraphSpacing = 0
+
+        textView.typingAttributes = [
+            .font: baseFont,
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: style,
+            .kernBlockKind: KernBlockKind.paragraph.rawValue,
+            .kernQuoteDepth: safeDepth,
+        ]
+    }
+
+    private func clearQuoteAttributes(in paraRange: NSRange, storage: NSTextStorage) {
+        guard storage.length > 0 else { return }
+        guard paraRange.location < storage.length else { return }
+        let safeLen = min(paraRange.length, storage.length - paraRange.location)
+        guard safeLen > 0 else { return }
+        let safeRange = NSRange(location: paraRange.location, length: safeLen)
+
+        storage.removeAttribute(.kernQuoteDepth, range: safeRange)
+        let style = NSMutableParagraphStyle()
+        style.paragraphSpacingBefore = 0
+        style.paragraphSpacing = 0
+        storage.addAttribute(.paragraphStyle, value: style, range: safeRange)
+        storage.addAttribute(.kernBlockKind, value: KernBlockKind.paragraph.rawValue, range: safeRange)
     }
 
     private func setHeadingTypingAttributes(level: Int) {
@@ -940,15 +1624,16 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         let barHeight: CGFloat = isFindReplaceMode ? 44 : 38
         let margin: CGFloat = 12
-        let maxWidth: CGFloat = 760
-
-        let availableWidth = max(320, view.bounds.width - margin * 2)
+        // Keep the bar compact and anchored to the top-right so it doesn't blanket top-of-document content.
+        let minWidth: CGFloat = isFindReplaceMode ? 380 : 320
+        let maxWidth: CGFloat = isFindReplaceMode ? 560 : 420
+        let availableWidth = max(minWidth, view.bounds.width - margin * 2)
         let width = min(maxWidth, availableWidth)
-        let x = (view.bounds.width - width) / 2
+        let x = max(margin, view.bounds.width - width - margin)
         let y = view.bounds.height - barHeight - margin
 
         findBarView.frame = NSRect(x: x, y: y, width: width, height: barHeight)
-        findBarView.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
+        findBarView.autoresizingMask = [.minXMargin, .minYMargin]
 
         let pad: CGFloat = 10
         let spacing: CGFloat = 6
@@ -1118,6 +1803,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             self.updateFindMatches(resetIndex: resetIndex, anchorLocation: anchorLocation)
         }
         findUpdateWorkItem = workItem
+
+        // Keep typing responsive in-app while making unit/snapshot runs deterministic and fast.
+        if isRunningUnderXCTest {
+            workItem.perform()
+            return
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
     }
 
@@ -1206,89 +1897,289 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         findField.stringValue = ns.substring(with: range)
     }
 
-    // MARK: - Code Block Copy
+    // MARK: - Code Block Chrome / Copy
 
-    @objc private func copyActiveCodeBlock(_ sender: Any?) {
-        guard let range = codeCopyCharacterRange else { return }
+    @objc private func copyCaretCodeBlock(_ sender: Any?) {
+        copyCodeBlock(range: caretCodeCopyCharacterRange, chrome: caretCodeBlockChrome, feedbackWorkItem: &caretCodeCopyFeedbackWorkItem)
+    }
+
+    @objc private func copyHoveredCodeBlock(_ sender: Any?) {
+        copyCodeBlock(range: hoverCodeCopyCharacterRange, chrome: hoverCodeBlockChrome, feedbackWorkItem: &hoverCodeCopyFeedbackWorkItem)
+    }
+
+    private func copyCodeBlock(range: NSRange?, chrome: CodeBlockChromeView, feedbackWorkItem: inout DispatchWorkItem?) {
+        let resolvedRange: NSRange? = {
+            if let range { return range }
+            guard let storage = textView.textStorage else { return nil }
+            if let caret = caretCodeBlockRange(in: storage, selection: textView.selectedRange()) {
+                return caret
+            }
+            return validatedHoverCodeBlockRange(in: storage)
+        }()
+        guard let range = resolvedRange else { return }
         let ns = textView.string as NSString
         guard range.location + range.length <= ns.length else { return }
         let code = ns.substring(with: range)
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
+
+        chrome.copyButton.title = "Copied"
+        updateCodeBlockChrome()
+
+        feedbackWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            chrome.copyButton.title = "Copy"
+            self.updateCodeBlockChrome()
+        }
+        feedbackWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
     @objc private func scrollViewDidScroll(_ notification: Notification) {
-        updateCodeCopyButtonVisibilityAndPosition()
+        updateCodeBlockChrome()
+        maybeReapplyAnchorJumpIfNeeded()
     }
 
-    private func updateCodeCopyButtonVisibilityAndPosition() {
+    private func updateCodeBlockChrome() {
         guard isViewLoaded else { return }
+        if isUpdatingCodeBlockChrome {
+            codeBlockChromeNeedsRefresh = true
+            return
+        }
+        isUpdatingCodeBlockChrome = true
+        defer {
+            isUpdatingCodeBlockChrome = false
+            if codeBlockChromeNeedsRefresh {
+                codeBlockChromeNeedsRefresh = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateCodeBlockChrome()
+                }
+            }
+        }
+
         guard let storage = textView.textStorage else {
-            codeCopyButton.isHidden = true
-            codeCopyCharacterRange = nil
+            caretCodeBlockChrome.isHidden = true
+            hoverCodeBlockChrome.isHidden = true
+            caretCodeCopyCharacterRange = nil
+            hoverCodeCopyCharacterRange = nil
             return
         }
 
         let selection = textView.selectedRange()
+        let hoverRange = validatedHoverCodeBlockRange(in: storage)
+        let caretRange = caretCodeBlockRange(in: storage, selection: selection)
+
+        // If hover and caret are the same code block, show only the caret chrome.
+        let effectiveHoverRange: NSRange? = rangesEqual(hoverRange, caretRange) ? nil : hoverRange
+
+        updateCodeBlockChromeOverlay(
+            chrome: caretCodeBlockChrome,
+            for: caretRange,
+            storage: storage,
+            copyRange: &caretCodeCopyCharacterRange,
+            lastBackgroundRect: &caretLastCodeBlockBackgroundRect
+        )
+
+        updateCodeBlockChromeOverlay(
+            chrome: hoverCodeBlockChrome,
+            for: effectiveHoverRange,
+            storage: storage,
+            copyRange: &hoverCodeCopyCharacterRange,
+            lastBackgroundRect: &hoverLastCodeBlockBackgroundRect
+        )
+    }
+
+    private func validatedHoverCodeBlockRange(in storage: NSTextStorage) -> NSRange? {
+        guard let hover = hoveredCodeBlockRange else { return nil }
+
+        // Validate stale hover range after edits.
+        if hover.location < storage.length, hover.length > 0, hover.location + hover.length <= storage.length {
+            let kindRaw = storage.attribute(.kernBlockKind, at: hover.location, effectiveRange: nil) as? Int
+            let kind = KernBlockKind(rawValue: kindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+            if kind == .codeBlock {
+                return hover
+            }
+        } else {
+            hoveredCodeBlockRange = nil
+        }
+        return nil
+    }
+
+    private func caretCodeBlockRange(in storage: NSTextStorage, selection: NSRange) -> NSRange? {
+        guard selection.length == 0 else { return nil }
         let caret = selection.location
-        guard selection.length == 0, caret <= storage.length, storage.length > 0 else {
-            codeCopyButton.isHidden = true
-            codeCopyCharacterRange = nil
-            return
-        }
+        guard caret <= storage.length, storage.length > 0 else { return nil }
 
-        let idx = min(max(0, caret), max(0, storage.length - 1))
-        let kindRaw = storage.attribute(.kernBlockKind, at: idx, effectiveRange: nil) as? Int
+        let ns = storage.string as NSString
+
+        // Use a probe location that's always within bounds. When the caret is at EOF, treat it as
+        // pointing at the last character so we can still resolve paragraph/block semantics.
+        let probe = min(max(0, caret), max(0, storage.length - 1))
+        let caretPara = ns.paragraphRange(for: NSRange(location: probe, length: 0))
+        guard caretPara.location < storage.length else { return nil }
+
+        let kindRaw = storage.attribute(.kernBlockKind, at: caretPara.location, effectiveRange: nil) as? Int
         let kind = KernBlockKind(rawValue: kindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
-        guard kind == .codeBlock else {
-            codeCopyButton.isHidden = true
-            codeCopyCharacterRange = nil
+        guard kind == .codeBlock else { return nil }
+        let caretQuoteDepth = (storage.attribute(.kernQuoteDepth, at: caretPara.location, effectiveRange: nil) as? Int) ?? 0
+        let caretCodeBlockID = storage.attribute(.kernCodeBlockID, at: caretPara.location, effectiveRange: nil) as? Int
+
+        // Expand to the contiguous code block range around the caret (paragraph-based so it survives
+        // partial attribute loss on newline insertion).
+        var startLoc = caretPara.location
+        while startLoc > 0 {
+            let prevProbe = max(0, startLoc - 1)
+            let prevPara = ns.paragraphRange(for: NSRange(location: prevProbe, length: 0))
+            guard prevPara.length > 0 else { break }
+            let prevKindRaw = storage.attribute(.kernBlockKind, at: prevPara.location, effectiveRange: nil) as? Int
+            let prevKind = KernBlockKind(rawValue: prevKindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+            if prevKind != .codeBlock { break }
+
+            let prevQuoteDepth = (storage.attribute(.kernQuoteDepth, at: prevPara.location, effectiveRange: nil) as? Int) ?? 0
+            if prevQuoteDepth != caretQuoteDepth { break }
+
+            if let caretCodeBlockID {
+                let prevID = storage.attribute(.kernCodeBlockID, at: prevPara.location, effectiveRange: nil) as? Int
+                if prevID != caretCodeBlockID { break }
+            } else if (storage.attribute(.kernCodeBlockID, at: prevPara.location, effectiveRange: nil) as? Int) != nil {
+                break
+            }
+            startLoc = prevPara.location
+        }
+
+        var endLoc = caretPara.location + caretPara.length
+        while endLoc < ns.length {
+            let nextPara = ns.paragraphRange(for: NSRange(location: endLoc, length: 0))
+            guard nextPara.length > 0 else { break }
+            guard nextPara.location < storage.length else { break }
+            let nextKindRaw = storage.attribute(.kernBlockKind, at: nextPara.location, effectiveRange: nil) as? Int
+            let nextKind = KernBlockKind(rawValue: nextKindRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
+            if nextKind != .codeBlock { break }
+
+            let nextQuoteDepth = (storage.attribute(.kernQuoteDepth, at: nextPara.location, effectiveRange: nil) as? Int) ?? 0
+            if nextQuoteDepth != caretQuoteDepth { break }
+
+            if let caretCodeBlockID {
+                let nextID = storage.attribute(.kernCodeBlockID, at: nextPara.location, effectiveRange: nil) as? Int
+                if nextID != caretCodeBlockID { break }
+            } else if (storage.attribute(.kernCodeBlockID, at: nextPara.location, effectiveRange: nil) as? Int) != nil {
+                break
+            }
+            endLoc = nextPara.location + nextPara.length
+        }
+
+        return NSRange(location: startLoc, length: max(0, endLoc - startLoc))
+    }
+
+    private func updateCodeBlockChromeOverlay(
+        chrome: CodeBlockChromeView,
+        for range: NSRange?,
+        storage: NSTextStorage,
+        copyRange: inout NSRange?,
+        lastBackgroundRect: inout NSRect?
+    ) {
+        guard let range, range.length > 0 else {
+            chrome.isHidden = true
+            copyRange = nil
             return
         }
 
-        // Expand to the contiguous code block range around the caret.
-        var start = idx
-        while start > 0 {
-            let prev = start - 1
-            let kRaw = storage.attribute(.kernBlockKind, at: prev, effectiveRange: nil) as? Int
-            let k = KernBlockKind(rawValue: kRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
-            if k != .codeBlock { break }
-            start = prev
-        }
-        var end = idx
-        while end < storage.length - 1 {
-            let next = end + 1
-            let kRaw = storage.attribute(.kernBlockKind, at: next, effectiveRange: nil) as? Int
-            let k = KernBlockKind(rawValue: kRaw ?? KernBlockKind.paragraph.rawValue) ?? .paragraph
-            if k != .codeBlock { break }
-            end = next
-        }
-        let range = NSRange(location: start, length: max(0, end - start + 1))
-        codeCopyCharacterRange = range
-
-        // Position the button near the top-right of the visible portion of the code block.
         guard let lm = textView.layoutManager, let tc = textView.textContainer else {
-            codeCopyButton.isHidden = true
+            chrome.isHidden = true
+            copyRange = nil
             return
         }
+
         let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
-        rect.origin.x += textView.textContainerOrigin.x
-        rect.origin.y += textView.textContainerOrigin.y
+        var glyphRect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+        glyphRect.origin.x += textView.textContainerOrigin.x
+        glyphRect.origin.y += textView.textContainerOrigin.y
 
+        var lineSpanRect: NSRect?
+        if glyphRange.length > 0 {
+            var effective = NSRange(location: 0, length: 0)
+            var lf = lm.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: &effective)
+            lf.origin.x += textView.textContainerOrigin.x
+            lf.origin.y += textView.textContainerOrigin.y
+
+            // Stretch the background to the full available line width, but preserve the code block's
+            // left indent (quotes/lists) by starting at the glyph bounding rect's minX.
+            let left = glyphRect.minX
+            let right = lf.maxX
+            lineSpanRect = NSRect(x: left, y: lf.minY, width: max(0, right - left), height: lf.height)
+        }
+
+        let bgRect = CodeBlockChromeGeometry.backgroundRect(
+            forGlyphBoundingRect: glyphRect,
+            lineFragmentRect: lineSpanRect,
+            isFlipped: textView.isFlipped
+        )
         let visible = textView.visibleRect
-        let size = codeCopyButton.intrinsicContentSize
 
-        var x = min(rect.maxX, visible.maxX) - size.width - 12
-        var y = min(rect.maxY, visible.maxY) - size.height - 8
-        x = max(x, visible.minX + 12)
-        y = max(y, visible.minY + 12)
+        // Avoid floating chrome when the code block is off-screen.
+        guard bgRect.intersects(visible) else {
+            chrome.isHidden = true
+            copyRange = nil
+            return
+        }
 
-        // Convert from textView coords to the container view coords.
-        let originInContainer = view.convert(NSPoint(x: x, y: y), from: textView)
-        codeCopyButton.frame = NSRect(origin: originInContainer, size: size)
-        codeCopyButton.isHidden = false
+        // Ensure the rounded background is actually painted where the chrome sits (TextKit can invalidate
+        // only glyph regions; our background extends above them).
+        if let lastBackgroundRect {
+            textView.setNeedsDisplay(lastBackgroundRect.union(bgRect))
+        } else {
+            textView.setNeedsDisplay(bgRect)
+        }
+        lastBackgroundRect = bgRect
+
+        // Extract language (first non-empty in range).
+        var lang: String?
+        storage.enumerateAttribute(.kernCodeLanguage, in: range, options: []) { value, _, stop in
+            guard let s = value as? String else { return }
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            lang = trimmed
+            stop.pointee = true
+        }
+        // Preserve the authored token text to keep language labels compact and avoid unnecessary truncation.
+        chrome.setLanguage(lang)
+
+        // Position the chrome in the top-right of the code-block background.
+        let paddingX: CGFloat = 10
+        let paddingY: CGFloat = 4
+
+        // Never truncate language names in the pill. If space is tight, the chrome can overflow the
+        // code block's visual bounds, but the token should remain fully readable.
+        chrome.maxLanguageWidth = nil
+
+        let chromeSize = chrome.preferredSize()
+        // Compute in the container coordinate space to avoid flipped-origin confusion.
+        let bgRectInContainer = view.convert(bgRect, from: textView)
+        let x = bgRectInContainer.maxX - paddingX - chromeSize.width
+        let y = bgRectInContainer.maxY - paddingY - chromeSize.height
+
+        // Clamp to keep chrome visible even if the code block background is unusually narrow.
+        let clampedX = max(0, min(x, view.bounds.width - chromeSize.width))
+        let clampedY = max(0, min(y, view.bounds.height - chromeSize.height))
+        chrome.frame = NSRect(x: clampedX, y: clampedY, width: chromeSize.width, height: chromeSize.height)
+        chrome.needsLayout = true
+        chrome.layoutSubtreeIfNeeded()
+        chrome.isHidden = false
+
+        copyRange = range
+    }
+
+    private func rangesEqual(_ lhs: NSRange?, _ rhs: NSRange?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+        case let (l?, r?):
+            return l.location == r.location && l.length == r.length
+        default:
+            return false
+        }
     }
 
     // MARK: - Toast
@@ -1375,6 +2266,10 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             }
         })
     }
+}
+
+private var isRunningUnderXCTest: Bool {
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }
 
 // MARK: - NSMenuItemValidation

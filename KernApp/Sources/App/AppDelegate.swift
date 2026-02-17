@@ -5,9 +5,17 @@ import ServiceManagement
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
+    private var preferencesWindowController: NativeEditorPreferencesWindowController?
+
     private var keepRunning: Bool {
         get { UserDefaults.standard.bool(forKey: "keepRunningInBackground") }
         set { UserDefaults.standard.set(newValue, forKey: "keepRunningInBackground") }
+    }
+
+    /// The app is launched as a host process when running unit tests (including snapshot tests).
+    /// Creating an untitled document window in that scenario is noisy (window flashes) and slows tests.
+    private var isRunningUnitTests: Bool {
+        NSClassFromString("XCTestCase") != nil
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -25,6 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openCommandLineDocumentsIfNeeded()
 
         NSLog("[Perf] applicationDidFinishLaunching end at %@ms", msSinceStart())
+
+        if isRunningUnitTests {
+            NSLog("[AppDelegate] XCTest detected; skipping untitled document creation for unit tests.")
+            return
+        }
 
         // Defer untitled document creation to the next run loop iteration.
         // By then, any Apple Event from `open -a KernTextKit file.md` will have triggered
@@ -240,6 +253,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    @objc func showPreferences(_ sender: Any?) {
+        if preferencesWindowController == nil {
+            preferencesWindowController = NativeEditorPreferencesWindowController()
+        }
+
+        preferencesWindowController?.refreshFromDefaults()
+        preferencesWindowController?.showWindow(sender)
+        preferencesWindowController?.window?.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     // MARK: - Menu Bar
 
     private func buildMenuBar() {
@@ -250,6 +274,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(showPreferences(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
         let keepRunningItem = NSMenuItem(
             title: "Keep Running in Background",
@@ -357,6 +385,8 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)):
             // Enable whenever there is an active document window.
             return currentDocument() != nil
+        case #selector(showPreferences(_:)):
+            return true
         case #selector(toggleKeepRunning(_:)):
             menuItem.state = keepRunning ? .on : .off
             return true

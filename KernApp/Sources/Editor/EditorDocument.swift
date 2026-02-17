@@ -88,6 +88,7 @@ final class EditorDocument: NSDocument {
 
         // Connect the editor VC to this document
         if let editorVC = windowController.contentViewController as? NativeEditorViewController {
+            editorVC.documentURL = fileURL
             editorVC.stringValue = stringValue
             editorVC.onContentChanged = { [weak self] markdown in
                 guard let self else { return }

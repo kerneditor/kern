@@ -23,6 +23,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.tabbingMode = .preferred
         window.isReleasedWhenClosed = false
         window.isRestorable = false
+        window.acceptsMouseMovedEvents = true
 
         let editorVC: NSViewController = NativeEditorViewController()
         window.contentViewController = editorVC
