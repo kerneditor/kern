@@ -1,95 +1,56 @@
-# HANDOFF — KernTextKit (Fresh Claude Code Agent)
+# Context Handoff — 2026-02-17
 
-Last updated: 2026-02-17 21:20:23 KST
+## First Steps (Read in Order)
+1. Read CLAUDE.md — project context, conventions, known issues
+2. Read TODO.md — current task list
+3. Read docs/reviews/codebase-review-2026-02-17.md — comprehensive codebase review
 
-## 1) What Just Happened
+## Session Summary
 
-User asked to split the large WIP into scoped commits, drop temp images, then run `$wrap` and regenerate handoff.
+### What Was Done
+- Pushed previous session's 8 scoped commits to origin (through `98eab05`)
+- Ran baseline tests: 165 passed, 0 failures, 50 skipped (behind env-flag gates)
+- Conducted comprehensive 5-agent parallel codebase review covering:
+  - Editor core (NativeEditorViewController, EditorDocument, EditorWindowController)
+  - Markdown codec (NativeMarkdownCodec — 4,626 lines)
+  - Test coverage gaps (44 test files analyzed)
+  - Scripts and tooling (15 shell scripts)
+  - Architecture and design patterns
+- Compiled findings into structured report: `docs/reviews/codebase-review-2026-02-17.md`
+- Updated CLAUDE.md with Known Issues section and Key Environment Flags
+- Updated `.doc-manifest.yaml` with review doc entry
 
-That has been completed.
-
-## 2) Current Repo State
-
-- Repo: `/Users/aaaaa/Projects/Kern-textkit`
+### Current State
 - Branch: `main`
-- HEAD: `9913b27`
-- Previous functional scoped stack tip: `17a45e0`
-- Working tree at this handoff moment: clean
+- Last commit: `d50fb40` — docs: add comprehensive codebase review and sync CLAUDE.md
+- Working tree: clean (after this handoff commit)
+- Remote: `d50fb40` is local-only — push recommended
 
-Quick verify commands:
+### What's Next
+1. **Push `d50fb40` to origin** (review commit is local-only)
+2. **Fix CRITICAL bugs** (6 found — all risk data loss or corruption):
+   - `windowWillClose` doesn't flush export debounce (last 150ms of edits lost)
+   - `applicationShouldTerminate` drops edits in background-mode path
+   - Data race on `lastKnownFileModDate` (concurrent write/read)
+   - Reference definitions inside blockquotes silently missed
+   - Global mutable static state makes `importMarkdown` non-reentrant
+   - Soft line breaks joined with `\n` corrupt export
+3. **Fix HIGH bugs** (10 found — see review doc for details)
+4. Continue TODO.md feature work (numbered lists, task lists, code blocks, tables, preferences)
 
-```bash
-git rev-parse --short HEAD
-git status --short
-```
+### Failed Approaches
+(none this session — review-only work)
 
-## 3) Scoped Commits Landed
+### Key Context
+- Review doc has specific line numbers for every finding
+- Test baseline is 165 pass / 50 skipped — any fix should not regress
+- Critical findings #1 and #2 share a root cause: debounced export not flushed on window/app close
 
-These commits were created in order:
-
-1. `0923f21` editor: expand native TextKit editor shell and window/document behavior
-2. `609ff3a` codec: extend markdown import/export and rich attachment rendering
-3. `fc0904a` tests: add native editor/spec regression coverage matrix
-4. `c13a4db` ui-tests: harden native editor e2e coverage and stability
-5. `b7abee5` tooling: add exhaustive runners, spec tools, and benchmark wiring
-6. `2d6ecea` fixtures: add stress/spec/golden fixtures for exhaustive native tests
-7. `0c1a16c` snapshots: refresh native editor visual baselines
-8. `17a45e0` docs: update native test-suite plans and failure tracker
-
-Temp image files removed:
-- `tmp/basic-dark-crop.png`
-- `tmp/tasks-crop-1600.png`
-- `tmp/tasks-crop.png`
-
-## 4) Important Implementation Notes
-
-### Memory / leak investigation
-
-- `kern://editor` was confirmed as legacy WebKit path, not TextKit.
-- TextKit soak checks showed stabilization (no monotonic leak trend in sampled runs).
-- `leaks <pid>` reported zero leaked bytes in the sampled runs.
-
-### Defensive memory hardening
-
-- Bounded image cache was added in:
-  - `KernApp/Sources/Editor/MarkdownRichAttachments.swift`
-- Uses `NSCache` with:
-  - `totalCostLimit = 128MB`
-  - `countLimit = 256`
-  - cost-based insertion via `estimatedImageCostBytes(_:)`
-
-### Tooling policy adaptation
-
-- `scripts/package-kern-app.sh` was adjusted to avoid broad `rm -rf` patterns that triggered policy checks.
-- It now uses guarded directory deletion helper logic.
-
-## 5) Wrap Workflow Result
-
-Requested wrap chain: `sync-docs -> claude-md-improver -> handoff`
-
-- `syncing-docs`: completed manually (owned docs refreshed)
-- `claude-md-improver`: missing at
-  - `/Users/aaaaa/.claude/skills/claude-md-improver/SKILL.md`
-- `handoff`: completed (this file regenerated)
-
-## 6) First Steps For Next Agent
-
-1. Read in order:
-   - `AGENTS.md`
-   - `HANDOFF.md`
-   - `CLAUDE.md`
-2. Validate status:
-   - `git status --short`
-   - `git log --oneline -n 12`
-3. Confirm canonical plans:
-   - `docs/plans/native-editor-test-suite.md`
-   - `docs/plans/markdown-spec-failure-tracker.md`
-   - `docs/plans/native-editor-missing-features-implementation-plan.md`
-4. Run fast baseline test lane:
-   - `./scripts/test-native-editor.sh --unit-only`
-
-## 7) Recommended Next Actions
-
-1. If baseline is green, push the scoped commit stack.
-2. If baseline fails, fix in a new commit on top; do not amend prior scoped commits.
-3. Re-run `$wrap` before session end if more commits are added.
+## Reference Files
+| File | Purpose |
+|------|---------|
+| docs/reviews/codebase-review-2026-02-17.md | Full review: 33 findings by severity |
+| CLAUDE.md | Updated with Known Issues + env flags |
+| .doc-manifest.yaml | Manifest tracking all docs |
+| TODO.md | Feature backlog |
+| AGENTS.md | Repo context and test commands |
