@@ -122,15 +122,25 @@ final class MarkdownImageAttachment: NSTextAttachment {
         }
 
         if url.isFileURL {
-            if let image = NSImage(contentsOf: url) {
-                let cost = Self.estimatedImageCostBytes(image)
-                Self.cache.setObject(image, forKey: url as NSURL, cost: cost)
-                renderedImage = image
-                loadState = .ready
-            } else {
-                loadState = .failed
+            isLoading = true
+            loadState = .loading
+            let fileURL = url
+            DispatchQueue.global(qos: .userInitiated).async {
+                let image = NSImage(contentsOf: fileURL)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isLoading = false
+                    if let image {
+                        let cost = Self.estimatedImageCostBytes(image)
+                        Self.cache.setObject(image, forKey: fileURL as NSURL, cost: cost)
+                        self.renderedImage = image
+                        self.loadState = .ready
+                    } else {
+                        self.loadState = .failed
+                    }
+                    self.notifyDisplayUpdate()
+                }
             }
-            notifyDisplayUpdate()
             return
         }
 

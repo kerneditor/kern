@@ -21,7 +21,16 @@ final class NativeMarkdownCodecImageRenderingTests: XCTestCase {
 
         XCTAssertNotNil(local.resolvedURL)
         XCTAssertTrue(local.resolvedURL?.isFileURL == true)
-        XCTAssertTrue(local.debugHasRenderedImage, "Local file image should render immediately")
+
+        // Local images load asynchronously off the main thread; spin the run loop
+        // briefly to let the background read + main-queue callback complete.
+        let ready = expectation(description: "Local image loads asynchronously")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            ready.fulfill()
+        }
+        waitForExpectations(timeout: 3.0)
+
+        XCTAssertTrue(local.debugHasRenderedImage, "Local file image should have loaded")
         XCTAssertEqual(local.loadState, .ready)
     }
 
