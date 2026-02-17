@@ -17,6 +17,7 @@ Thumbs.db
 # Xcode
 build/
 DerivedData/
+.derived-data/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 xcuserdata/
@@ -45,6 +46,7 @@ test-screenshots/
 # Local test/bench artifacts
 test-results/
 bench-results/
+dist/
 
 # Profiling data
 *.profraw

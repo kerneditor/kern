@@ -20,7 +20,12 @@ The goal is to make performance comparisons reproducible between:
 Primary benchmark files (committed so results are comparable across machines):
 - `test-fixtures/native-editor-benchmark.md` (large, supported subset)
 - `test-fixtures/stress-test.md` (medium)
-- `test-fixtures/mega-stress-test.md` (very large)
+- `test-fixtures/ultimate-stress-test.md` (permutation-dense canonical source)
+- `test-fixtures/mega-stress-test.md` (very large, includes embedded permutation appendix)
+
+Fixture maintenance:
+- `scripts/gen_ultimate_stress_test.py`
+- `scripts/sync_mega_permutation_appendix.py`
 
 Guideline:
 - Use the same file(s) for all editors.
@@ -42,6 +47,30 @@ These benchmarks run as XCTest performance tests, so they do not require UI auto
   - Import + export `test-fixtures/native-editor-benchmark.md`
 - `KernTests/NativeEditorRenderPerformanceTests.swift`
   - Render `test-fixtures/native-editor-benchmark.md` into a `NativeEditorViewController` and force layout
+- `KernTests/NativeEditorMegaStressPerformanceTests.swift`
+  - Render `stress-test.md`, `ultimate-stress-test.md`, and `mega-stress-test.md`
+  - Scroll jumps on `mega-stress-test.md`
+  - Incremental live typing benchmark
+  - Full char-by-char typing of `ultimate-stress-test.md` and `mega-stress-test.md`
+  - Interleaved action-burst typing + export on `ultimate-stress-test.md` and `mega-stress-test.md`
+
+Fast subset:
+
+```bash
+KERN_PERF_QUICK=1 ./scripts/bench-native-editor.sh
+
+Ultra exhaustive (non-UI, mega all-profile matrix + shardable):
+
+```bash
+./scripts/test-native-editor.sh --unit-only --exhaustive --ultra
+```
+
+Ultra full (all mega profiles/programs, very slow):
+
+```bash
+./scripts/test-native-editor.sh --unit-only --exhaustive --ultra-full
+```
+```
 
 Artifacts are written under `bench-results/native-editor/<timestamp>/` as `.xcresult` bundles plus logs.
 
@@ -74,4 +103,3 @@ Baseline comparisons that are actually measurable without deep instrumentation:
 Notes:
 - Many Electron apps do significant background work; record CPU spikes in Activity Monitor if needed.
 - Some editors lazily render; always wait a fixed “settle time” (ex: 5s) before measuring memory.
-

@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-/tmp/kern-derived-data-native}"
+DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$(pwd)/.derived-data/native}"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 
 ARCH="$(uname -m)"
