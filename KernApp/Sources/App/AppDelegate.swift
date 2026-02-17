@@ -231,6 +231,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Flush all pending exports before closing windows so no edits are lost.
+        for doc in NSDocumentController.shared.documents {
+            if let editorDoc = doc as? EditorDocument,
+               let hostVC = editorDoc.hostNativeViewController {
+                hostVC.flushPendingExport()
+            }
+        }
+
         if keepRunning {
             for window in NSApp.windows where window.isVisible {
                 window.close()

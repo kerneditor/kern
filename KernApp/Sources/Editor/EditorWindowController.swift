@@ -67,7 +67,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // no-op
+        // Flush any pending debounced export so the document's stringValue
+        // reflects the latest edits before the window (and document) close.
+        if let nativeVC = contentViewController as? NativeEditorViewController {
+            nativeVC.flushPendingExport()
+        }
     }
 
     // MARK: - Test Helpers
