@@ -16,6 +16,8 @@ Persistent tracker for the native TextKit rewrite (no WebView).
 - [ ] WYSIWYG: code block visuals (background, padding, font), copy button positioning and selection behavior
 - [ ] WYSIWYG: tables editing UX (caret movement, row/column edits) + export correctness
 - [ ] Preferences UI for native editor options (export dialect, extensions strategy, ordered numbering, checkbox hit target)
+- [ ] CRITICAL: Replace global mutable statics in NativeMarkdownCodec with ImportContext parameter threading (review finding #5 — `activeReferenceDefinitions`, `activeImportBaseURL`, `activeImportOptions`, `activeStrictConformanceRoundTripMode` at lines 17-21 are non-reentrant; 6 methods read them: `parseInline`, `parseImage`, `parseLink`, `makeMarkdownImageAttached`, `stripHardBreakMarker`; model fix on export path which already passes `options` as a parameter)
+- [ ] HIGH: Load local images asynchronously in MarkdownRichAttachments (review finding #10 — `loadImageIfNeeded` at lines 124-134 calls `NSImage(contentsOf:)` synchronously on @MainActor; dispatch to background queue matching the existing async pattern used for remote images at lines 140+)
 
 ## Testing
 
