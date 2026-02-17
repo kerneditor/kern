@@ -21,7 +21,6 @@ Persistent tracker for the native TextKit rewrite (no WebView).
 
 ## Testing
 
-- [ ] Expand `KernUITests/NativeEditorE2ETests.swift` scenario matrix (more permutations + edge cases)
 - [ ] Add always-on screenshot baselines and pixel-level comparison gates for alignment regressions
 - [ ] Add fuzz/property tests for editing operations (import -> edit ops -> export) where feasible
 

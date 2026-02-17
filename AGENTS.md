@@ -29,10 +29,7 @@ Build + run (opens a file):
 Tests:
 
 ```bash
-# Fast (unit only)
-./scripts/test-native-editor.sh --unit-only
-
-# Full (unit + UI; UI requires unlocked screen + Automation permissions)
+# Unit tests (the only test mode — XCUI target was removed)
 ./scripts/test-native-editor.sh
 
 # Exhaustive (expected to fail until full-spec features are implemented)
@@ -42,12 +39,11 @@ Tests:
 ./scripts/test-markdown-spec-conformance.sh
 
 # Pixel-level snapshots
-./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive
+./scripts/test-native-editor.sh --snapshots --exhaustive
 ```
 
 ## Testing Philosophy
 
 - Prefer **unit + snapshot** tests for broad coverage and speed.
-- Use **UI tests** only for interaction behaviors that can’t be validated otherwise.
 - Prefer **generator-backed matrices** (preferences, fixtures, edge cases) over hand-written repetition.
 - Always attach artifacts that an agent can use to self-repair: screenshots, snapshot diffs, markdown outputs, and minimal diffs.

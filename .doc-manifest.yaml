@@ -1,7 +1,7 @@
 # Documentation manifest for KernTextKit
 # Tracks docs, ownership intent, and primary code references
 
-last_synced: "2026-02-17T13:55:00Z"
+last_synced: "2026-02-18T12:00:00Z"
 
 files:
   - path: README.md
@@ -11,7 +11,7 @@ files:
 
   - path: CLAUDE.md
     type: project-instructions
-    last_updated: "2026-02-17T12:20:23Z"
+    last_updated: "2026-02-18T12:00:00Z"
     description: Session instructions and high-signal engineering context
     references:
       - KernApp/Sources/App/main.swift
@@ -37,7 +37,7 @@ files:
 
   - path: NATIVE-EDITOR-TEST-MATRIX.md
     type: test-plan
-    last_updated: "2026-02-17T12:20:23Z"
+    last_updated: "2026-02-18T12:00:00Z"
     description: Matrix coverage and exhaustive lane planning for native editor behavior
 
   - path: docs/plans/native-editor-test-suite.md

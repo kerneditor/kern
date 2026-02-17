@@ -31,10 +31,10 @@ xcodebuild -project KernTextKit.xcodeproj -scheme KernTextKit -configuration Deb
 
 ## Test Commands
 
-Fast unit tests:
+Unit tests (the only test mode — XCUI target was removed):
 
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh
 ```
 
 Exhaustive suites:
@@ -73,6 +73,8 @@ Strict markdown conformance:
   - `NSCache.countLimit = 256`
   - `setObject(..., cost: estimatedImageCostBytes(...))`
 - Packaging script avoids broad `rm -rf` patterns; use guarded directory deletion helper in `scripts/package-kern-app.sh`.
+- XCUI test target (`KernUITests/`) was removed; all tests are unit tests now. `--unit-only` is a no-op compat flag.
+- Simulating Enter in unit tests: `textView.insertNewline(nil)` (not key events). Shift+Enter: `textView.insertLineBreak(nil)`.
 
 ## Key Environment Flags
 
@@ -84,17 +86,22 @@ Strict markdown conformance:
 
 See full report: docs/reviews/codebase-review-2026-02-17.md
 
-Critical data-loss paths:
-- `windowWillClose` does not flush the 150ms export debounce — stale saves possible
-- `applicationShouldTerminate` background-mode path drops unflushed edits
-- `lastKnownFileModDate` has a data race (background `writeSafely` vs main queue)
+Critical data-loss paths (remaining):
 - Reference definitions inside blockquotes silently missed during import pre-scan
+- Global mutable static state makes `importMarkdown` non-reentrant (review finding #5)
 
-Key codec/editor bugs:
-- `NSTextStorage` mutations lack `beginEditing`/`endEditing` grouping
-- No `undoManager.beginUndoGrouping()` anywhere — input rules create multiple undo steps
+Fixed (2026-02-18):
+- ~~`windowWillClose` does not flush export debounce~~ (f85145d)
+- ~~`applicationShouldTerminate` drops unflushed edits~~ (f85145d)
+- ~~`lastKnownFileModDate` data race~~ (b58ed02)
+- ~~`NSTextStorage` mutations lack `beginEditing`/`endEditing`~~ (c80b9e4)
+- ~~No `undoManager.beginUndoGrouping()`~~ (92d2280)
+- ~~`handleBackspaceAtListStartIfNeeded` re-triggers input rules~~ (8a0185b)
+- ~~No encoding detection — UTF-8 hard failure~~ (530f4da)
+
+Remaining codec/editor bugs:
 - `toggleInlineAttribute` hardcodes 16pt base font, losing heading size
-- Soft line break join uses `"\n"` which corrupts export round-trip
+- Soft line break join uses `"\n"` — intentionally kept (2da10d7 revert); see TODO.md for deferred bugs
 
 ## Swift 6 Concurrency Notes
 
