@@ -104,15 +104,17 @@ final class EditorDocument: NSDocument {
         try super.writeSafely(to: url, ofType: typeName, for: saveOperation)
         // Use the actual on-disk mod date to prevent false-positive reloads from filesystem timestamp
         // rounding/resolution differences.
+        // writeSafely can be called off-main, but lastKnownFileModDate is read on main.
+        // Dispatch the write to main to eliminate the data race.
+        let modDate: Date
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-            if let modDate = attrs[.modificationDate] as? Date {
-                lastKnownFileModDate = modDate
-            } else {
-                lastKnownFileModDate = Date()
-            }
+            modDate = (attrs[.modificationDate] as? Date) ?? Date()
         } catch {
-            lastKnownFileModDate = Date()
+            modDate = Date()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.lastKnownFileModDate = modDate
         }
     }
 
