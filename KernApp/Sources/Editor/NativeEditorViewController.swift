@@ -385,6 +385,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let baselineOffset = CheckboxStyle.baselineOffset(textFont: textFontForAlignment, checkboxFont: checkboxFont)
 
         let newChar = newChecked ? "\u{2611}" : "\u{2610}" // ☑ / ☐
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
         storage.beginEditing()
         defer { storage.endEditing() }
 
@@ -870,6 +872,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             if let shortcut = parseTaskShortcutPrefix(body) {
                 isApplyingInputRules = true
                 defer { isApplyingInputRules = false }
+                textView.undoManager?.beginUndoGrouping()
+                defer { textView.undoManager?.endUndoGrouping() }
 
                 let indent = (storage.attribute(.kernListIndent, at: contentRange.location, effectiveRange: nil) as? Int) ?? 0
                 let box = shortcut.checked ? "x" : " "
@@ -901,6 +905,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             if let shortcut = parseTaskShortcutPrefix(body) {
                 isApplyingInputRules = true
                 defer { isApplyingInputRules = false }
+                textView.undoManager?.beginUndoGrouping()
+                defer { textView.undoManager?.endUndoGrouping() }
 
                 let indent = (storage.attribute(.kernListIndent, at: contentRange.location, effectiveRange: nil) as? Int) ?? 0
                 let rawIndex = (storage.attribute(.kernOrderedIndex, at: contentRange.location, effectiveRange: nil) as? Int) ?? 1
@@ -927,6 +933,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         isApplyingInputRules = true
         defer { isApplyingInputRules = false }
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
 
         // If we're converting a heading marker, keep heading typing attrs so subsequent characters
         // (and export) retain the heading block kind even when conversion happens on an empty marker-only line.
@@ -989,6 +997,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         isApplyingInputRules = true
         defer { isApplyingInputRules = false }
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
 
         storage.replaceCharacters(in: contentRange, with: replacement)
         textView.setSelectedRange(NSRange(location: min(contentRange.location, storage.length), length: 0))
@@ -1290,6 +1300,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         isApplyingInputRules = true
         defer { isApplyingInputRules = false }
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
 
         let delta = imported.length - replaceRange.length
         storage.replaceCharacters(in: replaceRange, with: imported)
@@ -1519,6 +1531,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let existing = (storage.attribute(key, at: range.location, effectiveRange: nil) as? Bool) ?? false
         let newValue = !existing
 
+        textView.undoManager?.beginUndoGrouping()
+        defer { textView.undoManager?.endUndoGrouping() }
         storage.beginEditing()
         defer { storage.endEditing() }
 
