@@ -18,7 +18,8 @@ Requested chain: `sync-docs -> claude-md-improver -> handoff`
 
 - Repo path: `/Users/aaaaa/Projects/Kern-textkit`
 - Branch: `main`
-- HEAD commit: `62b220a`
+- HEAD commit: `5d35ada`
+- Previous HEAD before wrap-doc commit: `62b220a`
 - Working tree state at handoff time:
   - modified: `77`
   - untracked: `73`
@@ -118,4 +119,3 @@ Watched doc mismatches still present and should be reviewed by next agent:
 
 - Do not use destructive git commands on this branch (`reset --hard`, blanket checkout) because active WIP is intentionally present.
 - Do not modify legacy repo unless explicitly asked (`/Users/aaaaa/Projects/Kern-webkit`).
-
