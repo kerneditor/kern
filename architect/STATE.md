@@ -1,43 +1,18 @@
 # Forge State
 ## Current Stage: complete
-## Mode: 1
+## Mode: 2
 ## Depth: full
-## Categories Asked: [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12]
-## Categories Skipped: [7 — local-only app, no security concerns]
+## Categories Asked: [1,2,3,4,5,6,8,9,10,11,12]
+## Categories Skipped: [7 — local benchmarking scope, no auth/PII/security surface expansion]
+## Categories Remaining: []
 ## Key Decisions:
-- Audience: Personal → product trajectory
-- Priority #1: Rendering quality (Notion-level)
-- Priority #2: Reliability (never crash, never lose data)
-- Korean IME: Critical for v1
-- Bridge: Simple/manual (4-6 methods)
-- Web build: Commit built HTML
-- Build system: Whatever follows best practices
-- Conflict handling: Warn if user has unsaved edits, silent reload otherwise
-- File open target: <200ms
-- Simultaneous files: 20+ (memory tension with WKWebView pool)
-- Debounce: 300ms
-- Tab behavior: All in tabs, one window
-- Milkdown risk: Fork and fix
-- Mermaid: Lazy-load in v1
-- Testing: Manual + key unit tests (bridge, file watching)
-- Distribution: Direct Xcode build for v1
-- PoC gates: Mandatory validation checkpoints before full build
-- Extensibility: Theme system designed for later expansion
-- Done = replaces MarkText daily
-- Mermaid: bundled at build time (no internet)
-- Network: zero internet requirements
-- Conflict handling: always revert + toast
-- Priorities: rendering quality and reliability co-equal #1
-- Scroll preservation on reload
-- Undo/Redo forwarded to JS editor (not NSDocument UndoManager)
-
-## Cold Start Optimization Forge (Feb 2026): complete
-- Scope: All 11 items + background daemon + login item
-- Phasing: Two prompts (Phase A: Swift+JS, Phase B: build system)
-- _drawsBackground: Yes, use it (on WKWebView, not WKWebViewConfiguration)
-- KaTeX: Keep bundled in Phase A, lazy via code splitting in Phase B
-- Daemon: Opt-in via menu toggle, Cmd+Q = hide (applicationShouldTerminate returns .terminateCancel)
-- Login item: SMAppService, tied to keep-running setting
-- Verification: OSSignposter + NSLog + before/after comparison
-- Challenge: Prompt A 23 issues (all fixed), Prompt B 20 issues (all fixed)
-- Artifacts: cold-start-prompt-A.md, cold-start-prompt-B.md
+- Build two explicit suites: wow + real-use.
+- Lock roster v1 to 5 editors: Kern, VS Code, Zed, Sublime Text, TextEdit.
+- Mandatory metrics in both suites: cold/warm start, load/save, typing, RAM.
+- Add additional realism metrics in real-use suite (scroll/failure-aware).
+- Controlled environment runs only (no synthetic load).
+- Policy: incomplete/failing roster => Partial run, not eligible for README/social claims.
+- User-selected rollout: single large implementation prompt.
+- Prompt refined through self-critique + sub-agent challenge.
+- Methodology deepening complete with dedicated plan: `architect/dual-benchmark-methodology-plan.md`.
+- Independent parallel fact-check complete: `architect/research-dual-benchmark-independent-2026-02-21.md`.

@@ -115,3 +115,18 @@ Remaining codec/editor bugs:
 - Prefer fixing behavior via the native codec and attributed-text model, not markdown string hacks.
 - Keep defaults fast and deterministic; gate optional behavior via preferences/env flags.
 - Always check `git status --short` before starting to avoid mixing unrelated edits.
+
+## Current Work
+
+Feature: Dual cross-editor benchmark suites (Wow + Real-Use) with locked roster policy.
+
+- Locked roster v1: Kern, VS Code, Zed, Sublime Text, TextEdit
+- Official-vs-Partial publishing policy for benchmark claims
+- Required metrics in both suites: cold/warm start, load/save latency, typing performance, RAM usage
+- Real-Use workflow minimum: open, scroll, type/edit, find, save
+- Reliability requirement: fail-fast timeouts and no indefinite hangs
+
+Implementation prompt: `architect/prompt.md`
+Forge transcript and rationale: `architect/transcript.md`
+Methodology refinement plan: `architect/dual-benchmark-methodology-plan.md`
+Independent fact-check synthesis: `architect/research-dual-benchmark-independent-2026-02-21.md`

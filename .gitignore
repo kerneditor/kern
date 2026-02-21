@@ -51,6 +51,10 @@ dist/
 # Profiling data
 *.profraw
 
+# Python caches
+__pycache__/
+*.pyc
+
 # Claude workspace settings and session context (local only)
 .claude/
 CONTEXT-RESTORE.md

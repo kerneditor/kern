@@ -1,27 +1,13 @@
-# Benchmark Suite (Native Editor Prototype)
-
-This repo contains two kinds of benchmarks:
-
-1. **Engine-level benchmarks** (fast, deterministic, no UI automation):
-   - Markdown import/export throughput and memory
-   - TextKit render cost for large `.md` files
-2. **App-level benchmarks** (slower, closer to real UX; may require UI automation):
-   - Cold start + file open + first render
-   - Scroll responsiveness on huge documents
-   - Save latency (flush + write)
-
-The goal is to make performance comparisons reproducible between:
-- Kern **Native TextKit** prototype
-- Kern **WebKit** editor (current)
-- External editors (Electron and native)
+# Benchmark Suite (Native Editor)
 
 ## Datasets
 
 Primary benchmark files (committed so results are comparable across machines):
-- `test-fixtures/native-editor-benchmark.md` (large, supported subset)
-- `test-fixtures/stress-test.md` (medium)
-- `test-fixtures/ultimate-stress-test.md` (permutation-dense canonical source)
-- `test-fixtures/mega-stress-test.md` (very large, includes embedded permutation appendix)
+- `test-fixtures/native-editor-benchmark.md` (~3.6MB, ~64K lines, feature-dense — no filler)
+- `test-fixtures/cross-editor-benchmark.md` (~18KB, ~580 lines, GFM-only for fair cross-editor comparison)
+- `test-fixtures/stress-test.md` (medium, 342 lines)
+- `test-fixtures/ultimate-stress-test.md` (permutation-dense, 1493 lines)
+- `test-fixtures/mega-stress-test.md` (very large, 11456 lines)
 
 Fixture maintenance:
 - `scripts/gen_ultimate_stress_test.py`
@@ -30,76 +16,241 @@ Fixture maintenance:
 Guideline:
 - Use the same file(s) for all editors.
 - Record whether the run is **cold** (after reboot / app not in memory) or **warm** (second run).
+- The cross-editor benchmark fixture is content-neutral — no editor names, no benchmark results, no editor-specific paths.
 
-## Engine-Level (Recommended)
+## Baselines
 
-These benchmarks run as XCTest performance tests, so they do not require UI automation permissions.
+### Environment
 
-### Run (Fast, Non-UI)
+- **Date**: 2026-02-18
+- **Hardware**: Apple M4
+- **macOS**: 26.2
+- **Commit**: 9238540 (pre-benchmark-overhaul)
+
+### Codec (native-editor-benchmark.md, ~3.6MB)
+
+| Benchmark | Time | Test Method |
+| --- | --- | --- |
+| Import+Export round-trip | ~12.1s | `testImportExportBenchmarkFilePerformance` |
+| Import only | ~3.5s | `testImportOnlyBenchmarkFilePerformance` |
+| Export only | — | `testExportOnlyBenchmarkFilePerformance` |
+| parseInline micro (100KB inline-dense) | ~0.13s | `testParseInlineMicroBenchmark` |
+
+### Editor
+
+| Benchmark | Time | Test Method |
+| --- | --- | --- |
+| Render stress-test.md (24K chars) | — | `testRenderStressFilePerformance` |
+| Render mega-stress-test.md (50K chars) | — | `testRenderMegaStressFilePerformance` |
+| Render benchmark file (24K chars) | — | `testRenderBenchmarkFilePerformance` |
+| Scroll mega-stress-test.md (70K chars) | — | `testScrollMegaStressFilePerformance` |
+| Edit-in-middle mega (50K chars) | ~0.016s | `testEditInMiddleOfLargeDocumentPerformance` |
+| Incremental typing (2K lines) | — | `testIncrementalTypingPerformance_LiveAppend` |
+| Char-by-char ultimate (15K chars) | — | `testTypingUltimateStressCharacterByCharacterPerformance` |
+| Char-by-char mega (30K chars) | — | `testTypingMegaStressCharacterByCharacterPerformance` |
+| Interleaved action ultimate (12K chars) | — | `testInterleavedActionBurstOnUltimateStressPerformance` |
+| Interleaved action mega (20K chars) | — | `testInterleavedActionBurstOnMegaStressPerformance` |
+
+## How to Run
+
+### Engine-Level Benchmarks (XCTest)
 
 ```bash
+# Quick: run engine benchmarks
 ./scripts/bench-native-editor.sh
+
+# All codec benchmarks
+KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeMarkdownCodecPerformanceTests
+
+# All editor benchmarks
+KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeEditorMegaStressPerformanceTests
+
+# Render benchmark
+KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeEditorRenderPerformanceTests
 ```
 
-### What It Runs
+### Cross-Editor Comparison
 
-- `KernTests/NativeMarkdownCodecPerformanceTests.swift`
-  - Import + export `test-fixtures/native-editor-benchmark.md`
-- `KernTests/NativeEditorRenderPerformanceTests.swift`
-  - Render `test-fixtures/native-editor-benchmark.md` into a `NativeEditorViewController` and force layout
-- `KernTests/NativeEditorMegaStressPerformanceTests.swift`
-  - Render `stress-test.md`, `ultimate-stress-test.md`, and `mega-stress-test.md`
-  - Scroll jumps on `mega-stress-test.md`
-  - Incremental live typing benchmark
-  - Full char-by-char typing of `ultimate-stress-test.md` and `mega-stress-test.md`
-  - Interleaved action-burst typing + export on `ultimate-stress-test.md` and `mega-stress-test.md`
-
-Fast subset:
+#### Phase 1: Shell script (window detection, ~50ms resolution)
 
 ```bash
-KERN_PERF_QUICK=1 ./scripts/bench-native-editor.sh
+# All detected editors, 30 runs, warm
+./scripts/cross-editor-benchmark.sh
 
-Ultra exhaustive (non-UI, mega all-profile matrix + shardable):
+# Specific editors, cold starts, JSON output
+./scripts/cross-editor-benchmark.sh --editors "Kern,Zed,TextEdit" --cold --runs 30 --json results.json
+
+# Fewer runs for quick comparison
+./scripts/cross-editor-benchmark.sh --runs 5 --verbose
+```
+
+#### Phase 2: Swift CLI (ScreenCaptureKit, ~16ms resolution)
 
 ```bash
-./scripts/test-native-editor.sh --unit-only --exhaustive --ultra
+# Build once
+cd scripts/kern-bench && swift build -c release && cd ../..
+
+# Run with all editors (default: 30 runs, shuffled order, 3 warmup)
+scripts/kern-bench/.build/release/kern-bench --all --verbose
+
+# Specific editor with JSON output
+scripts/kern-bench/.build/release/kern-bench --editor "TextEdit" --runs 30 --json results.json
+
+# Quick test (fewer runs)
+scripts/kern-bench/.build/release/kern-bench --all --runs 5 --verbose
+
+# Cold starts (requires sudo for purge)
+sudo scripts/kern-bench/.build/release/kern-bench --all --cold --runs 30 --json results.json
 ```
 
-Ultra full (all mega profiles/programs, very slow):
+#### Phase 3: Regression Detection
 
 ```bash
-./scripts/test-native-editor.sh --unit-only --exhaustive --ultra-full
+# Compare baseline vs latest (uses Mann-Whitney U for v3 JSON)
+python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json
+
+# Custom thresholds
+python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json \
+  --threshold 5 --min-abs-ms 50 --verbose
+
+# JSON output for CI
+python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json \
+  --json regression-report.json
 ```
+
+## Statistical Methodology
+
+### Measurement Protocol
+
+- **Default: 30 runs** per editor (minimum for reliable percentile estimates)
+- **3 warmup runs** (discarded, not counted)
+- **Interleaved editor order**: editors are shuffled each round to eliminate thermal ordering bias
+- **5-second cooldown** between editors within each round
+- **No outlier removal**: raw data is preserved; the slow tail IS the user experience
+
+### Reported Statistics
+
+| Metric | Description |
+| --- | --- |
+| Median (p50) | Primary comparison metric |
+| p25, p75 | Interquartile range |
+| p95, p99 | Tail latency |
+| Mean, Std Dev, CV% | Distribution shape |
+| 95% Bootstrap CI | Confidence interval for the median (10,000 resamples, seeded PRNG) |
+
+Both Swift (kern-bench) and Python (shell script) use **R Type 7 linear interpolation** for percentiles, producing identical results.
+
+### Regression Detection (v3)
+
+- **Primary test**: Mann-Whitney U (non-parametric, no distribution assumptions)
+- **Secondary**: Bootstrap 95% CI for difference in medians
+- **Regression gate**: `p < 0.05` AND `|median difference| > max(5%, 50ms)`
+- Requires v3 JSON with raw run data. Falls back to legacy threshold check for v1/v2.
+
+### Environment Requirements
+
+Before any benchmark run:
+
+- [ ] Plugged into AC power (macOS throttles CPU on battery)
+- [ ] Close all non-essential apps (browsers, Docker, Spotlight-heavy apps)
+- [ ] `pmset -g therm` shows `CPU_Speed_Limit = 100`
+- [ ] Do Not Disturb enabled
+- [ ] Wait 10+ minutes after boot
+- [ ] Same test file for all editors (committed to repo)
+- [ ] Screen Recording permission granted (for Phase 2 ScreenCaptureKit)
+
+## JSON Schema (v3)
+
+```json
+{
+  "version": 3,
+  "tool": "kern-bench",
+  "timestamp": "2026-02-19T12:00:00Z",
+  "environment": {
+    "chip": "Apple M4",
+    "macos": "26.2",
+    "ram_gb": 24,
+    "power": "AC",
+    "thermal_pct": 100,
+    "thermal_pct_end": 100,
+    "screencapture_available": true
+  },
+  "config": {
+    "file": "test-fixtures/cross-editor-benchmark.md",
+    "file_bytes": 18432,
+    "file_hash": "<sha256>",
+    "mode": "warm",
+    "runs": 30,
+    "warmup_runs": 3,
+    "editor_order": "shuffled"
+  },
+  "results": [
+    {
+      "editor": "TextEdit",
+      "architecture": "Native AppKit",
+      "runs": [
+        {
+          "window_visible_ms": 245.3,
+          "first_paint_ms": 310.1,
+          "render_stable_ms": 520.5,
+          "memory_phys_mb": 82.3,
+          "memory_rss_mb": 95.1,
+          "thermal_pct": 100,
+          "power": "AC"
+        }
+      ],
+      "stats": {
+        "window_visible": {
+          "n": 30, "min": 230.0, "max": 295.0,
+          "median": 248.0, "mean": 255.0, "std": 18.0,
+          "cv_pct": 7.1,
+          "p25": 240.0, "p75": 265.0, "iqr": 25.0,
+          "p95": 285.0, "p99": 293.0,
+          "ci_lower": 242.0, "ci_upper": 258.0
+        }
+      }
+    }
+  ]
+}
 ```
 
-Artifacts are written under `bench-results/native-editor/<timestamp>/` as `.xcresult` bundles plus logs.
+## Environment Flags
 
-## App-Level (Design)
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `KERN_ENABLE_PERF_TESTS` | `0` | Gate for all performance tests |
+| `KERN_PERF_ITERATIONS` | `5` | Override iteration count for all benchmarks |
+| `KERN_PERF_RENDER_FULL` | `0` | Bypass char-limit truncation for render tests |
+| Various `KERN_PERF_*_CHAR_LIMIT` | per-test | Override truncation limit per benchmark |
 
-These are the benchmarks that matter most to users, but they are harder to make foolproof without
-app-level instrumentation.
+## Cross-Editor Benchmark Suite
 
-Planned harness (not implemented yet):
-- `KERN_BENCHMARK_MODE=1`
-  - app opens a file passed on argv
-  - records JSON metrics to a specified path
-  - quits automatically
-- `hyperfine` wrapper scripts to run N cold/warm iterations and summarize results
+### Tools
 
-Suggested metrics:
-- `launch_ms`: process start -> first window visible
-- `open_ms`: file open -> editor content rendered
-- `export_ms`: current document -> `.md` string produced
-- `save_ms`: `Cmd+S` -> write complete
-- `rss_mb`: resident set size after open + after 30s idle
+| Tool | Resolution | Metrics | Usage |
+| --- | --- | --- | --- |
+| `scripts/cross-editor-benchmark.sh` | ~50ms | Window visible, RSS, phys_footprint | Quick comparison, bash 3.2 compatible |
+| `scripts/kern-bench/` | ~16ms | Window visible, first paint, render stable, memory | Precise frame-level detection via ScreenCaptureKit |
+| `scripts/bench-regression-check.py` | — | Mann-Whitney U, bootstrap CI | Compare baseline vs latest JSON |
 
-## External Editor Comparisons (Design)
+### JSON Result History
 
-Baseline comparisons that are actually measurable without deep instrumentation:
-- Cold start time to open a file (AppleScript-driven open + wait for front window)
-- RSS after file open
-- Manual scroll test (qualitative, but repeatable if done with the same trackpad gesture)
+Store benchmark results in `benchmark-history/` for trend tracking. Only v3 JSON is supported for regression detection with Mann-Whitney U.
 
-Notes:
-- Many Electron apps do significant background work; record CPU spikes in Activity Monitor if needed.
-- Some editors lazily render; always wait a fixed “settle time” (ex: 5s) before measuring memory.
+### Test Files
+
+| File | Size | Purpose |
+| --- | --- | --- |
+| `cross-editor-benchmark.md` | ~18KB | GFM-only, content-neutral cross-editor comparison |
+| `stress-test.md` | ~24KB | Medium document |
+| `mega-stress-test.md` | ~800KB | Large document |
+| `native-editor-benchmark.md` | ~3.6MB | Extreme stress test |
