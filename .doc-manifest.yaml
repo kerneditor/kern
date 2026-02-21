@@ -1,7 +1,7 @@
 # Documentation manifest for KernTextKit
 # Tracks docs, ownership intent, and primary code references
 
-last_synced: "2026-02-18T13:00:00Z"
+last_synced: "2026-02-21T18:48:04Z"
 
 files:
   - path: README.md
@@ -11,7 +11,7 @@ files:
 
   - path: CLAUDE.md
     type: project-instructions
-    last_updated: "2026-02-18T13:00:00Z"
+    last_updated: "2026-02-21T18:48:04Z"
     description: Session instructions and high-signal engineering context
     references:
       - KernApp/Sources/App/main.swift
@@ -27,7 +27,7 @@ files:
 
   - path: HANDOFF.md
     type: session-handoff
-    last_updated: "2026-02-17T12:20:23Z"
+    last_updated: "2026-02-21T18:48:04Z"
     description: Fresh-agent continuation snapshot with current repo state and next actions
 
   - path: TODO.md
@@ -57,7 +57,7 @@ files:
 
   - path: BENCHMARKS.md
     type: benchmark-guide
-    last_updated: "2026-02-17T12:20:23Z"
+    last_updated: "2026-02-21T18:48:04Z"
     description: Benchmark methodology and reproducibility notes for editor performance
 
   - path: KERN-MARKDOWN.md
