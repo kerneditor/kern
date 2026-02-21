@@ -1431,6 +1431,16 @@ enum NativeMarkdownCodec {
         ProcessInfo.processInfo.environment["KERN_DEBUG_TABLE_PARSE"] == "1"
     }()
 
+    /// Pre-compiled regex for reference definition parsing (avoids recompilation per line).
+    private static let referenceDefinitionRegex: NSRegularExpression =
+        try! NSRegularExpression(pattern: #"^\[([^\]]+)\]:\s*(\S+)(?:\s+["']([^"']+)["'])?\s*$"#)
+
+    /// Cache for syntax highlighting regexes (bounded by language × pattern count, ~150 entries max).
+    private static var syntaxHighlightingRegexCache: [String: NSRegularExpression] = [:]
+
+    /// Cache for list marker width measurements (avoids repeated CoreText layout calls).
+    private static var markerWidthCache: [String: CGFloat] = [:]
+
     private static func parseGfmTable(_ lines: [String], startIndex: Int) -> GfmTableMatch? {
         guard startIndex + 1 < lines.count else { return nil }
 
@@ -2040,8 +2050,7 @@ enum NativeMarkdownCodec {
         guard indent <= 3 else { return nil }
         let candidate = String(rest)
 
-        let pattern = #"^\[([^\]]+)\]:\s*(\S+)(?:\s+["']([^"']+)["'])?\s*$"#
-        guard let re = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let re = referenceDefinitionRegex
         let ns = candidate as NSString
         let full = NSRange(location: 0, length: ns.length)
         guard let m = re.firstMatch(in: candidate, options: [], range: full) else { return nil }
@@ -2604,7 +2613,15 @@ enum NativeMarkdownCodec {
         let variableColor = NSColor.systemOrange
 
         func apply(_ pattern: String, color: NSColor, options: NSRegularExpression.Options = []) {
-            guard let re = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+            let cacheKey = pattern + "\0" + String(options.rawValue)
+            let re: NSRegularExpression
+            if let cached = syntaxHighlightingRegexCache[cacheKey] {
+                re = cached
+            } else {
+                guard let compiled = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+                syntaxHighlightingRegexCache[cacheKey] = compiled
+                re = compiled
+            }
             let full = NSRange(location: 0, length: ns.length)
             re.enumerateMatches(in: attributed.string, options: [], range: full) { m, _, _ in
                 guard let m else { return }
@@ -3055,11 +3072,21 @@ enum NativeMarkdownCodec {
             if markerLen > 0 {
                 let markerAttr = paragraph.attributedSubstring(from: NSRange(location: 0, length: min(markerLen, paragraph.length)))
                 // Measure the attributed prefix using its actual fonts (checkbox glyph is larger).
-                let rect = markerAttr.boundingRect(
-                    with: NSSize(width: 1000, height: 1000),
-                    options: [.usesFontLeading, .usesLineFragmentOrigin]
-                )
-                style.headIndent = baseIndent + max(24, ceil(rect.width) + 8)
+                let markerText = markerAttr.string
+                let markerFont = (markerAttr.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) ?? NSFont.systemFont(ofSize: 16)
+                let cacheKey = markerText + "\0" + markerFont.fontName + "\0" + String(Double(markerFont.pointSize))
+                let markerWidth: CGFloat
+                if let cached = markerWidthCache[cacheKey] {
+                    markerWidth = cached
+                } else {
+                    let rect = markerAttr.boundingRect(
+                        with: NSSize(width: 1000, height: 1000),
+                        options: [.usesFontLeading, .usesLineFragmentOrigin]
+                    )
+                    markerWidth = ceil(rect.width)
+                    markerWidthCache[cacheKey] = markerWidth
+                }
+                style.headIndent = baseIndent + max(24, markerWidth + 8)
             }
 
             paragraph.addAttribute(.paragraphStyle, value: style, range: full)
@@ -3121,6 +3148,12 @@ enum NativeMarkdownCodec {
         var linkReferenceURL: String? = nil
     }
 
+    /// Internal entry point for micro-benchmarking via `@testable import`.
+    static func parseInline(_ text: String, baseFont: NSFont) -> NSAttributedString {
+        let ctx = ImportContext(referenceDefinitions: [:], baseURL: nil, options: .fromUserDefaults(), strictConformanceRoundTripMode: false)
+        return parseInline(text, baseFont: baseFont, style: InlineStyle(), ctx: ctx)
+    }
+
     private static func parseInline(_ text: String, baseFont: NSFont, ctx: ImportContext) -> NSAttributedString {
         parseInline(text, baseFont: baseFont, style: InlineStyle(), ctx: ctx)
     }
@@ -3171,6 +3204,13 @@ enum NativeMarkdownCodec {
         let out = NSMutableAttributedString()
         let chars = Array(text)
         var i = 0
+        var literalBuffer = ""
+
+        func flushLiterals() {
+            guard !literalBuffer.isEmpty else { return }
+            out.append(makeInlineAttributed(literalBuffer, baseFont: baseFont, style: style))
+            literalBuffer = ""
+        }
 
         func appendLiteral(_ s: String, style: InlineStyle) {
             out.append(makeInlineAttributed(s, baseFont: baseFont, style: style))
@@ -3190,6 +3230,16 @@ enum NativeMarkdownCodec {
 
         while i < chars.count {
             let ch = chars[i]
+
+            // Fast path: accumulate plain characters that can't start any inline syntax.
+            if ch != "\\" && ch != "!" && ch != "<" && ch != "[" && ch != "$" && ch != "`" && ch != "*" && ch != "_" && ch != "~" {
+                literalBuffer.append(ch)
+                i += 1
+                continue
+            }
+
+            // Flush accumulated plain text before handling any delimiter.
+            flushLiterals()
 
             // Escape: only strip the backslash for escapable punctuation.
             if ch == "\\" {
@@ -3357,6 +3407,7 @@ enum NativeMarkdownCodec {
             i += 1
         }
 
+        flushLiterals()
         return out
     }
 
@@ -3716,17 +3767,15 @@ enum NativeMarkdownCodec {
 
     private static func isWhitespace(_ ch: Character?) -> Bool {
         guard let ch else { return true }
-        return ch.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
+        return ch.isWhitespace || ch.isNewline
     }
 
     private static func isPunctuation(_ ch: Character?) -> Bool {
         guard let ch else { return false }
-        return ch.unicodeScalars.allSatisfy { scalar in
-            if scalar.isASCII {
-                return !CharacterSet.alphanumerics.contains(scalar) && !CharacterSet.whitespacesAndNewlines.contains(scalar)
-            }
-            return CharacterSet.punctuationCharacters.contains(scalar) || CharacterSet.symbols.contains(scalar)
+        if ch.isASCII {
+            return !ch.isLetter && !ch.isNumber && !ch.isWhitespace && !ch.isNewline
         }
+        return ch.isPunctuation || ch.isSymbol
     }
 
     private static func parseInlineMath(_ chars: [Character], startIndex: Int, baseFont: NSFont) -> InlineParseResult? {
@@ -3951,7 +4000,7 @@ enum NativeMarkdownCodec {
         return NSAttributedString(string: text, attributes: attrs)
     }
 
-    private static var inlineCodeBackgroundColor: NSColor {
+    private static let inlineCodeBackgroundColor: NSColor = {
         NSColor(name: nil) { appearance in
             switch appearance.bestMatch(from: [.darkAqua, .vibrantDark, .aqua, .vibrantLight]) {
             case .darkAqua, .vibrantDark:
@@ -3960,7 +4009,7 @@ enum NativeMarkdownCodec {
                 return NSColor(white: 0.0, alpha: 0.08)
             }
         }
-    }
+    }()
 
     // MARK: - Export
 

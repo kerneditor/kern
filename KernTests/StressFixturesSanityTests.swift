@@ -150,6 +150,83 @@ final class StressFixturesSanityTests: XCTestCase {
         XCTAssertTrue(md.contains("\n---\n"))
     }
 
+    func testBenchmarkFixtureIsFeatureDenseAndLargeEnough() throws {
+        let md = try loadFixture(name: "native-editor-benchmark.md")
+
+        // Size: should be ~3.5MB+, feature-dense (not filler).
+        let byteCount = md.utf8.count
+        XCTAssertGreaterThanOrEqual(byteCount, 3_000_000, "Benchmark fixture should be >=3MB (got \(byteCount))")
+
+        // Key sections.
+        XCTAssertTrue(md.contains("## Table of Contents"))
+        XCTAssertTrue(md.contains("## Heading Hierarchy"))
+        XCTAssertTrue(md.contains("## Inline Formatting Blocks"))
+        XCTAssertTrue(md.contains("## Bullet Lists"))
+        XCTAssertTrue(md.contains("## Ordered Lists"))
+        XCTAssertTrue(md.contains("## Task Lists"))
+        XCTAssertTrue(md.contains("## Mixed Nested Lists"))
+        XCTAssertTrue(md.contains("## Code Fence Matrix"))
+        XCTAssertTrue(md.contains("## Table Matrix"))
+        XCTAssertTrue(md.contains("## Math Blocks"))
+        XCTAssertTrue(md.contains("## Blockquote Matrix"))
+        XCTAssertTrue(md.contains("## Horizontal Rules"))
+        XCTAssertTrue(md.contains("## Image References"))
+        XCTAssertTrue(md.contains("## Mermaid Diagrams"))
+        XCTAssertTrue(md.contains("## Heading Checkboxes"))
+        XCTAssertTrue(md.contains("## Link Variants"))
+        XCTAssertTrue(md.contains("## Dense Paragraph Blocks"))
+
+        // Inline formatting presence.
+        XCTAssertTrue(md.contains("**bold text**"))
+        XCTAssertTrue(md.contains("*italic text*"))
+        XCTAssertTrue(md.contains("~~strikethrough text~~"))
+        XCTAssertTrue(md.contains("`inline code`"))
+        XCTAssertTrue(md.contains("***bold italic"))
+
+        // Lists and tasks.
+        XCTAssertTrue(md.contains("- [x]"))
+        XCTAssertTrue(md.contains("- [ ]"))
+        XCTAssertTrue(md.contains("1. [x]"))
+        XCTAssertTrue(md.contains("1. [ ]"))
+
+        // Code fences (all expected languages).
+        for languageFence in expectedLanguageFences() {
+            XCTAssertTrue(md.contains(languageFence), "Missing language fence in benchmark: \(languageFence)")
+        }
+
+        // Tables.
+        XCTAssertTrue(md.contains("| --- |"))
+
+        // Math.
+        XCTAssertTrue(md.contains("$E = mc^2$"))
+        XCTAssertTrue(md.contains("$$"))
+
+        // Blockquotes + rules.
+        XCTAssertTrue(md.contains("> Quote"))
+        XCTAssertTrue(md.contains("\n---\n"))
+        XCTAssertTrue(md.contains("\n***\n"))
+        XCTAssertTrue(md.contains("\n___\n"))
+
+        // Images (local only — no remote URLs).
+        XCTAssertTrue(md.contains("![Local sample"))
+        XCTAssertTrue(md.contains("screenshots/01-default-sample.png"))
+
+        // Mermaid.
+        XCTAssertTrue(md.contains("```mermaid"))
+        XCTAssertTrue(md.contains("flowchart TD"))
+        XCTAssertTrue(md.contains("sequenceDiagram"))
+
+        // Heading checkboxes.
+        XCTAssertTrue(md.contains("# [ ] Unchecked"))
+        XCTAssertTrue(md.contains("# [x] Checked"))
+
+        // Autolinks.
+        XCTAssertTrue(md.contains("<https://example.com/auto/"))
+
+        // No filler: should not contain lorem ipsum.
+        XCTAssertFalse(md.lowercased().contains("lorem ipsum"), "Benchmark fixture should not contain filler text")
+    }
+
     // MARK: - Helpers
 
     private func loadFixture(name: String) throws -> String {

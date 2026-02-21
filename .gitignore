@@ -55,3 +55,15 @@ dist/
 .claude/
 CONTEXT-RESTORE.md
 .worktrees
+
+# Handoff/session artifacts (local only)
+.handoff-fresh/
+HANDOFF.auto.md
+
+# Research/internal development scratch artifacts (local only)
+architect/
+benchmark-history/
+research-*.md
+
+# Nested handoff artifacts
+scripts/kern-bench/HANDOFF.md

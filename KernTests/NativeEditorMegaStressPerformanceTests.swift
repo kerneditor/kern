@@ -13,14 +13,14 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "stress-test.md")
+        let source = try loadPerfFixture(name: "stress-test.md")
         let md = boundedRenderFixture(
             source,
             envLimitKey: "KERN_PERF_STRESS_RENDER_CHAR_LIMIT",
             defaultLimit: 24_000
         )
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             let vc = NativeEditorViewController()
             vc.disablesDebouncedExportsForTesting = true
             _ = vc.view
@@ -35,14 +35,14 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "mega-stress-test.md")
+        let source = try loadPerfFixture(name: "mega-stress-test.md")
         let md = boundedRenderFixture(
             source,
             envLimitKey: "KERN_PERF_MEGA_RENDER_CHAR_LIMIT",
             defaultLimit: 50_000
         )
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             let vc = NativeEditorViewController()
             vc.disablesDebouncedExportsForTesting = true
             _ = vc.view
@@ -60,14 +60,14 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_PERF_ENABLE_ULTIMATE_RENDER=1 (or KERN_PERF_RENDER_FULL=1) to run heavy ultimate render perf")
         }
 
-        let source = try loadFixture(name: "ultimate-stress-test.md")
+        let source = try loadPerfFixture(name: "ultimate-stress-test.md")
         let md = boundedRenderFixture(
             source,
             envLimitKey: "KERN_PERF_ULTIMATE_RENDER_CHAR_LIMIT",
             defaultLimit: 32_000
         )
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             let vc = NativeEditorViewController()
             vc.disablesDebouncedExportsForTesting = true
             _ = vc.view
@@ -82,14 +82,14 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "mega-stress-test.md")
+        let source = try loadPerfFixture(name: "mega-stress-test.md")
         let md = boundedRenderFixture(
             source,
             envLimitKey: "KERN_PERF_MEGA_SCROLL_CHAR_LIMIT",
             defaultLimit: 70_000
         )
 
-        measure(metrics: [XCTClockMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -123,7 +123,7 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
 
         let lineCount = TestRuntimeConfig.int("KERN_PERF_TYPING_LINES", default: 2000) ?? 2000
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -154,11 +154,11 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "ultimate-stress-test.md")
+        let source = try loadPerfFixture(name: "ultimate-stress-test.md")
         XCTAssertGreaterThan(source.count, 15_000)
         let md = boundedFixture(source, envLimitKey: "KERN_PERF_ULTIMATE_CHAR_LIMIT", defaultLimit: 15_000)
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -187,11 +187,11 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "mega-stress-test.md")
+        let source = try loadPerfFixture(name: "mega-stress-test.md")
         XCTAssertGreaterThan(source.count, 100_000)
         let md = boundedFixture(source, envLimitKey: "KERN_PERF_MEGA_CHAR_LIMIT", defaultLimit: 30_000)
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -220,11 +220,11 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "ultimate-stress-test.md")
+        let source = try loadPerfFixture(name: "ultimate-stress-test.md")
         let md = boundedFixture(source, envLimitKey: "KERN_PERF_ULTIMATE_INTERLEAVED_CHAR_LIMIT", defaultLimit: 12_000)
         let interval = max(31, TestRuntimeConfig.int("KERN_PERF_ACTION_INTERVAL", default: 151) ?? 151)
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -271,11 +271,11 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
 
-        let source = try loadFixture(name: "mega-stress-test.md")
+        let source = try loadPerfFixture(name: "mega-stress-test.md")
         let md = boundedFixture(source, envLimitKey: "KERN_PERF_MEGA_INTERLEAVED_CHAR_LIMIT", defaultLimit: 20_000)
         let interval = max(31, TestRuntimeConfig.int("KERN_PERF_ACTION_INTERVAL", default: 151) ?? 151)
 
-        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: performanceOptions()) {
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
             autoreleasepool {
                 let vc = NativeEditorViewController()
                 vc.disablesDebouncedExportsForTesting = true
@@ -313,47 +313,72 @@ final class NativeEditorMegaStressPerformanceTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
-
-    private func loadFixture(name: String) throws -> String {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // KernTests/
-            .deletingLastPathComponent() // repo root
-        let url = root.appendingPathComponent("test-fixtures").appendingPathComponent(name)
-        return try String(contentsOf: url, encoding: .utf8)
-    }
-
     @MainActor
-    private func findSubview(withAXIdentifier id: String, in view: NSView) -> NSView? {
-        if view.accessibilityIdentifier() == id { return view }
-        for sub in view.subviews {
-            if let found = findSubview(withAXIdentifier: id, in: sub) { return found }
+    func testEditInMiddleOfLargeDocumentPerformance() throws {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
+            throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
         }
-        return nil
-    }
 
-    private func performanceOptions() -> XCTMeasureOptions {
-        let options = XCTMeasureOptions.default
-        let iterations = max(1, TestRuntimeConfig.int("KERN_PERF_ITERATIONS", default: 3) ?? 3)
-        options.iterationCount = iterations
-        return options
-    }
+        let source = try loadPerfFixture(name: "mega-stress-test.md")
+        let md = boundedFixture(source, envLimitKey: "KERN_PERF_EDIT_MIDDLE_CHAR_LIMIT", defaultLimit: 50_000)
 
-    private func boundedRenderFixture(_ source: String, envLimitKey: String, defaultLimit: Int) -> String {
-        if TestRuntimeConfig.bool("KERN_PERF_RENDER_FULL") {
-            return source
+        // Pre-create the VC and load content once outside measure.
+        let vc = NativeEditorViewController()
+        vc.disablesDebouncedExportsForTesting = true
+        _ = vc.view
+        vc.stringValue = md
+        vc.view.layoutSubtreeIfNeeded()
+
+        guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+            XCTFail("Missing NativeEditor.TextView")
+            return
         }
-        return boundedFixture(source, envLimitKey: envLimitKey, defaultLimit: defaultLimit)
-    }
+        textView.allowsUndo = false
+        textView.undoManager?.removeAllActions()
 
-    private func boundedFixture(_ source: String, envLimitKey: String, defaultLimit: Int) -> String {
-        let limit = max(1, TestRuntimeConfig.int(envLimitKey, default: defaultLimit) ?? defaultLimit)
-        guard source.count > limit else { return source }
-        let end = source.index(source.startIndex, offsetBy: limit)
-        var bounded = String(source[..<end])
-        if let lastNewline = bounded.lastIndex(of: "\n") {
-            bounded = String(bounded[...lastNewline])
+        let midPoint = textView.string.count / 2
+
+        // Content to insert and then delete — exercises headings, lists, inline formatting.
+        let editLines = [
+            "## Inserted Heading During Edit\n",
+            "- [ ] New task item inserted mid-document\n",
+            "- [x] Completed task with **bold** and *italic*\n",
+            "1. Ordered item with `inline code`\n",
+            "   - Nested bullet with [a link](https://example.com)\n",
+            "### Another heading level 3\n",
+            "> Blockquote inserted in the middle\n",
+            "Paragraph with ~~strikethrough~~ and $E=mc^2$ math\n",
+            "- Plain bullet item\n",
+            "  - Nested level 1\n",
+            "    - Nested level 2\n",
+            "```swift\nlet x = 42\n```\n",
+            "| Col A | Col B |\n| --- | --- |\n| data | data |\n",
+            "Another paragraph with **bold *nested italic* bold**\n",
+            "---\n",
+            "#### H4 with `code` and **bold**\n",
+            "- [ ] Final unchecked task\n",
+            "- [x] Final checked task\n",
+            "*Italic paragraph* followed by ~~strike~~ text\n",
+            "Last inserted line before cleanup\n",
+        ]
+        let editBlock = editLines.joined()
+        let editBlockLength = editBlock.count
+
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
+            // Position caret at ~50% of text length.
+            let caretPos = min(midPoint, textView.string.count)
+            textView.setSelectedRange(NSRange(location: caretPos, length: 0))
+
+            // Insert mixed content.
+            textView.insertText(editBlock, replacementRange: textView.selectedRange())
+            vc.view.layoutSubtreeIfNeeded()
+
+            // Delete what we just inserted (backspace char by char would be too slow — select and delete).
+            let deleteStart = caretPos
+            let deleteEnd = min(deleteStart + editBlockLength, textView.string.count)
+            textView.setSelectedRange(NSRange(location: deleteStart, length: deleteEnd - deleteStart))
+            textView.delete(nil)
+            vc.view.layoutSubtreeIfNeeded()
         }
-        return bounded
     }
 }

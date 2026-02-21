@@ -47,3 +47,7 @@ Tests:
 - Prefer **unit + snapshot** tests for broad coverage and speed.
 - Prefer **generator-backed matrices** (preferences, fixtures, edge cases) over hand-written repetition.
 - Always attach artifacts that an agent can use to self-repair: screenshots, snapshot diffs, markdown outputs, and minimal diffs.
+
+## Build Discipline
+
+- After **every code change**, always rebuild the app before handing work back for review so the user does not need to rebuild manually.
