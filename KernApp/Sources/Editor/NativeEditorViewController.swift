@@ -117,6 +117,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var stagedPromotionToken: UInt64 = 0
     private var stagedPromotionInFlight = false
     private var stagedPromotionInFlightToken: UInt64?
+    private var stagedPromotionInFlightStartedAtUptime: TimeInterval?
+    private var lastStagedPromotionApplyMs: Double = 0
     private let stagedPromotionComputeWorker = StagedPromotionComputeWorker()
     private var lastUserInteractionUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     private var lastScrollEventUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
@@ -398,7 +400,11 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
     private func renderMarkdown(_ markdown: String, preserveSelection: Bool) {
         noteUserInteraction()
-        if deferredFullRenderWorkItem != nil {
+        if deferredFullRenderWorkItem != nil
+            || stagedPromotionsAllowed
+            || stagedPromotionInFlight
+            || stagedPromotionWorkItem != nil
+        {
             WowInternalMetricsRecorder.shared.failFullDocumentFidelityIfMissing(reason: "superseded_by_new_render")
         }
         renderGeneration &+= 1
@@ -417,6 +423,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionToken &+= 1
         stagedPromotionInFlight = false
         stagedPromotionInFlightToken = nil
+        stagedPromotionInFlightStartedAtUptime = nil
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
@@ -967,6 +974,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionToken &+= 1
         stagedPromotionInFlight = false
         stagedPromotionInFlightToken = nil
+        stagedPromotionInFlightStartedAtUptime = nil
 
         stagedRenderedDisplayBoundary = renderedBoundary
         stagedRenderedMarkdownUTF16Count = renderedMarkdownUTF16
@@ -987,6 +995,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionToken &+= 1
         stagedPromotionInFlight = false
         stagedPromotionInFlightToken = nil
+        stagedPromotionInFlightStartedAtUptime = nil
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
@@ -1008,6 +1017,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionToken &+= 1
         stagedPromotionInFlight = false
         stagedPromotionInFlightToken = nil
+        stagedPromotionInFlightStartedAtUptime = nil
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
@@ -1456,6 +1466,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
     /// Closing fast-path: drop non-critical deferred work to avoid shutdown lag on huge documents.
     func cancelDeferredWorkForClose() {
+        WowInternalMetricsRecorder.shared.failFullDocumentFidelityIfMissing(
+            reason: "cancelled_for_close"
+        )
         deferredFullRenderWorkItem?.cancel()
         deferredFullRenderWorkItem = nil
         deferredFullRenderToken &+= 1
@@ -1474,6 +1487,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionToken &+= 1
         stagedPromotionInFlight = false
         stagedPromotionInFlightToken = nil
+        stagedPromotionInFlightStartedAtUptime = nil
         stagedPromotionsAllowed = false
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
@@ -2679,7 +2693,19 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         guard stagedRenderGeneration == renderGeneration else { return }
         guard deferredFullRenderWorkItem == nil else { return }
         guard !hasUnexportedChanges else { return }
-        guard !stagedPromotionInFlight else { return }
+        if stagedPromotionInFlight {
+            let now = ProcessInfo.processInfo.systemUptime
+            if let started = stagedPromotionInFlightStartedAtUptime,
+               now - started > 2.0 {
+                WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_stuck_recovery_count")
+                stagedPromotionComputeTask?.cancel()
+                stagedPromotionInFlight = false
+                stagedPromotionInFlightToken = nil
+                stagedPromotionInFlightStartedAtUptime = nil
+                scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: 40)
+            }
+            return
+        }
         guard NSEvent.pressedMouseButtons == 0 else {
             scheduleStagedPromotionFollowupIfNeeded()
             return
@@ -2790,6 +2816,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         stagedPromotionInFlight = true
         stagedPromotionInFlightToken = token
+        stagedPromotionInFlightStartedAtUptime = ProcessInfo.processInfo.systemUptime
         stagedPromotionParseWorkItem?.cancel()
         stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
@@ -2849,6 +2876,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             if stagedPromotionInFlightToken == token {
                 stagedPromotionInFlight = false
                 stagedPromotionInFlightToken = nil
+                stagedPromotionInFlightStartedAtUptime = nil
                 stagedPromotionComputeTask = nil
                 stagedPromotionParseWorkItem = nil
             }
@@ -2972,6 +3000,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             replacementLength: replacementLength
         )
         let promotionApplyMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - promotionApplyStart) / 1_000_000
+        lastStagedPromotionApplyMs = promotionApplyMs
         WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
             "wow_staged_promotion_apply_latency_ms_max",
             candidate: promotionApplyMs
@@ -3021,6 +3050,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if stagedPromotionInFlightToken == token {
             stagedPromotionInFlight = false
             stagedPromotionInFlightToken = nil
+            stagedPromotionInFlightStartedAtUptime = nil
             stagedPromotionComputeTask = nil
             stagedPromotionParseWorkItem = nil
         }
@@ -3092,6 +3122,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         let replaceEnd = replaceRange.location + replaceRange.length
         let replacementIsEntirelyBeforeAnchor = replaceEnd <= anchor.characterLocation
+        let now = ProcessInfo.processInfo.systemUptime
+        let sinceScroll = now - lastScrollEventUptime
+        if sinceScroll < 0.5 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("anchor_rebase_skipped_recent_scroll_count")
+            return
+        }
 
         let glyphRange = lm.glyphRange(
             forCharacterRange: NSRange(location: adjustedLocation, length: 1),
@@ -3425,11 +3461,21 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             self.applyNextStagedViewportPromotion(token: token)
         }
         let now = ProcessInfo.processInfo.systemUptime
+        let sinceInteraction = now - lastUserInteractionUptime
+        let sinceScroll = now - lastScrollEventUptime
         let useTurbo = shouldUseTurboStagedPromotion(
-            sinceInteraction: now - lastUserInteractionUptime,
-            sinceScroll: now - lastScrollEventUptime
+            sinceInteraction: sinceInteraction,
+            sinceScroll: sinceScroll
         )
-        let followupDelayMs = max(4, delayOverrideMs ?? stagedPromotionFollowupDelayMsValue(useTurbo: useTurbo))
+        var followupDelayMs = max(4, delayOverrideMs ?? stagedPromotionFollowupDelayMsValue(useTurbo: useTurbo))
+        if sinceInteraction < 0.35 || sinceScroll < 0.35 {
+            followupDelayMs = max(followupDelayMs, 60)
+        }
+        if lastStagedPromotionApplyMs > 33 {
+            followupDelayMs = max(followupDelayMs, 80)
+        } else if lastStagedPromotionApplyMs > 16 {
+            followupDelayMs = max(followupDelayMs, 40)
+        }
         stagedPromotionWorkItem = work
         DispatchQueue.main.asyncAfter(
             deadline: .now() + .milliseconds(followupDelayMs),
