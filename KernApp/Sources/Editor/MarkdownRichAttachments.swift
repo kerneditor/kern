@@ -110,14 +110,14 @@ final class MarkdownImageAttachment: NSTextAttachment {
         // Disabled means no remote fetches and no reuse of remote cache entries.
         if isRemoteURL, !allowsRemoteLoading {
             loadState = .failed
-            notifyDisplayUpdate()
+            requestDisplayUpdate()
             return
         }
 
         if let cached = Self.cache.object(forKey: url as NSURL) {
             renderedImage = cached
             loadState = .ready
-            notifyDisplayUpdate()
+            requestDisplayUpdate()
             return
         }
 
@@ -138,7 +138,7 @@ final class MarkdownImageAttachment: NSTextAttachment {
                     } else {
                         self.loadState = .failed
                     }
-                    self.notifyDisplayUpdate()
+                    self.requestDisplayUpdate()
                 }
             }
             return
@@ -155,7 +155,7 @@ final class MarkdownImageAttachment: NSTextAttachment {
 
                 guard error == nil, let data, let image = NSImage(data: data) else {
                     self.loadState = .failed
-                    self.notifyDisplayUpdate()
+                    self.requestDisplayUpdate()
                     return
                 }
 
@@ -163,23 +163,24 @@ final class MarkdownImageAttachment: NSTextAttachment {
                 Self.cache.setObject(image, forKey: url as NSURL, cost: cost)
                 self.renderedImage = image
                 self.loadState = .ready
-                self.notifyDisplayUpdate()
+                self.requestDisplayUpdate()
             }
         }.resume()
     }
 
-    @MainActor
-    private func notifyDisplayUpdate() {
+    private func requestDisplayUpdate() {
         guard let hostView else { return }
-        hostView.needsDisplay = true
-        if let textView = hostView as? NSTextView {
-            guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
-            let visibleRectInContainer = textView.visibleRect.offsetBy(
-                dx: -textView.textContainerOrigin.x,
-                dy: -textView.textContainerOrigin.y
-            )
-            let visibleGlyphRange = lm.glyphRange(forBoundingRect: visibleRectInContainer, in: tc)
-            lm.invalidateDisplay(forGlyphRange: visibleGlyphRange)
+        DispatchQueue.main.async {
+            hostView.needsDisplay = true
+            if let textView = hostView as? NSTextView {
+                guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+                let visibleRectInContainer = textView.visibleRect.offsetBy(
+                    dx: -textView.textContainerOrigin.x,
+                    dy: -textView.textContainerOrigin.y
+                )
+                let visibleGlyphRange = lm.glyphRange(forBoundingRect: visibleRectInContainer, in: tc)
+                lm.invalidateDisplay(forGlyphRange: visibleGlyphRange)
+            }
         }
     }
 

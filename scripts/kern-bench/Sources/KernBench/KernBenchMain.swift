@@ -629,7 +629,8 @@ struct KernBench {
                     automationOverheadMs: Double?,
                     unattributedOpenBudgetMs: Double?,
                     timeToStableLayoutMs: Double?,
-                    postReadyExportQuiescenceMs: Double?
+                    postReadyExportQuiescenceMs: Double?,
+                    extraMetrics: [String: Double]?
                 ) {
                     // Single source of truth: suite.requiredMetrics.
                     // Startup metrics are collected via preflight probes rather than each measured run.
@@ -693,6 +694,7 @@ struct KernBench {
                         unattributedOpenBudgetMs: unattributedOpenBudgetMs,
                         timeToStableLayoutMs: timeToStableLayoutMs,
                         postReadyExportQuiescenceMs: postReadyExportQuiescenceMs,
+                        extraMetrics: extraMetrics,
                         runQuality: runQuality.rawValue,
                         stageTimeoutCount: timeoutCount,
                         stageFailureCount: failureCount,
@@ -743,7 +745,8 @@ struct KernBench {
                         automationOverheadMs: nil,
                         unattributedOpenBudgetMs: nil,
                         timeToStableLayoutMs: nil,
-                        postReadyExportQuiescenceMs: nil
+                        postReadyExportQuiescenceMs: nil,
+                        extraMetrics: nil
                     )
                 }
 
@@ -921,6 +924,7 @@ struct KernBench {
                 var wowViewportFidelityReadyLatencyMs: Double?
                 var wowFullDocumentFidelityReadyLatencyMs: Double?
                 var fullFidelityEndToEndLatencyMs: Double?
+                var runExtraMetrics: [String: Double]?
                 var preloadedWowMetrics: WowInternalMetricsPayload?
 
                 if config.enableFrameMonitor && screencaptureAvailable && !config.noScreenCapture && !editor.isElectron {
@@ -1202,8 +1206,13 @@ struct KernBench {
 
                     if let wowMetrics {
                         let knownMetrics = Set(wowMetricValues.map(\.0))
+                        var unknownMetrics: [String: Double] = [:]
                         for (metric, value) in wowMetrics.metrics where !knownMetrics.contains(metric) {
                             collector.record(metric: metric, value: value)
+                            unknownMetrics[metric] = value
+                        }
+                        if !unknownMetrics.isEmpty {
+                            runExtraMetrics = unknownMetrics
                         }
                     }
                 }
@@ -1322,7 +1331,8 @@ struct KernBench {
                     automationOverheadMs: automationOverheadMs,
                     unattributedOpenBudgetMs: unattributedOpenBudgetMs,
                     timeToStableLayoutMs: timeToStableLayoutMs,
-                    postReadyExportQuiescenceMs: postReadyExportQuiescenceMs
+                    postReadyExportQuiescenceMs: postReadyExportQuiescenceMs,
+                    extraMetrics: runExtraMetrics
                 )
 
                 editorResults[editor.displayName] = result

@@ -133,6 +133,7 @@ struct RunResult: Codable {
     let unattributedOpenBudgetMs: Double?
     let timeToStableLayoutMs: Double?
     let postReadyExportQuiescenceMs: Double?
+    let extraMetrics: [String: Double]?
 
     let runQuality: String
     let stageTimeoutCount: Int
@@ -179,6 +180,7 @@ struct RunResult: Codable {
         case unattributedOpenBudgetMs = "unattributed_open_budget_ms"
         case timeToStableLayoutMs = "time_to_stable_layout_ms"
         case postReadyExportQuiescenceMs = "post_ready_export_quiescence_ms"
+        case extraMetrics = "extra_metrics"
         case runQuality = "run_quality"
         case stageTimeoutCount = "stage_timeout_count"
         case stageFailureCount = "stage_failure_count"

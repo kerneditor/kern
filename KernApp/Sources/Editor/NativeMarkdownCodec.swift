@@ -8,7 +8,7 @@ import AppKit
 /// - It does not aim for full CommonMark/GFM compliance yet.
 @MainActor
 enum NativeMarkdownCodec {
-    private struct ReferenceDefinition {
+    struct ReferenceDefinition {
         let id: String
         let destination: String
         let title: String?
@@ -139,7 +139,12 @@ enum NativeMarkdownCodec {
         }
     }
 
-    static func importMarkdown(_ markdown: String, options: Options = Options(), baseURL: URL? = nil) -> NSAttributedString {
+    static func importMarkdown(
+        _ markdown: String,
+        options: Options = Options(),
+        baseURL: URL? = nil,
+        precomputedReferenceDefinitions: [String: ReferenceDefinition]? = nil
+    ) -> NSAttributedString {
         let baseFont = NSFont.systemFont(ofSize: 16)
         let markdownLength = markdown.utf16.count
         if shouldUseLargeDocumentPlainImport(options: options, markdownLength: markdownLength) {
@@ -151,22 +156,7 @@ enum NativeMarkdownCodec {
         // Preserve empty lines by splitting with omittingEmptySubsequences=false.
         let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
-        var referenceDefinitions: [String: ReferenceDefinition] = [:]
-        for raw in lines {
-            if let def = parseReferenceDefinition(raw) {
-                referenceDefinitions[def.id.lowercased()] = def
-            } else {
-                // Strip blockquote prefixes and retry — reference definitions inside
-                // blockquotes are still valid link targets per CommonMark spec.
-                var stripped = raw
-                while let q = parseBlockquotePrefix(stripped) {
-                    stripped = q.text
-                }
-                if stripped != raw, let def = parseReferenceDefinition(stripped) {
-                    referenceDefinitions[def.id.lowercased()] = def
-                }
-            }
-        }
+        let referenceDefinitions = precomputedReferenceDefinitions ?? collectReferenceDefinitions(lines: lines)
         let syntaxHighlightingEnabled = shouldEnableSyntaxHighlighting(
             options: options,
             markdownLength: markdownLength
@@ -1030,6 +1020,31 @@ enum NativeMarkdownCodec {
         }
 
         return result
+    }
+
+    static func collectReferenceDefinitions(in markdown: String) -> [String: ReferenceDefinition] {
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        return collectReferenceDefinitions(lines: lines)
+    }
+
+    private static func collectReferenceDefinitions(lines: [String]) -> [String: ReferenceDefinition] {
+        var referenceDefinitions: [String: ReferenceDefinition] = [:]
+        for raw in lines {
+            if let def = parseReferenceDefinition(raw) {
+                referenceDefinitions[def.id.lowercased()] = def
+                continue
+            }
+            // Strip blockquote prefixes and retry — reference definitions inside
+            // blockquotes are still valid link targets per CommonMark spec.
+            var stripped = raw
+            while let q = parseBlockquotePrefix(stripped) {
+                stripped = q.text
+            }
+            if stripped != raw, let def = parseReferenceDefinition(stripped) {
+                referenceDefinitions[def.id.lowercased()] = def
+            }
+        }
+        return referenceDefinitions
     }
 
     static func exportMarkdown(_ attributed: NSAttributedString, options: Options = Options()) -> String {

@@ -106,11 +106,20 @@ final class EditorDocument: NSDocument {
         // Connect the editor VC to this document
         if let editorVC = windowController.contentViewController as? NativeEditorViewController {
             editorVC.documentURL = fileURL
-            editorVC.stringValue = stringValue
             editorVC.onContentChanged = { [weak self] markdown in
                 guard let self else { return }
                 self.stringValue = markdown
                 self.updateChangeCount(.changeDone)
+            }
+            let initialMarkdown = stringValue
+            if isUITesting {
+                editorVC.stringValue = initialMarkdown
+            } else {
+                // Keep initial window presentation responsive: let AppKit show the window first,
+                // then start document rendering on the next main-runloop turn.
+                DispatchQueue.main.async { [weak editorVC] in
+                    editorVC?.stringValue = initialMarkdown
+                }
             }
         }
     }

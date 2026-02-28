@@ -111,7 +111,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var scrollChromeUpdateWorkItem: DispatchWorkItem?
     private var stagedPromotionWorkItem: DispatchWorkItem?
     private var stagedPromotionLayoutWorkItem: DispatchWorkItem?
-    private var stagedPromotionParseWorkItem: DispatchWorkItem?
     private var stagedPromotionComputeTask: Task<Void, Never>?
     private var deferredFullRenderToken: UInt64 = 0
     private var stagedPromotionToken: UInt64 = 0
@@ -121,7 +120,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var lastStagedPromotionApplyMs: Double = 0
     private let stagedPromotionComputeWorker = StagedPromotionComputeWorker()
     private var lastUserInteractionUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
-    private var lastScrollEventUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private var lastUserScrollEventUptime: TimeInterval?
+    private var isUserLiveScrolling: Bool = false
     private var renderGeneration: Int = 0
     private let stagedOpenCharThreshold = 250_000
     private let stagedOpenPrefixLineBudget = 900
@@ -140,7 +140,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private let stagedPromotionTurboFollowupDelayMs = 6
     private let stagedPromotionTurboStepChars = 4_000_000
     private let stagedPromotionTurboMaxCatchupStepChars = 8_000_000
-    private let stagedPromotionTurboActivateIdleMs = 350
+    private let stagedPromotionTurboActivateIdleMs = 250
     private let stagedPromotionContextChars = 8_000
     private let stagedPromotionViewportGuardChars = 400
     private let stagedPromotionViewportMicroStepChars = 512_000
@@ -159,6 +159,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var stagedRenderedMarkdownUTF16Count: Int?
     private var stagedRenderedDisplayBoundary: Int?
     private var stagedRenderGeneration: Int?
+    private var stagedReferenceDefinitions: [String: NativeMarkdownCodec.ReferenceDefinition]?
+    private var stagedReferenceDefinitionsGeneration: Int?
     private var stagedPromotionsAllowed: Bool = false
     private var stagedAdaptiveViewportMicroStepChars: Int = 512_000
     private var pendingEditMutation: PendingEditMutation?
@@ -269,6 +271,18 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             selector: #selector(scrollViewDidScroll(_:)),
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewWillStartLiveScroll(_:)),
+            name: NSScrollView.willStartLiveScrollNotification,
+            object: scrollView
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewDidEndLiveScroll(_:)),
+            name: NSScrollView.didEndLiveScrollNotification,
+            object: scrollView
         )
         NotificationCenter.default.addObserver(
             self,
@@ -416,8 +430,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionWorkItem = nil
         stagedPromotionLayoutWorkItem?.cancel()
         stagedPromotionLayoutWorkItem = nil
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         stagedPromotionComputeTask = nil
         stagedPromotionToken &+= 1
@@ -427,6 +439,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
+        stagedReferenceDefinitions = nil
+        stagedReferenceDefinitionsGeneration = nil
         stagedPromotionsAllowed = false
         pendingEditMutation = nil
         resetAdaptiveStagedPromotionBudget()
@@ -438,6 +452,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         let opt = NativeMarkdownCodec.Options.fromUserDefaults()
         let useStagedOpen = shouldUseStagedOpen(for: markdown)
+        let referenceDefinitions = useStagedOpen
+            ? NativeMarkdownCodec.collectReferenceDefinitions(in: markdown)
+            : nil
 
         wow.beginOpenReady()
         wow.beginViewportSemanticReady()
@@ -447,17 +464,25 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         wow.beginParse()
         let attr: NSAttributedString
         if useStagedOpen {
-            let staged = makeStagedInitialAttributed(markdown: markdown, options: opt)
+            let staged = makeStagedInitialAttributed(
+                markdown: markdown,
+                options: opt,
+                precomputedReferenceDefinitions: referenceDefinitions
+            )
             attr = staged.attributed
             stagedRenderedMarkdownUTF16Count = staged.renderedMarkdownUTF16Count
             stagedRenderedDisplayBoundary = staged.renderedDisplayBoundary
             stagedRenderGeneration = currentGeneration
+            stagedReferenceDefinitions = referenceDefinitions
+            stagedReferenceDefinitionsGeneration = currentGeneration
             stagedPromotionsAllowed = staged.renderedMarkdownUTF16Count < markdown.utf16.count
         } else {
             attr = NativeMarkdownCodec.importMarkdown(markdown, options: opt, baseURL: documentURL)
             stagedRenderedMarkdownUTF16Count = nil
             stagedRenderedDisplayBoundary = nil
             stagedRenderGeneration = nil
+            stagedReferenceDefinitions = nil
+            stagedReferenceDefinitionsGeneration = nil
             stagedPromotionsAllowed = false
         }
         wow.endParse()
@@ -631,10 +656,16 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         options: NativeMarkdownCodec.Options,
         prefix: String,
         prefixUTF16Count: Int,
-        baseURL: URL?
+        baseURL: URL?,
+        precomputedReferenceDefinitions: [String: NativeMarkdownCodec.ReferenceDefinition]?
     ) -> StagedAttributedPayload {
         if prefixUTF16Count >= markdown.utf16.count {
-            let full = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: baseURL)
+            let full = NativeMarkdownCodec.importMarkdown(
+                markdown,
+                options: options,
+                baseURL: baseURL,
+                precomputedReferenceDefinitions: precomputedReferenceDefinitions
+            )
             return StagedAttributedPayload(
                 attributed: full,
                 renderedMarkdownUTF16Count: markdown.utf16.count,
@@ -643,7 +674,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         }
 
         let prefixAttr = NSMutableAttributedString(
-            attributedString: NativeMarkdownCodec.importMarkdown(prefix, options: options, baseURL: baseURL)
+            attributedString: NativeMarkdownCodec.importMarkdown(
+                prefix,
+                options: options,
+                baseURL: baseURL,
+                precomputedReferenceDefinitions: precomputedReferenceDefinitions
+            )
         )
         let renderedBoundary = prefixAttr.length
         let suffixStart = String.Index(utf16Offset: min(prefixUTF16Count, markdown.utf16.count), in: markdown)
@@ -662,15 +698,27 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         )
     }
 
-    private func makeStagedInitialAttributed(markdown: String, options: NativeMarkdownCodec.Options) -> StagedAttributedPayload {
+    private func makeStagedInitialAttributed(
+        markdown: String,
+        options: NativeMarkdownCodec.Options,
+        precomputedReferenceDefinitions: [String: NativeMarkdownCodec.ReferenceDefinition]?
+    ) -> StagedAttributedPayload {
         let initialPrefix = stagedPrefixMarkdown(markdown)
         return makeStagedAttributed(
             markdown: markdown,
             options: options,
             prefix: initialPrefix.prefix,
             prefixUTF16Count: initialPrefix.utf16Count,
-            baseURL: documentURL
+            baseURL: documentURL,
+            precomputedReferenceDefinitions: precomputedReferenceDefinitions
         )
+    }
+
+    private func currentStagedReferenceDefinitions(
+        for generation: Int
+    ) -> [String: NativeMarkdownCodec.ReferenceDefinition]? {
+        guard stagedReferenceDefinitionsGeneration == generation else { return nil }
+        return stagedReferenceDefinitions
     }
 
     private func scheduleDeferredFullRender(
@@ -724,23 +772,29 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                 )
                 return
             }
-            let sinceScroll = ProcessInfo.processInfo.systemUptime - self.lastScrollEventUptime
-            let minScrollIdleSeconds = max(0.15, Double(self.scrollChromeThrottleDelayMs) / 1_000.0)
-            if sinceScroll < minScrollIdleSeconds {
-                let retryDelayMs = Int(ceil(max(0.05, minScrollIdleSeconds - sinceScroll) * 1_000.0))
-                self.scheduleDeferredFullRender(
-                    markdown: markdown,
-                    options: options,
-                    generation: generation,
-                    delayOverrideMs: retryDelayMs
-                )
-                return
+            if let sinceScroll = self.secondsSinceLastUserScroll() {
+                let minScrollIdleSeconds = max(0.15, Double(self.scrollChromeThrottleDelayMs) / 1_000.0)
+                if sinceScroll < minScrollIdleSeconds {
+                    let retryDelayMs = Int(ceil(max(0.05, minScrollIdleSeconds - sinceScroll) * 1_000.0))
+                    self.scheduleDeferredFullRender(
+                        markdown: markdown,
+                        options: options,
+                        generation: generation,
+                        delayOverrideMs: retryDelayMs
+                    )
+                    return
+                }
             }
 
             let selection = self.textView.selectedRange()
             let scrollOrigin = self.scrollView.contentView.bounds.origin
 
-            let full = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: self.documentURL)
+            let full = NativeMarkdownCodec.importMarkdown(
+                markdown,
+                options: options,
+                baseURL: self.documentURL,
+                precomputedReferenceDefinitions: self.currentStagedReferenceDefinitions(for: generation)
+            )
             guard token == self.deferredFullRenderToken else { return }
             guard generation == self.renderGeneration else { return }
             guard self.stringValue == markdown else { return }
@@ -975,8 +1029,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionWorkItem = nil
         stagedPromotionLayoutWorkItem?.cancel()
         stagedPromotionLayoutWorkItem = nil
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         stagedPromotionComputeTask = nil
         stagedPromotionToken &+= 1
@@ -996,8 +1048,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionWorkItem = nil
         stagedPromotionLayoutWorkItem?.cancel()
         stagedPromotionLayoutWorkItem = nil
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         stagedPromotionComputeTask = nil
         stagedPromotionToken &+= 1
@@ -1007,6 +1057,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
+        stagedReferenceDefinitions = nil
+        stagedReferenceDefinitionsGeneration = nil
         resetAdaptiveStagedPromotionBudget()
     }
 
@@ -1018,8 +1070,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionWorkItem = nil
         stagedPromotionLayoutWorkItem?.cancel()
         stagedPromotionLayoutWorkItem = nil
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         stagedPromotionComputeTask = nil
         stagedPromotionToken &+= 1
@@ -1029,6 +1079,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
+        stagedReferenceDefinitions = nil
+        stagedReferenceDefinitionsGeneration = nil
         stagedPromotionsAllowed = false
         resetAdaptiveStagedPromotionBudget()
     }
@@ -1456,7 +1508,12 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         pendingStagedRecoveryAfterExport = false
         guard shouldUseStagedOpen(for: markdown) else { return }
 
-        let staged = makeStagedInitialAttributed(markdown: markdown, options: options)
+        let referenceDefinitions = NativeMarkdownCodec.collectReferenceDefinitions(in: markdown)
+        let staged = makeStagedInitialAttributed(
+            markdown: markdown,
+            options: options,
+            precomputedReferenceDefinitions: referenceDefinitions
+        )
         let selection = textView.selectedRange()
         let scrollOrigin = scrollView.contentView.bounds.origin
 
@@ -1478,6 +1535,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedRenderedMarkdownUTF16Count = staged.renderedMarkdownUTF16Count
         stagedRenderedDisplayBoundary = staged.renderedDisplayBoundary
         stagedRenderGeneration = renderGeneration
+        stagedReferenceDefinitions = referenceDefinitions
+        stagedReferenceDefinitionsGeneration = renderGeneration
         stagedPromotionsAllowed = staged.renderedMarkdownUTF16Count < markdown.utf16.count
         guard stagedPromotionsAllowed else {
             finalizeStagedPromotionCompletion()
@@ -1509,8 +1568,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionWorkItem = nil
         stagedPromotionLayoutWorkItem?.cancel()
         stagedPromotionLayoutWorkItem = nil
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         stagedPromotionComputeTask = nil
         stagedPromotionToken &+= 1
@@ -1521,6 +1578,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedRenderedMarkdownUTF16Count = nil
         stagedRenderedDisplayBoundary = nil
         stagedRenderGeneration = nil
+        stagedReferenceDefinitions = nil
+        stagedReferenceDefinitionsGeneration = nil
         resetAdaptiveStagedPromotionBudget()
     }
 
@@ -2668,18 +2727,51 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     @objc private func scrollViewDidScroll(_ notification: Notification) {
-        let isUserScrollEvent = NSApp.currentEvent?.type == .scrollWheel
+        let isUserScrollEvent = isUserLiveScrolling || isUserDrivenScrollEventType(NSApp.currentEvent?.type)
         if isUserScrollEvent, !isApplyingExternalUpdate {
-            noteUserInteraction()
-            lastScrollEventUptime = ProcessInfo.processInfo.systemUptime
+            noteUserScrollEvent()
         }
         scheduleStagedViewportPromotionIfNeeded()
         scheduleCodeBlockChromeUpdateForScrollIfNeeded()
         maybeReapplyAnchorJumpIfNeeded()
     }
 
-    private func noteUserInteraction() {
-        lastUserInteractionUptime = ProcessInfo.processInfo.systemUptime
+    @objc private func scrollViewWillStartLiveScroll(_ notification: Notification) {
+        guard !isApplyingExternalUpdate else { return }
+        isUserLiveScrolling = true
+        noteUserScrollEvent()
+    }
+
+    @objc private func scrollViewDidEndLiveScroll(_ notification: Notification) {
+        isUserLiveScrolling = false
+        guard !isApplyingExternalUpdate else { return }
+        noteUserScrollEvent()
+        scheduleStagedViewportPromotionIfNeeded()
+    }
+
+    private func isUserDrivenScrollEventType(_ type: NSEvent.EventType?) -> Bool {
+        guard let type else { return false }
+        switch type {
+        case .scrollWheel, .leftMouseDown, .leftMouseDragged, .leftMouseUp,
+             .otherMouseDown, .otherMouseDragged, .otherMouseUp:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func noteUserInteraction(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        lastUserInteractionUptime = now
+    }
+
+    private func noteUserScrollEvent(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        noteUserInteraction(at: now)
+        lastUserScrollEventUptime = now
+    }
+
+    private func secondsSinceLastUserScroll(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TimeInterval? {
+        guard let lastUserScrollEventUptime else { return nil }
+        return now - lastUserScrollEventUptime
     }
 
     private func scheduleStagedViewportPromotionIfNeeded() {
@@ -2741,10 +2833,11 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         }
 
         let now = ProcessInfo.processInfo.systemUptime
-        let sinceScroll = now - lastScrollEventUptime
+        let sinceScroll = secondsSinceLastUserScroll(at: now)
+        let effectiveSinceScroll = sinceScroll ?? .greatestFiniteMagnitude
         let sinceInteraction = now - lastUserInteractionUptime
         let scrollQuietSeconds = Double(stagedPromotionScrollQuietPeriodMsValue()) / 1_000.0
-        if sinceScroll < scrollQuietSeconds {
+        if effectiveSinceScroll < scrollQuietSeconds {
             scheduleStagedPromotionFollowupIfNeeded()
             return
         }
@@ -2758,7 +2851,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         }
         let useTurbo = shouldUseTurboStagedPromotion(
             sinceInteraction: sinceInteraction,
-            sinceScroll: sinceScroll
+            sinceScroll: effectiveSinceScroll
         )
 
         guard let currentRenderedUTF16 = stagedRenderedMarkdownUTF16Count else { return }
@@ -2805,7 +2898,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let parseDeltaCap = stagedPromotionViewportMicroStepCharsValue(
             useTurbo: useTurbo,
             sinceInteraction: sinceInteraction,
-            sinceScroll: sinceScroll
+            sinceScroll: effectiveSinceScroll
         )
         if rawDeltaUTF16 > parseDeltaCap {
             targetUTF16 = min(totalUTF16, currentRenderedUTF16 + parseDeltaCap)
@@ -2831,7 +2924,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                         stagedPromotionViewportMicroStepCharsValue(
                             useTurbo: useTurbo,
                             sinceInteraction: sinceInteraction,
-                            sinceScroll: sinceScroll
+                            sinceScroll: effectiveSinceScroll
                         )
                     )
                 )
@@ -2856,8 +2949,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         stagedPromotionInFlight = true
         stagedPromotionInFlightToken = token
         stagedPromotionInFlightStartedAtUptime = ProcessInfo.processInfo.systemUptime
-        stagedPromotionParseWorkItem?.cancel()
-        stagedPromotionParseWorkItem = nil
         stagedPromotionComputeTask?.cancel()
         WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_compute_launch_count")
         let computeWorker = stagedPromotionComputeWorker
@@ -2878,7 +2969,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                 return
             }
             await MainActor.run {
-                self?.applyParsedStagedViewportPromotion(
+                guard let self else { return }
+                self.applyStagedViewportPromotionWithMainThreadParse(
                     token: token,
                     markdown: markdown,
                     totalUTF16: totalUTF16,
@@ -2896,7 +2988,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         }
     }
 
-    private func applyParsedStagedViewportPromotion(
+    private func applyStagedViewportPromotionWithMainThreadParse(
         token: UInt64,
         markdown: String,
         totalUTF16: Int,
@@ -2910,6 +3002,51 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         promotionComputeMs: Double,
         options: NativeMarkdownCodec.Options
     ) {
+        let referenceDefinitions = currentStagedReferenceDefinitions(for: renderGeneration)
+        let promotionParseStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        let contextOldAttributed = NativeMarkdownCodec.importMarkdown(
+            contextOldMarkdown,
+            options: options,
+            baseURL: documentURL,
+            precomputedReferenceDefinitions: referenceDefinitions
+        )
+        let contextNewAttributed = NativeMarkdownCodec.importMarkdown(
+            contextNewMarkdown,
+            options: options,
+            baseURL: documentURL,
+            precomputedReferenceDefinitions: referenceDefinitions
+        )
+        let promotionParseMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - promotionParseStart) / 1_000_000
+        applyParsedStagedViewportPromotion(
+            token: token,
+            markdown: markdown,
+            totalUTF16: totalUTF16,
+            rawDeltaUTF16: rawDeltaUTF16,
+            currentRenderedDisplayBoundary: currentRenderedDisplayBoundary,
+            promotedPrefixUTF16Count: promotedPrefixUTF16Count,
+            viewportAnchor: viewportAnchor,
+            useTurbo: useTurbo,
+            contextOldAttributed: contextOldAttributed,
+            contextNewAttributed: contextNewAttributed,
+            promotionComputeMs: promotionComputeMs,
+            promotionParseMs: promotionParseMs
+        )
+    }
+
+    private func applyParsedStagedViewportPromotion(
+        token: UInt64,
+        markdown: String,
+        totalUTF16: Int,
+        rawDeltaUTF16: Int,
+        currentRenderedDisplayBoundary: Int,
+        promotedPrefixUTF16Count: Int,
+        viewportAnchor: ViewportAnchor?,
+        useTurbo: Bool,
+        contextOldAttributed: NSAttributedString,
+        contextNewAttributed: NSAttributedString,
+        promotionComputeMs: Double,
+        promotionParseMs: Double
+    ) {
         WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_attempt_count")
         defer {
             if stagedPromotionInFlightToken == token {
@@ -2917,7 +3054,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                 stagedPromotionInFlightToken = nil
                 stagedPromotionInFlightStartedAtUptime = nil
                 stagedPromotionComputeTask = nil
-                stagedPromotionParseWorkItem = nil
             }
         }
         guard stagedPromotionsAllowed else {
@@ -2963,19 +3099,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             "wow_staged_promotion_compute_latency_ms_total",
             by: promotionComputeMs
         )
-
-        let promotionParseStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        let contextOldAttributed = NativeMarkdownCodec.importMarkdown(
-            contextOldMarkdown,
-            options: options,
-            baseURL: documentURL
-        )
-        let contextNewAttributed = NativeMarkdownCodec.importMarkdown(
-            contextNewMarkdown,
-            options: options,
-            baseURL: documentURL
-        )
-        let promotionParseMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - promotionParseStart) / 1_000_000
 
         WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
             "wow_staged_promotion_parse_latency_ms_max",
@@ -3091,7 +3214,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             stagedPromotionInFlightToken = nil
             stagedPromotionInFlightStartedAtUptime = nil
             stagedPromotionComputeTask = nil
-            stagedPromotionParseWorkItem = nil
         }
     }
 
@@ -3162,8 +3284,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let replaceEnd = replaceRange.location + replaceRange.length
         let replacementIsEntirelyBeforeAnchor = replaceEnd <= anchor.characterLocation
         let now = ProcessInfo.processInfo.systemUptime
-        let sinceScroll = now - lastScrollEventUptime
-        if sinceScroll < 0.6 {
+        if let sinceScroll = secondsSinceLastUserScroll(at: now), sinceScroll < 0.6 {
             WowInternalMetricsRecorder.shared.incrementAuxCounter("anchor_rebase_skipped_recent_scroll_count")
             return
         }
@@ -3400,8 +3521,23 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private func tuneAdaptiveStagedPromotionBudget(lastApplyMs: Double, lastParseMs: Double, useTurbo: Bool) {
         guard stagedPromotionsAllowed else { return }
         let frameBudgetMs = stagedPromotionFrameBudgetMsValue()
-        let overHardBudget = lastApplyMs > max(16, frameBudgetMs * 4)
-        let overSoftBudget = lastApplyMs > max(8, frameBudgetMs * 2)
+        let overHardBudget: Bool
+        let overSoftBudget: Bool
+        let growthApplyThreshold: Double
+        let growthParseThreshold: Double
+        if useTurbo {
+            // In turbo mode we are intentionally catching up large unseen regions.
+            // Allow larger slices before backing off so full-fidelity completion does not stall.
+            overHardBudget = lastApplyMs > max(42.0, frameBudgetMs * 10.0)
+            overSoftBudget = lastApplyMs > max(24.0, frameBudgetMs * 6.0)
+            growthApplyThreshold = max(12.0, frameBudgetMs * 3.0)
+            growthParseThreshold = 260.0
+        } else {
+            overHardBudget = lastApplyMs > max(16.0, frameBudgetMs * 4.0)
+            overSoftBudget = lastApplyMs > max(8.0, frameBudgetMs * 2.0)
+            growthApplyThreshold = max(2.0, frameBudgetMs * 0.65)
+            growthParseThreshold = 160.0
+        }
         let floorChars = stagedPromotionViewportMicroStepMinChars
         var next = stagedAdaptiveViewportMicroStepChars
         if lastApplyMs > 50 {
@@ -3410,8 +3546,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             next = Int(Double(next) * 0.9)
         } else if overSoftBudget {
             next = Int(Double(next) * 0.82)
-        } else if lastApplyMs < max(2.0, frameBudgetMs * 0.65), lastParseMs < 160 {
-            next = Int(Double(next) * 1.08)
+        } else if lastApplyMs < growthApplyThreshold, lastParseMs < growthParseThreshold {
+            next = Int(Double(next) * (useTurbo ? 1.14 : 1.08))
         } else {
             return
         }
@@ -3503,12 +3639,16 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             }
             let now = ProcessInfo.processInfo.systemUptime
             let sinceInteraction = now - self.lastUserInteractionUptime
-            let sinceScroll = now - self.lastScrollEventUptime
+            let sinceScroll = self.secondsSinceLastUserScroll(at: now)
             let quietSeconds = Double(self.stagedPromotionIdleQuietPeriodMsValue()) / 1_000.0
             let scrollQuietSeconds = Double(self.stagedPromotionScrollQuietPeriodMsValue()) / 1_000.0
-            if sinceInteraction < quietSeconds || sinceScroll < scrollQuietSeconds {
+            let scrollIsQuiet = (sinceScroll ?? .greatestFiniteMagnitude) >= scrollQuietSeconds
+            if sinceInteraction < quietSeconds || !scrollIsQuiet {
                 let quietRemainingMs = max(0, Int(ceil((quietSeconds - sinceInteraction) * 1_000.0)))
-                let scrollRemainingMs = max(0, Int(ceil((scrollQuietSeconds - sinceScroll) * 1_000.0)))
+                let scrollRemainingMs = max(
+                    0,
+                    Int(ceil((scrollQuietSeconds - (sinceScroll ?? scrollQuietSeconds)) * 1_000.0))
+                )
                 let retryDelayMs = max(20, max(quietRemainingMs, scrollRemainingMs))
                 self.scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: retryDelayMs)
                 return
@@ -3517,7 +3657,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         }
         let now = ProcessInfo.processInfo.systemUptime
         let sinceInteraction = now - lastUserInteractionUptime
-        let sinceScroll = now - lastScrollEventUptime
+        let sinceScroll = secondsSinceLastUserScroll(at: now) ?? .greatestFiniteMagnitude
         let useTurbo = shouldUseTurboStagedPromotion(
             sinceInteraction: sinceInteraction,
             sinceScroll: sinceScroll

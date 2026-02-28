@@ -20,6 +20,8 @@ final class WowInternalMetricsRecorder {
     private var metrics: [String: Double] = [:]
     private var failureReasons: [String: String] = [:]
     private var metricSamples: [String: [Double]] = [:]
+    private var dirtySampleMetricKeys: Set<String> = []
+    private var p99MetricKeyOverrides: [String: String] = [:]
     private var pendingPersistWorkItem: DispatchWorkItem?
     private var lastPersistUptime: TimeInterval = 0
     private let persistCoalesceSeconds: TimeInterval = 0.08
@@ -42,6 +44,8 @@ final class WowInternalMetricsRecorder {
         metrics.removeAll(keepingCapacity: true)
         failureReasons.removeAll(keepingCapacity: true)
         metricSamples.removeAll(keepingCapacity: true)
+        dirtySampleMetricKeys.removeAll(keepingCapacity: true)
+        p99MetricKeyOverrides.removeAll(keepingCapacity: true)
         persist(immediate: true)
     }
 
@@ -109,21 +113,9 @@ final class WowInternalMetricsRecorder {
     ) {
         guard isEnabled else { return }
         let rounded = round(sample * 100) / 100
-        var samples = metricSamples[key] ?? []
-        samples.append(rounded)
-        metricSamples[key] = samples
-        guard !samples.isEmpty else { return }
-
-        let sorted = samples.sorted()
-        let p99 = percentile(sorted, percentile: 0.99)
-        let p95 = percentile(sorted, percentile: 0.95)
-        let p50 = percentile(sorted, percentile: 0.50)
-        let maxSample = sorted.last ?? rounded
-
-        metrics[p99MetricKey ?? "\(key)_p99_ms"] = round(p99 * 100) / 100
-        metrics["\(key)_p95_ms"] = round(p95 * 100) / 100
-        metrics["\(key)_p50_ms"] = round(p50 * 100) / 100
-        metrics["\(key)_max_ms"] = round(maxSample * 100) / 100
+        metricSamples[key, default: []].append(rounded)
+        dirtySampleMetricKeys.insert(key)
+        p99MetricKeyOverrides[key] = p99MetricKey ?? "\(key)_p99_ms"
         persist()
     }
 
@@ -178,6 +170,7 @@ final class WowInternalMetricsRecorder {
 
     private func flushPersistNow() {
         guard let outputPath else { return }
+        materializeDirtySampleMetrics()
         let payload = Payload(version: 1, metrics: metrics, failureReasons: failureReasons)
         do {
             let encoder = JSONEncoder()
@@ -187,6 +180,27 @@ final class WowInternalMetricsRecorder {
             lastPersistUptime = ProcessInfo.processInfo.systemUptime
         } catch {
             // Best effort only; benchmark runner will classify missing instrumentation.
+        }
+    }
+
+    private func materializeDirtySampleMetrics() {
+        guard !dirtySampleMetricKeys.isEmpty else { return }
+        let keys = dirtySampleMetricKeys
+        dirtySampleMetricKeys.removeAll(keepingCapacity: true)
+
+        for key in keys {
+            guard let samples = metricSamples[key], !samples.isEmpty else { continue }
+            let sorted = samples.sorted()
+            let p99 = percentile(sorted, percentile: 0.99)
+            let p95 = percentile(sorted, percentile: 0.95)
+            let p50 = percentile(sorted, percentile: 0.50)
+            let maxSample = sorted.last ?? 0
+
+            let p99Key = p99MetricKeyOverrides[key] ?? "\(key)_p99_ms"
+            metrics[p99Key] = round(p99 * 100) / 100
+            metrics["\(key)_p95_ms"] = round(p95 * 100) / 100
+            metrics["\(key)_p50_ms"] = round(p50 * 100) / 100
+            metrics["\(key)_max_ms"] = round(maxSample * 100) / 100
         }
     }
 

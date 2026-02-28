@@ -284,6 +284,7 @@ final class ClassificationTests: XCTestCase {
                     unattributedOpenBudgetMs: nil,
                     timeToStableLayoutMs: nil,
                     postReadyExportQuiescenceMs: nil,
+                    extraMetrics: nil,
                     runQuality: "degraded",
                     stageTimeoutCount: 0,
                     stageFailureCount: 3,
