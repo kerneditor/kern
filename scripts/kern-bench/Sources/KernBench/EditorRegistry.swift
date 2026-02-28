@@ -14,78 +14,54 @@ struct EditorDefinition {
     let cleanLaunchArgs: [String]
     /// Prefix for helper processes (e.g., "Code Helper" for VS Code Electron children).
     let helperProcessPrefix: String?
+    /// Roster-locked v1 membership.
+    let requiredForOfficial: Bool
 }
 
-let knownEditors: [EditorDefinition] = [
-    // --- Required editors ---
+/// Locked roster v1 for official benchmark claims.
+/// Policy source: architect/prompt.md + architect/dual-benchmark-methodology-plan.md.
+let requiredRosterV1: [EditorDefinition] = [
     .init(displayName: "Kern", appName: "Kern",
           bundleIdentifier: "com.gradigit.kern", processName: "Kern",
           architecture: "Native Swift + TextKit", isElectron: false,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
+          cliLaunchCommand: nil, cleanLaunchArgs: ["-ApplePersistenceIgnoreState", "YES"],
+          helperProcessPrefix: nil, requiredForOfficial: true),
     .init(displayName: "VS Code", appName: "Visual Studio Code",
-          bundleIdentifier: "com.microsoft.VSCode", processName: "Electron",
+          bundleIdentifier: "com.microsoft.VSCode", processName: "Code",
           architecture: "Electron (Chromium + Node)", isElectron: true,
           cliLaunchCommand: ["code"],
           cleanLaunchArgs: ["--new-window", "--user-data-dir", "/tmp/vscode-bench", "--disable-extensions"],
-          helperProcessPrefix: "Code Helper"),
-    .init(displayName: "Sublime Text", appName: "Sublime Text",
-          bundleIdentifier: "com.sublimetext.4", processName: "sublime_text",
-          architecture: "Native C++", isElectron: false,
-          cliLaunchCommand: ["subl"],
-          cleanLaunchArgs: ["--safe-mode", "--new-window"],
-          helperProcessPrefix: nil),
+          helperProcessPrefix: "Code Helper", requiredForOfficial: true),
     .init(displayName: "Zed", appName: "Zed",
           bundleIdentifier: "dev.zed.Zed", processName: "zed",
           architecture: "Native Rust + Metal", isElectron: false,
           cliLaunchCommand: ["zed"],
-          cleanLaunchArgs: ["--new"],
-          helperProcessPrefix: nil),
+          cleanLaunchArgs: ["--new", "--user-data-dir", "/tmp/zed-bench"],
+          helperProcessPrefix: nil, requiredForOfficial: true),
+    .init(displayName: "Sublime Text", appName: "Sublime Text",
+          bundleIdentifier: "com.sublimetext.4", processName: "sublime_text",
+          architecture: "Native C++", isElectron: false,
+          cliLaunchCommand: ["subl"],
+          cleanLaunchArgs: ["--new-window"],
+          helperProcessPrefix: "/opt/homebrew/bin/subl", requiredForOfficial: true),
     .init(displayName: "TextEdit", appName: "TextEdit",
           bundleIdentifier: "com.apple.TextEdit", processName: "TextEdit",
           architecture: "Native AppKit", isElectron: false,
           cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-    .init(displayName: "MarkText", appName: "MarkText",
-          bundleIdentifier: "com.github.marktext.marktext", processName: "MarkText",
-          architecture: "Electron", isElectron: true,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-
-    // --- Optional editors ---
-    .init(displayName: "Typora", appName: "Typora",
-          bundleIdentifier: "abnerworks.Typora", processName: "Typora",
-          architecture: "Electron", isElectron: true,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-    .init(displayName: "iA Writer", appName: "iA Writer",
-          bundleIdentifier: "pro.writer.mac", processName: "iA Writer",
-          architecture: "Native AppKit", isElectron: false,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-    .init(displayName: "Nova", appName: "Nova",
-          bundleIdentifier: "com.panic.Nova", processName: "Nova",
-          architecture: "Native AppKit", isElectron: false,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-    .init(displayName: "BBEdit", appName: "BBEdit",
-          bundleIdentifier: "com.barebones.bbedit", processName: "BBEdit",
-          architecture: "Native AppKit", isElectron: false,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
-    .init(displayName: "CotEditor", appName: "CotEditor",
-          bundleIdentifier: "com.coteditor.CotEditor", processName: "CotEditor",
-          architecture: "Native AppKit", isElectron: false,
-          cliLaunchCommand: nil, cleanLaunchArgs: [],
-          helperProcessPrefix: nil),
+          helperProcessPrefix: nil, requiredForOfficial: true),
 ]
 
+/// Alias retained for call sites.
+let knownEditors: [EditorDefinition] = requiredRosterV1
+
+func requiredRosterNames() -> [String] {
+    requiredRosterV1.map(\.displayName)
+}
+
 func isEditorInstalled(_ editor: EditorDefinition) -> Bool {
-    // Use NSWorkspace for bundle ID lookup first (most reliable).
     if NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier) != nil {
         return true
     }
-    // Fallback: check common paths.
     let paths = [
         "/Applications/\(editor.appName).app",
         "/System/Applications/\(editor.appName).app",

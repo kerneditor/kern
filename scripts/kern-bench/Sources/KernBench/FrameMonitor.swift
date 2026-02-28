@@ -8,6 +8,11 @@ struct FrameTimestamps {
     let renderStableNs: UInt64?
 }
 
+struct ScrollFrameCaptureResult {
+    let frameIntervalsMs: [Double]
+    let captureDurationMs: Double
+}
+
 /// Monitor frames from a specific window using ScreenCaptureKit.
 /// Detects first paint (SCFrameStatus.complete with actual content) and render stable (sustained .idle).
 @available(macOS 14.0, *)
@@ -230,4 +235,153 @@ func checkScreenCapturePermission() async -> Bool {
 
 private func printErr(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
+}
+
+/// Captures frame cadence for a fixed interval and returns inter-frame deltas.
+/// Used for real-use scroll smoothness preferred metrics.
+@available(macOS 14.0, *)
+final class ScrollFrameCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+    private var stream: SCStream?
+    private let captureQueue = DispatchQueue(label: "com.kern.bench.scroll.capture", qos: .userInteractive)
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<ScrollFrameCaptureResult?, Never>?
+    private var frameTimesNs: [UInt64] = []
+    private var startedAtNs: UInt64?
+    private var endedAtNs: UInt64?
+    private let timeoutNs: UInt64
+
+    init(timeout: TimeInterval) {
+        self.timeoutNs = UInt64(timeout * 1_000_000_000)
+        super.init()
+    }
+
+    func capture(windowID: CGWindowID, duration: TimeInterval) async -> ScrollFrameCaptureResult? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+                return nil
+            }
+
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let config = SCStreamConfiguration()
+            let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+            config.width = max(1, Int(window.frame.width * scale))
+            config.height = max(1, Int(window.frame.height * scale))
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+            config.pixelFormat = kCVPixelFormatType_32BGRA
+            config.showsCursor = false
+            config.capturesAudio = false
+
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: captureQueue)
+
+            return await withCheckedContinuation { continuation in
+                captureQueue.sync {
+                    self.stream = stream
+                    self.continuation = continuation
+                    self.frameTimesNs = []
+                    self.startedAtNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+                    self.endedAtNs = nil
+                }
+
+                Task {
+                    do {
+                        try await stream.startCapture()
+                    } catch {
+                        self.finish()
+                    }
+                }
+
+                DispatchQueue.global().asyncAfter(deadline: .now() + duration) { [weak self] in
+                    self?.finish()
+                }
+                let timeoutSec = Double(self.timeoutNs) / 1_000_000_000
+                DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSec) { [weak self] in
+                    self?.finish()
+                }
+            }
+        } catch {
+            return nil
+        }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen else { return }
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let statusRaw = attachments.first?[.status] as? Int,
+              let status = SCFrameStatus(rawValue: statusRaw),
+              status == .complete else { return }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        let ptsNs = UInt64(max(0, CMTimeGetSeconds(pts) * 1_000_000_000.0))
+        guard ptsNs > 0 else { return }
+
+        lock.lock()
+        if let last = frameTimesNs.last {
+            if ptsNs > last {
+                frameTimesNs.append(ptsNs)
+            }
+        } else {
+            frameTimesNs.append(ptsNs)
+        }
+        lock.unlock()
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: any Error) {
+        finish()
+    }
+
+    private func finish() {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        self.endedAtNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        let frameTimes = self.frameTimesNs
+        let captureStarted = self.startedAtNs
+        let captureEnded = self.endedAtNs
+        let stream = self.stream
+        self.stream = nil
+        lock.unlock()
+
+        if let stream {
+            Task { try? await stream.stopCapture() }
+        }
+
+        guard frameTimes.count >= 2 else {
+            continuation.resume(returning: nil)
+            return
+        }
+
+        var intervals: [Double] = []
+        intervals.reserveCapacity(max(0, frameTimes.count - 1))
+        for idx in 1..<frameTimes.count {
+            let deltaNs = frameTimes[idx] - frameTimes[idx - 1]
+            if deltaNs > 0 {
+                let deltaMs = Double(deltaNs) / 1_000_000.0
+                if deltaMs < 500 {
+                    intervals.append(deltaMs)
+                }
+            }
+        }
+
+        guard !intervals.isEmpty else {
+            continuation.resume(returning: nil)
+            return
+        }
+
+        let captureDurationMs: Double
+        if let captureStarted, let captureEnded, captureEnded > captureStarted {
+            captureDurationMs = Double(captureEnded - captureStarted) / 1_000_000.0
+        } else {
+            captureDurationMs = Double(frameTimes.last! - frameTimes.first!) / 1_000_000.0
+        }
+
+        continuation.resume(returning: ScrollFrameCaptureResult(
+            frameIntervalsMs: intervals,
+            captureDurationMs: captureDurationMs
+        ))
+    }
 }

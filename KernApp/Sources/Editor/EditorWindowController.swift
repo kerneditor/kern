@@ -67,9 +67,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Flush any pending debounced export so the document's stringValue
-        // reflects the latest edits before the window (and document) close.
+        // Drop non-critical deferred work + flush pending exports so close/quit stays responsive
+        // even for huge documents while still preserving unsaved user edits.
         if let nativeVC = contentViewController as? NativeEditorViewController {
+            nativeVC.cancelDeferredWorkForClose()
             nativeVC.flushPendingExport()
         }
     }

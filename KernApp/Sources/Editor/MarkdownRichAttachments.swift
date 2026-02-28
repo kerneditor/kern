@@ -476,25 +476,48 @@ final class MarkdownMermaidAttachment: NSTextAttachment {
         let label: String?
     }
 
+    fileprivate struct ASCIILayout {
+        let lines: [String]
+        let size: CGSize
+        let lineHeight: CGFloat
+        let font: NSFont
+    }
+
     let sourceMarkdown: String
+    nonisolated fileprivate let requestedRenderMode: NativeMarkdownCodec.Options.MermaidRenderMode
+    nonisolated fileprivate let effectiveRenderMode: NativeMarkdownCodec.Options.MermaidRenderMode
     nonisolated fileprivate let kind: MermaidMiniParser.DiagramKind
     nonisolated let nodes: [Node]
     nonisolated let edges: [Edge]
     nonisolated(unsafe) private var cachedLayoutWidthKey: Int?
     nonisolated(unsafe) private var cachedLayoutResult: MermaidMiniLayout.Result?
+    nonisolated(unsafe) private var cachedASCIIWidthKey: Int?
+    nonisolated(unsafe) private var cachedASCIILayout: ASCIILayout?
 
-    init(sourceMarkdown: String) {
+    init(
+        sourceMarkdown: String,
+        requestedRenderMode: NativeMarkdownCodec.Options.MermaidRenderMode = .rich
+    ) {
         self.sourceMarkdown = sourceMarkdown
         let parsed = MermaidMiniParser.parse(sourceMarkdown: sourceMarkdown)
         self.kind = parsed.kind
         self.nodes = parsed.nodes
         self.edges = parsed.edges
+        self.requestedRenderMode = requestedRenderMode
+        self.effectiveRenderMode = MarkdownMermaidAttachment.resolveRenderMode(
+            requested: requestedRenderMode,
+            kind: parsed.kind,
+            nodes: parsed.nodes,
+            edges: parsed.edges
+        )
         super.init(data: nil, ofType: nil)
         self.attachmentCell = MarkdownMermaidAttachmentCell()
     }
 
     required init?(coder: NSCoder) {
         self.sourceMarkdown = ""
+        self.requestedRenderMode = .rich
+        self.effectiveRenderMode = .rich
         self.kind = .generic
         self.nodes = []
         self.edges = []
@@ -511,13 +534,23 @@ final class MarkdownMermaidAttachment: NSTextAttachment {
         let widthSource = textContainer?.containerSize.width ?? lineFrag.width
         let availableWidth = max(280, min(920, widthSource - 8))
         let contentWidth = max(220, availableWidth - MermaidChromeMetrics.horizontalPadding * 2)
-        let layout = layoutResult(maxContentWidth: contentWidth)
-
-        let width = min(availableWidth, layout.size.width + MermaidChromeMetrics.horizontalPadding * 2)
-        let height = max(
-            MermaidChromeMetrics.minimumHeight,
-            layout.size.height + MermaidChromeMetrics.topChromeHeight + MermaidChromeMetrics.bottomPadding
-        )
+        let width: CGFloat
+        let height: CGFloat
+        if effectiveRenderMode == .ascii {
+            let layout = asciiLayout(maxContentWidth: contentWidth)
+            width = min(availableWidth, layout.size.width + MermaidChromeMetrics.horizontalPadding * 2)
+            height = max(
+                MermaidChromeMetrics.minimumHeightASCII,
+                layout.size.height + MermaidChromeMetrics.topChromeHeight + MermaidChromeMetrics.bottomPadding
+            )
+        } else {
+            let layout = layoutResult(maxContentWidth: contentWidth)
+            width = min(availableWidth, layout.size.width + MermaidChromeMetrics.horizontalPadding * 2)
+            height = max(
+                MermaidChromeMetrics.minimumHeight,
+                layout.size.height + MermaidChromeMetrics.topChromeHeight + MermaidChromeMetrics.bottomPadding
+            )
+        }
         return NSRect(x: 0, y: -4, width: width, height: height)
     }
 
@@ -540,12 +573,87 @@ final class MarkdownMermaidAttachment: NSTextAttachment {
         return layout
     }
 
+    nonisolated fileprivate func asciiLayout(maxContentWidth: CGFloat) -> ASCIILayout {
+        let widthBucket: CGFloat = 16
+        let widthKey = max(1, Int((maxContentWidth / widthBucket).rounded()) * Int(widthBucket))
+        if cachedASCIIWidthKey == widthKey, let cachedASCIILayout {
+            return cachedASCIILayout
+        }
+
+        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        let charWidth = max(5.8, ("M" as NSString).size(withAttributes: [.font: font]).width)
+        let maxChars = max(24, Int((CGFloat(widthKey) - 16) / charWidth))
+
+        let baseLines = MermaidASCIIFormatter.lines(kind: kind, nodes: nodes, edges: edges)
+        let wrappedLines = MermaidASCIIFormatter.wrap(lines: baseLines, maxColumns: maxChars)
+        let maxLineChars = max(maxChars, wrappedLines.map(\.count).max() ?? maxChars)
+        let lineHeight = max(13, ceil(NSLayoutManager().defaultLineHeight(for: font)))
+        let textHeight = CGFloat(wrappedLines.count) * lineHeight
+        let maxTextWidth = CGFloat(maxLineChars) * charWidth
+        let size = CGSize(
+            width: min(CGFloat(widthKey), maxTextWidth + 16),
+            height: max(72, textHeight + 12)
+        )
+        let layout = ASCIILayout(lines: wrappedLines, size: size, lineHeight: lineHeight, font: font)
+        cachedASCIIWidthKey = widthKey
+        cachedASCIILayout = layout
+        return layout
+    }
+
+    nonisolated fileprivate static func resolveRenderMode(
+        requested: NativeMarkdownCodec.Options.MermaidRenderMode,
+        kind: MermaidMiniParser.DiagramKind,
+        nodes: [Node],
+        edges: [Edge]
+    ) -> NativeMarkdownCodec.Options.MermaidRenderMode {
+        guard requested == .auto else { return requested }
+        let score = mermaidComplexityScore(kind: kind, nodes: nodes, edges: edges)
+        let threshold = mermaidAutoASCIIThreshold()
+        return score >= threshold ? .ascii : .rich
+    }
+
+    nonisolated fileprivate static func mermaidComplexityScore(
+        kind: MermaidMiniParser.DiagramKind,
+        nodes: [Node],
+        edges: [Edge]
+    ) -> Int {
+        let kindWeight: Int
+        switch kind {
+        case .flowchart: kindWeight = 10
+        case .sequence: kindWeight = 16
+        case .generic: kindWeight = 12
+        }
+        let nodeLabelChars = nodes.reduce(0) { $0 + $1.label.count }
+        let edgeLabelChars = edges.reduce(0) { partial, edge in
+            partial + (edge.label?.count ?? 0)
+        }
+        let topologyScore = nodes.count * 5 + edges.count * 7
+        let labelScore = min(220, (nodeLabelChars + edgeLabelChars) / 6)
+        return kindWeight + topologyScore + labelScore
+    }
+
+    nonisolated fileprivate static func mermaidAutoASCIIThreshold() -> Int {
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["KERN_NATIVE_MERMAID_AUTO_ASCII_THRESHOLD"], let parsed = Int(raw) {
+            return max(30, parsed)
+        }
+        if let raw = UserDefaults.standard.object(forKey: "nativeEditor.mermaidAutoAsciiThreshold") as? NSNumber {
+            return max(30, raw.intValue)
+        }
+        if let raw = UserDefaults.standard.string(forKey: "nativeEditor.mermaidAutoAsciiThreshold"),
+           let parsed = Int(raw) {
+            return max(30, parsed)
+        }
+        return 100
+    }
+
     var debugNodeCount: Int { nodes.count }
     var debugEdgeCount: Int { edges.count }
     var debugNodeHeightsForTesting: [CGFloat] {
         Array(layoutResult(maxContentWidth: 560).nodeFrames.values.map(\.height))
     }
     var debugShowsEdgeLabelsForTesting: Bool { kind != .sequence }
+    var debugEffectiveRenderModeForTesting: NativeMarkdownCodec.Options.MermaidRenderMode { effectiveRenderMode }
 }
 
 private enum MermaidChromeMetrics {
@@ -553,6 +661,7 @@ private enum MermaidChromeMetrics {
     static let topChromeHeight: CGFloat = 26
     static let bottomPadding: CGFloat = 10
     static let minimumHeight: CGFloat = 170
+    static let minimumHeightASCII: CGFloat = 128
 }
 
 private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
@@ -594,7 +703,8 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
         bg.lineWidth = 1
         bg.stroke()
 
-        drawBadge(text: "MERMAID", in: frame)
+        let badgeText = owner.effectiveRenderMode == .ascii ? "MERMAID ASCII" : "MERMAID"
+        drawBadge(text: badgeText, in: frame)
 
         let contentRect = NSRect(
             x: frame.minX + MermaidChromeMetrics.horizontalPadding,
@@ -603,6 +713,11 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             height: frame.height - MermaidChromeMetrics.topChromeHeight - MermaidChromeMetrics.bottomPadding
         ).integral
         guard contentRect.width > 10, contentRect.height > 10 else { return }
+
+        if owner.effectiveRenderMode == .ascii {
+            drawASCII(owner: owner, contentRect: contentRect)
+            return
+        }
 
         let layout = owner.layoutResult(maxContentWidth: contentRect.width)
         let scale = min(
@@ -632,6 +747,48 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
 
         drawEdges(layout: layout, origin: origin, scale: scale, showLabels: owner.kind != .sequence)
         drawNodes(layout: layout, origin: origin, scale: scale)
+    }
+
+    private func drawASCII(owner: MarkdownMermaidAttachment, contentRect: NSRect) {
+        let layout = owner.asciiLayout(maxContentWidth: contentRect.width)
+
+        let canvasRect = NSRect(
+            x: contentRect.minX,
+            y: contentRect.maxY - layout.size.height,
+            width: min(contentRect.width, layout.size.width),
+            height: min(contentRect.height, layout.size.height)
+        ).integral
+
+        let canvas = NSBezierPath(roundedRect: canvasRect, xRadius: 8, yRadius: 8)
+        NSColor.textBackgroundColor.withAlphaComponent(0.72).setFill()
+        canvas.fill()
+        NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
+        canvas.lineWidth = 1
+        canvas.stroke()
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .left
+        paragraph.lineBreakMode = .byClipping
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: layout.font,
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: paragraph,
+        ]
+
+        let leftInset: CGFloat = 8
+        let topInset: CGFloat = 6
+        let maxVisibleLines = max(1, Int((canvasRect.height - topInset * 2) / layout.lineHeight))
+        let visibleLines = layout.lines.prefix(maxVisibleLines)
+        for (index, line) in visibleLines.enumerated() {
+            let y = canvasRect.maxY - topInset - CGFloat(index + 1) * layout.lineHeight
+            let lineRect = NSRect(
+                x: canvasRect.minX + leftInset,
+                y: y,
+                width: canvasRect.width - leftInset * 2,
+                height: layout.lineHeight
+            )
+            (line as NSString).draw(in: lineRect, withAttributes: attrs)
+        }
     }
 
     private func drawBadge(text: String, in frame: NSRect) {
@@ -1187,5 +1344,84 @@ private enum MermaidMiniLayout {
             height: maxY + margin
         )
         return Result(size: size, nodes: nodes, edges: edges, nodeFrames: frames)
+    }
+}
+
+private enum MermaidASCIIFormatter {
+    static func lines(
+        kind: MermaidMiniParser.DiagramKind,
+        nodes: [MarkdownMermaidAttachment.Node],
+        edges: [MarkdownMermaidAttachment.Edge]
+    ) -> [String] {
+        var out: [String] = []
+        out.reserveCapacity(2 + nodes.count + edges.count)
+        out.append("diagram: \(kindLabel(kind))")
+        out.append(String(repeating: "-", count: 36))
+
+        if nodes.isEmpty {
+            out.append("(no nodes parsed)")
+        } else {
+            out.append("nodes:")
+            for node in nodes.prefix(24) {
+                out.append("  [\(node.id)] \(node.label)")
+            }
+            if nodes.count > 24 {
+                out.append("  … +\(nodes.count - 24) more nodes")
+            }
+        }
+
+        if !edges.isEmpty {
+            out.append("")
+            out.append("edges:")
+            for edge in edges.prefix(48) {
+                var line = "  \(edge.from) -> \(edge.to)"
+                if let label = edge.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+                    line += "  (\(label))"
+                }
+                out.append(line)
+            }
+            if edges.count > 48 {
+                out.append("  … +\(edges.count - 48) more edges")
+            }
+        }
+        return out
+    }
+
+    static func wrap(lines: [String], maxColumns: Int) -> [String] {
+        let columns = max(16, maxColumns)
+        var out: [String] = []
+        for line in lines {
+            out.append(contentsOf: wrap(line: line, maxColumns: columns))
+        }
+        return out
+    }
+
+    private static func wrap(line: String, maxColumns: Int) -> [String] {
+        guard line.count > maxColumns else { return [line] }
+        var remaining = line[...]
+        var wrapped: [String] = []
+        while remaining.count > maxColumns {
+            let splitIndex = remaining.index(remaining.startIndex, offsetBy: maxColumns)
+            let prefix = remaining[..<splitIndex]
+            if let ws = prefix.lastIndex(where: { $0.isWhitespace }), ws > remaining.startIndex {
+                let chunk = String(remaining[..<ws]).trimmingCharacters(in: .whitespaces)
+                wrapped.append(chunk)
+                let next = remaining.index(after: ws)
+                remaining = remaining[next...]
+            } else {
+                wrapped.append(String(prefix))
+                remaining = remaining[splitIndex...]
+            }
+        }
+        wrapped.append(String(remaining))
+        return wrapped
+    }
+
+    private static func kindLabel(_ kind: MermaidMiniParser.DiagramKind) -> String {
+        switch kind {
+        case .flowchart: return "flowchart"
+        case .sequence: return "sequence"
+        case .generic: return "generic"
+        }
     }
 }

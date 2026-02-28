@@ -29,6 +29,7 @@ if isUITesting {
         "nativeEditor.orderedTasksEnabled": false,
         "nativeEditor.headingCheckboxesEnabled": false,
         "nativeEditor.orderedListNumbering": "gfmDefault",
+        "nativeEditor.mermaidRenderMode": "rich",
         "nativeEditor.checkboxHitTarget": "glyph",
     ]
 
@@ -39,6 +40,8 @@ if isUITesting {
     if let v = env["KERN_NATIVE_ORDERED_TASKS"] { overrides["nativeEditor.orderedTasksEnabled"] = (v == "1") }
     if let v = env["KERN_NATIVE_HEADING_CHECKBOXES"] { overrides["nativeEditor.headingCheckboxesEnabled"] = (v == "1") }
     if let v = env["KERN_NATIVE_ORDERED_NUMBERING"] { overrides["nativeEditor.orderedListNumbering"] = v } // gfmDefault | preserveTyped
+    if let v = env["KERN_NATIVE_MERMAID_RENDER_MODE"] { overrides["nativeEditor.mermaidRenderMode"] = v } // rich | ascii | auto
+    if let v = env["KERN_NATIVE_MERMAID_AUTO_ASCII_THRESHOLD"] { overrides["nativeEditor.mermaidAutoAsciiThreshold"] = v }
     if let v = env["KERN_NATIVE_CHECKBOX_HIT_TARGET"] { overrides["nativeEditor.checkboxHitTarget"] = v } // glyph | marker
 
     // Use NSArgumentDomain (highest-precedence, in-memory) so overrides win over any persisted defaults
@@ -63,6 +66,9 @@ if isUITesting {
     if UserDefaults.standard.object(forKey: "nativeEditor.headingCheckboxesEnabled") == nil {
         UserDefaults.standard.set(true, forKey: "nativeEditor.headingCheckboxesEnabled")
     }
+    if UserDefaults.standard.object(forKey: "nativeEditor.mermaidRenderMode") == nil {
+        UserDefaults.standard.set("rich", forKey: "nativeEditor.mermaidRenderMode")
+    }
 
     // Normal runs: allow env vars to override persisted defaults (useful for manual profiling/debugging).
     if let v = env["KERN_NATIVE_EXPORT_DIALECT"] {
@@ -82,6 +88,12 @@ if isUITesting {
     }
     if let v = env["KERN_NATIVE_ORDERED_NUMBERING"] {
         UserDefaults.standard.set(v, forKey: "nativeEditor.orderedListNumbering") // gfmDefault | preserveTyped
+    }
+    if let v = env["KERN_NATIVE_MERMAID_RENDER_MODE"] {
+        UserDefaults.standard.set(v, forKey: "nativeEditor.mermaidRenderMode") // rich | ascii | auto
+    }
+    if let v = env["KERN_NATIVE_MERMAID_AUTO_ASCII_THRESHOLD"] {
+        UserDefaults.standard.set(v, forKey: "nativeEditor.mermaidAutoAsciiThreshold")
     }
     if let v = env["KERN_NATIVE_CHECKBOX_HIT_TARGET"] {
         UserDefaults.standard.set(v, forKey: "nativeEditor.checkboxHitTarget") // glyph | marker

@@ -76,7 +76,22 @@ KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
   -project KernTextKit.xcodeproj -scheme KernTextKit \
   -destination 'platform=macOS' \
   -only-testing:KernTextKitTests/NativeEditorRenderPerformanceTests
+
+# Mermaid render-mode benchmark (rich vs ascii vs auto)
+defaults write com.gradigit.kern.tests KERN_ENABLE_MERMAID_MODE_BENCHMARKS -bool YES
+defaults write com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS -int 7
+xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeMarkdownCodecPerformanceTests/testMermaidRenderModeBenchmarkMatrix
+
+# Cleanup benchmark gate after run
+defaults delete com.gradigit.kern.tests KERN_ENABLE_MERMAID_MODE_BENCHMARKS
+defaults delete com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS
 ```
+
+Benchmark artifacts are written to:
+- `benchmark-archive/mermaid-render-modes/`
 
 ### Cross-Editor Comparison
 
@@ -89,11 +104,35 @@ KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
 # Specific editors, cold starts, JSON output
 ./scripts/cross-editor-benchmark.sh --editors "Kern,Zed,TextEdit" --cold --runs 30 --json results.json
 
+# Internal microbenchmark (Kern-only)
+./scripts/cross-editor-benchmark.sh --suite wow_internal --runs 30
+
+# Optional large-fixture open-ready aside (defaults to Kern+Zed)
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --runs 10
+
+# Optional large-fixture full-fidelity aside (defaults to Kern+Zed)
+# - Real-usage behavior (no forced full import)
+# - Defaults: Zed hook required + styled_stable mode
+./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --runs 10
+
 # Fewer runs for quick comparison
 ./scripts/cross-editor-benchmark.sh --runs 5 --verbose
 
 # Optional: include durable-save probe (off by default for speed)
 ./scripts/cross-editor-benchmark.sh --runs 10 --save-durable
+
+# Optional: disable WOW metric env injection (observer-effect checks)
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --editor Kern --disable-wow-metrics --runs 10
+
+# Optional: force Kern open metric source (auto|wow|probe)
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --editor Kern --kern-open-metric-source probe --runs 10
+
+# Optional: Zed fork hook mode (auto|off|required)
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --editor Zed --zed-bench-hook auto --runs 10
+
+# Observer-effect report (instrumentation enabled vs disabled)
+./scripts/observer-effect-benchmark.sh 10 test-fixtures/cross-editor-benchmark.md
+# (script forces --kern-open-metric-source probe for both variants)
 ```
 
 #### Phase 2: Swift CLI core runner
@@ -105,8 +144,8 @@ cd scripts/kern-bench && swift build -c release && cd ../..
 # Run with all editors (default: 30 runs, shuffled order, 3 warmup)
 scripts/kern-bench/.build/release/kern-bench --all --verbose
 
-# Run suite
-scripts/kern-bench/.build/release/kern-bench --suite wow --all --verbose
+# Run internal suite (Kern-only)
+scripts/kern-bench/.build/release/kern-bench --suite wow_internal --editor Kern --verbose
 
 # Specific editor with JSON output
 scripts/kern-bench/.build/release/kern-bench --editor "TextEdit" --runs 30 --json results.json
@@ -131,6 +170,14 @@ python3 scripts/bench-regression-check.py --baseline baseline.json --latest late
 # JSON output for CI
 python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json \
   --json regression-report.json
+
+# Enforce cross-editor-only policy for publish/claim comparisons
+python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json \
+  --require-cross-editor
+
+# Stabilization mode (report regressions without failing CI)
+python3 scripts/bench-regression-check.py --baseline baseline.json --latest latest.json \
+  --report-only
 ```
 
 ## Statistical Methodology
@@ -139,12 +186,21 @@ python3 scripts/bench-regression-check.py --baseline baseline.json --latest late
 
 - **Suite defaults**: 30 measured runs + 3 warmup
 - **Core measured UX metrics**: `open_latency_ms`, `typing_latency_ms`, `save_ui_ack_latency_ms`, `quit_latency_ms`
+- **Full-fidelity aside metric**: `full_fidelity_end_to_end_latency_ms` (launch → full-fidelity completion proxy)
 - **Durable-save probe** (`save_durable_latency_ms`) is opt-in via `--save-durable` (disabled by default for runtime stability/speed)
 - **Startup probes**: cold and warm startup sampled independently (not mixed into measured run mode)
 - **Interleaved editor order**: editors are shuffled each round to eliminate thermal ordering bias
 - **0ms inter-editor cooldown by default** (opt-in via `--inter-editor-delay-ms`)
 - **No outlier removal**: raw data is preserved; the slow tail IS the user experience
 - **Frame monitor probes are opt-in** (`--enable-frame-monitor`) to keep default suite runtime fast
+- **Zed bench hook path**: `--zed-bench-hook auto|off|required` uses fork hook when available, with automatic fallback in `auto`
+- **Full-fidelity aside defaults** (`--suite benchmark_full_fidelity`):
+  - `--zed-bench-hook required`
+  - `--zed-ready-mode styled_stable`
+  - `--kern-open-metric-source probe`
+- **Zed CLI override**: `KERN_BENCH_ZED_CLI=/abs/path/to/zed-wrapper` lets you route benchmark launches to a forked Zed build without changing roster definitions
+- **WOW instrumentation toggle**: `--disable-wow-metrics` allows observer-effect comparison runs
+- **Kern open metric source**: `--kern-open-metric-source auto|wow|probe` controls whether Kern open-ready uses WOW-derived phase timings or external probe timing
 
 ### Reported Statistics
 
@@ -185,7 +241,8 @@ Before any benchmark run:
   "version": 4,
   "tool": "kern-bench",
   "timestamp": "2026-02-19T12:00:00Z",
-  "suite": "wow",
+  "suite": "benchmark",
+  "suite_kind": "cross_editor",
   "run_classification": "official",
   "run_quality": "complete",
   "partial_reasons": [],
@@ -208,8 +265,9 @@ Before any benchmark run:
     "fixture_hash_recorded": true
   },
   "config": {
-    "suite": "wow",
-    "suite_intended_usage": "headline/synthetic comparison",
+    "suite": "benchmark",
+    "suite_kind": "cross_editor",
+    "suite_intended_usage": "single benchmark comparison",
     "roster_policy": "locked_roster_v1_official_claims_only",
     "file": "test-fixtures/cross-editor-benchmark.md",
     "file_bytes": 18432,
@@ -267,14 +325,34 @@ Before any benchmark run:
 
 ### Suite Policy
 
-- **Single suite** (`--suite wow`): headline/synthetic comparison
-- `real_use` is accepted as a deprecated alias to `wow`
-- Lean cross-editor core path: startup/open, type, save UI ack, quit
+- **Cross-editor suite** (`--suite benchmark`): official external comparison
+- **Open-ready aside** (`--suite benchmark_open_ready`): optional open-readiness comparison (defaults to Kern+Zed, large frozen fixture, no save/quit steps)
+- **Full-fidelity aside** (`--suite benchmark_full_fidelity`): optional large-fixture full-fidelity completion comparison (defaults to Kern+Zed)
+- **Internal suite** (`--suite wow_internal`): Kern-only stage microbenchmark (`suite_kind=internal_microbenchmark`)
+- `wow_internal` defaults to the small frozen fixture (`cross-editor-benchmark.md`) for minimum-latency numbers.
+- `wow_internal` defaults: 10 measured runs, 0 warmups.
+- Legacy aliases (`wow`, `real_use`) map to `benchmark` only
+- Lean cross-editor core path: startup/open, save UI ack, quit (typing off by default)
+- `wow_internal` reports only in-app stage timings (parse/layout/paint-ready/edit-apply/save-serialize);
+  external automation timings (open/save-ui/quit/typing) are excluded from internal-suite metrics.
+- Internal summary tables use **min (best)** per metric for quick "fastest achievable" signal;
+  full p50/p95/p99 stats remain in detailed output/JSON.
 - Durable file-commit save probe is optional (`--save-durable`)
 - Locked roster v1 (Official eligibility): **Kern, VS Code, Zed, Sublime Text, TextEdit**
 - If any required roster editor or required metric is missing, run is classified **Partial**
 - README/social headline claims must use **Official** runs only
+- Publish/claim checks must reject `suite_kind=internal_microbenchmark` (use `--require-cross-editor`)
 - See execution hardening checklist: `architect/benchmark-v2-execution-checklist.md`
+
+### Artifact Persistence
+
+- Every run writes canonical artifacts to:
+  - `benchmark-archive/runs/<timestamp>-benchmark/` or
+  - `benchmark-archive/runs/<timestamp>-wow-internal/`
+- Required files:
+  - `results.json`
+  - `results.md`
+  - `env.json`
 
 ### Tools
 

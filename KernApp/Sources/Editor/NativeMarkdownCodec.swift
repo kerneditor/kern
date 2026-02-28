@@ -20,6 +20,7 @@ enum NativeMarkdownCodec {
         let baseURL: URL?
         let options: Options
         let strictConformanceRoundTripMode: Bool
+        let syntaxHighlightingEnabled: Bool
     }
 
     struct Options: Equatable {
@@ -55,6 +56,15 @@ enum NativeMarkdownCodec {
             case gfmDefault
         }
 
+        enum MermaidRenderMode: String {
+            /// Always render Mermaid using the rich native diagram renderer.
+            case rich
+            /// Always render Mermaid using the lightweight ASCII renderer.
+            case ascii
+            /// Automatically choose a mode based on diagram complexity.
+            case auto
+        }
+
         /// Export `.md` as pure GFM (default) or preserve Kern extensions where possible.
         var exportDialect: ExportDialect = .gfm
         /// When exporting in GFM mode, choose whether Kern extension syntaxes are preserved, made more portable,
@@ -70,6 +80,13 @@ enum NativeMarkdownCodec {
         var orderedListNumbering: OrderedListNumbering = .gfmDefault
         /// Enable remote image loading for image attachments (local file images always load).
         var remoteImageLoadingEnabled: Bool = true
+        /// Enable syntax highlighting for fenced code blocks.
+        var syntaxHighlightingEnabled: Bool = true
+        /// Mermaid render mode for fenced mermaid blocks.
+        var mermaidRenderMode: MermaidRenderMode = .rich
+        /// For very large files, prefer a plain-text fast path during import to keep first-open latency low.
+        /// This can defer rich Markdown styling fidelity in exchange for responsiveness.
+        var largeDocumentPlainImportEnabled: Bool = false
         /// Strict round-trip mode for spec conformance harnesses.
         /// This keeps inline source literals intact and disables marker rewrites that can
         /// otherwise alter semantics in edge-case CommonMark examples.
@@ -106,12 +123,28 @@ enum NativeMarkdownCodec {
             if defaults.object(forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey) != nil {
                 opt.remoteImageLoadingEnabled = defaults.bool(forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
             }
+            if defaults.object(forKey: "nativeEditor.syntaxHighlightingEnabled") != nil {
+                opt.syntaxHighlightingEnabled = defaults.bool(forKey: "nativeEditor.syntaxHighlightingEnabled")
+            }
+            if let raw = defaults.string(forKey: "nativeEditor.mermaidRenderMode"),
+               let v = MermaidRenderMode(rawValue: raw) {
+                opt.mermaidRenderMode = v
+            }
+            // Intentionally ignore persisted large-document plain-import preference.
+            // Legacy sessions could leave this enabled and force degraded non-WYSIWYG opens.
+            // Plain import remains available only via explicit benchmark/test env override:
+            //   KERN_FORCE_PLAIN_MARKDOWN_IMPORT=1
+            //   KERN_ALLOW_PLAIN_IMPORT_OVERRIDE=1
             return opt
         }
     }
 
     static func importMarkdown(_ markdown: String, options: Options = Options(), baseURL: URL? = nil) -> NSAttributedString {
         let baseFont = NSFont.systemFont(ofSize: 16)
+        let markdownLength = markdown.utf16.count
+        if shouldUseLargeDocumentPlainImport(options: options, markdownLength: markdownLength) {
+            return makeLargeDocumentPlainAttributed(markdown: markdown, baseFont: baseFont)
+        }
         let inputEndsWithNewline = markdown.hasSuffix("\n")
         let result = NSMutableAttributedString()
 
@@ -134,11 +167,16 @@ enum NativeMarkdownCodec {
                 }
             }
         }
+        let syntaxHighlightingEnabled = shouldEnableSyntaxHighlighting(
+            options: options,
+            markdownLength: markdownLength
+        )
         let ctx = ImportContext(
             referenceDefinitions: referenceDefinitions,
             baseURL: baseURL,
             options: options,
-            strictConformanceRoundTripMode: options.strictConformanceRoundTripMode
+            strictConformanceRoundTripMode: options.strictConformanceRoundTripMode,
+            syntaxHighlightingEnabled: syntaxHighlightingEnabled
         )
 
         // For GFM-style ordered list semantics, only the first marker matters and the rest are
@@ -321,7 +359,11 @@ enum NativeMarkdownCodec {
                 if fence.language?.lowercased() == "mermaid" {
                     let mermaidSourceMarkdown = "```mermaid\n\(codeText)\n```"
                     let mermaidAttr = NSMutableAttributedString(
-                        attributedString: makeMermaidAttachmentAttributed(sourceMarkdown: mermaidSourceMarkdown, baseFont: baseFont)
+                        attributedString: makeMermaidAttachmentAttributed(
+                            sourceMarkdown: mermaidSourceMarkdown,
+                            baseFont: baseFont,
+                            renderMode: options.mermaidRenderMode
+                        )
                     )
                     if let strictBlockSourceMarkdown, mermaidAttr.length > 0 {
                         mermaidAttr.addAttribute(.kernSourceMarkdown, value: strictBlockSourceMarkdown, range: NSRange(location: 0, length: mermaidAttr.length))
@@ -330,7 +372,14 @@ enum NativeMarkdownCodec {
                     result.append(mermaidAttr)
                     appendedBlockEndsWithNewline = mermaidAttr.string.hasSuffix("\n")
                 } else {
-                    let codeAttr = NSMutableAttributedString(attributedString: makeCodeBlockAttributed(codeText, baseFont: baseFont, language: fence.language))
+                    let codeAttr = NSMutableAttributedString(
+                        attributedString: makeCodeBlockAttributed(
+                            codeText,
+                            baseFont: baseFont,
+                            language: fence.language,
+                            syntaxHighlightingEnabled: ctx.syntaxHighlightingEnabled
+                        )
+                    )
                     codeBlockCounter += 1
                     if codeAttr.length > 0 {
                         let full = NSRange(location: 0, length: codeAttr.length)
@@ -361,7 +410,14 @@ enum NativeMarkdownCodec {
                 resetOrderedCounters()
                 let blockStartIndex = i
                 let codeText = indented.codeLines.joined(separator: "\n")
-                let codeAttr = NSMutableAttributedString(attributedString: makeCodeBlockAttributed(codeText, baseFont: baseFont, language: nil))
+                let codeAttr = NSMutableAttributedString(
+                    attributedString: makeCodeBlockAttributed(
+                        codeText,
+                        baseFont: baseFont,
+                        language: nil,
+                        syntaxHighlightingEnabled: ctx.syntaxHighlightingEnabled
+                    )
+                )
                 codeBlockCounter += 1
                 if codeAttr.length > 0 {
                     let full = NSRange(location: 0, length: codeAttr.length)
@@ -394,7 +450,8 @@ enum NativeMarkdownCodec {
             }
 
             // GFM table
-            if let match = parseGfmTable(lines, startIndex: i) {
+            if canStartGfmTable(lines, startIndex: i),
+               let match = parseGfmTable(lines, startIndex: i) {
                 resetOrderedCounters()
                 tableCounter += 1
                 let tableID = tableCounter
@@ -710,7 +767,14 @@ enum NativeMarkdownCodec {
                 }
 
                 let codeText = codeLines.joined(separator: "\n")
-                let codeAttr = NSMutableAttributedString(attributedString: makeCodeBlockAttributed(codeText, baseFont: baseFont, language: inlineFence.language))
+                let codeAttr = NSMutableAttributedString(
+                    attributedString: makeCodeBlockAttributed(
+                        codeText,
+                        baseFont: baseFont,
+                        language: inlineFence.language,
+                        syntaxHighlightingEnabled: ctx.syntaxHighlightingEnabled
+                    )
+                )
                 codeBlockCounter += 1
                 if codeAttr.length > 0 {
                     let full = NSRange(location: 0, length: codeAttr.length)
@@ -840,7 +904,14 @@ enum NativeMarkdownCodec {
                 }
 
                 let codeText = codeLines.joined(separator: "\n")
-                let codeAttr = NSMutableAttributedString(attributedString: makeCodeBlockAttributed(codeText, baseFont: baseFont, language: inlineFence.language))
+                let codeAttr = NSMutableAttributedString(
+                    attributedString: makeCodeBlockAttributed(
+                        codeText,
+                        baseFont: baseFont,
+                        language: inlineFence.language,
+                        syntaxHighlightingEnabled: ctx.syntaxHighlightingEnabled
+                    )
+                )
                 codeBlockCounter += 1
                 if codeAttr.length > 0 {
                     let full = NSRange(location: 0, length: codeAttr.length)
@@ -932,7 +1003,7 @@ enum NativeMarkdownCodec {
                     || parseBullet(nextLine) != nil
                     || parseThematicBreak(nextLine) != nil
                     || parseSetextUnderline(nextLine) != nil
-                    || parseGfmTable(lines, startIndex: j) != nil
+                    || (canStartGfmTable(lines, startIndex: j) && parseGfmTable(lines, startIndex: j) != nil)
                     || (canStartIndentedCode(lines, at: j, quoteDepth: quoteDepth)
                         && parseIndentedCodeBlock(lines, startIndex: j, quoteDepth: quoteDepth) != nil)
                 {
@@ -1437,9 +1508,65 @@ enum NativeMarkdownCodec {
 
     /// Cache for syntax highlighting regexes (bounded by language × pattern count, ~150 entries max).
     private static var syntaxHighlightingRegexCache: [String: NSRegularExpression] = [:]
+    private static let syntaxHighlightingRegexCacheLock = NSLock()
 
     /// Cache for list marker width measurements (avoids repeated CoreText layout calls).
     private static var markerWidthCache: [String: CGFloat] = [:]
+    private static let markerWidthCacheLock = NSLock()
+
+    private static let largeDocumentPlainImportThreshold = 1_000_000
+
+    private static func shouldUseLargeDocumentPlainImport(options: Options, markdownLength: Int) -> Bool {
+        if ProcessInfo.processInfo.environment["KERN_FORCE_FULL_MARKDOWN_IMPORT"] == "1" {
+            return false
+        }
+        if ProcessInfo.processInfo.environment["KERN_FORCE_PLAIN_MARKDOWN_IMPORT"] == "1" {
+            let env = ProcessInfo.processInfo.environment
+            // Guard against shell-level leakage of KERN_FORCE_PLAIN_MARKDOWN_IMPORT into normal
+            // interactive app launches (which would degrade to raw Markdown rendering).
+            // Require explicit opt-in for forced plain mode, unless running under XCTest.
+            if env["KERN_ALLOW_PLAIN_IMPORT_OVERRIDE"] == "1" || NSClassFromString("XCTestCase") != nil {
+                return true
+            }
+            return false
+        }
+        guard options.largeDocumentPlainImportEnabled else { return false }
+        return markdownLength >= largeDocumentPlainImportThreshold
+    }
+
+    private static func makeLargeDocumentPlainAttributed(markdown: String, baseFont: NSFont) -> NSAttributedString {
+        guard !markdown.isEmpty else { return NSAttributedString() }
+        let attrs = baseAttributes(baseFont: baseFont)
+        let result = NSMutableAttributedString(string: markdown, attributes: attrs)
+        result.addAttribute(
+            .kernBlockKind,
+            value: KernBlockKind.paragraph.rawValue,
+            range: NSRange(location: 0, length: result.length)
+        )
+        return result
+    }
+
+    private static func shouldEnableSyntaxHighlighting(options: Options, markdownLength: Int) -> Bool {
+        if ProcessInfo.processInfo.environment["KERN_FORCE_SYNTAX_HIGHLIGHTING"] == "1" {
+            return true
+        }
+        if ProcessInfo.processInfo.environment["KERN_DISABLE_SYNTAX_HIGHLIGHTING"] == "1" {
+            return false
+        }
+        guard options.syntaxHighlightingEnabled else { return false }
+        // Keep syntax highlighting enabled for large documents.
+        // Performance should be managed by staged rendering / scheduling, not by silently
+        // dropping visual fidelity features.
+        _ = markdownLength
+        return true
+    }
+
+    private static func canStartGfmTable(_ lines: [String], startIndex: Int) -> Bool {
+        guard startIndex >= 0, startIndex + 1 < lines.count else { return false }
+        let header = lines[startIndex]
+        let delimiter = lines[startIndex + 1]
+        return header.contains("|") && delimiter.contains("|")
+    }
 
     private static func parseGfmTable(_ lines: [String], startIndex: Int) -> GfmTableMatch? {
         guard startIndex + 1 < lines.count else { return nil }
@@ -1991,6 +2118,21 @@ enum NativeMarkdownCodec {
         index: Int,
         quoteDepth: Int
     ) -> FenceContext? {
+        // Fast path: most fences are not list-indented and can be parsed directly
+        // without scanning previous lines for list continuation context.
+        if let fence = parseFenceStart(line) {
+            return FenceContext(fence: fence, listIndent: 0)
+        }
+
+        // If the line has no leading indentation, list-context fence recovery is impossible.
+        if let first = line.first, first != " ", first != "\t" {
+            return nil
+        }
+        // Skip expensive list-context lookup when the line clearly cannot be a fence.
+        if !line.contains("`"), !line.contains("~") {
+            return nil
+        }
+
         if let ctx = previousListContinuationContext(lines, before: index, quoteDepth: quoteDepth) {
             let prefix = String(repeating: " ", count: max(0, ctx.indent))
             if line.hasPrefix(prefix) {
@@ -1999,9 +2141,6 @@ enum NativeMarkdownCodec {
                     return FenceContext(fence: fence, listIndent: ctx.indent)
                 }
             }
-        }
-        if let fence = parseFenceStart(line) {
-            return FenceContext(fence: fence, listIndent: 0)
         }
         return nil
     }
@@ -2049,6 +2188,9 @@ enum NativeMarkdownCodec {
         let (indent, rest) = parseLeadingIndent(line)
         guard indent <= 3 else { return nil }
         let candidate = String(rest)
+        // Fast guards before regex.
+        guard candidate.first == "[" else { return nil }
+        guard candidate.contains("]:") else { return nil }
 
         let re = referenceDefinitionRegex
         let ns = candidate as NSString
@@ -2085,6 +2227,9 @@ enum NativeMarkdownCodec {
 
         guard let firstRaw = unquotedLine(startIndex) else { return nil }
         if firstRaw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+        if let first = firstRaw.first, first != " ", first != "\t" {
+            return nil
+        }
 
         let listContext = previousListContinuationContext(lines, before: startIndex, quoteDepth: quoteDepth)
         let firstLine = listContext.map { stripFenceIndent(firstRaw, indent: $0.indent) } ?? firstRaw
@@ -2478,7 +2623,12 @@ enum NativeMarkdownCodec {
         return para
     }
 
-    private static func makeCodeBlockAttributed(_ code: String, baseFont: NSFont, language: String?) -> NSAttributedString {
+    private static func makeCodeBlockAttributed(
+        _ code: String,
+        baseFont: NSFont,
+        language: String?,
+        syntaxHighlightingEnabled: Bool
+    ) -> NSAttributedString {
         let storedCode = code.isEmpty ? String(storagePlaceholderCharacter) : code
         let para = NSMutableAttributedString(string: storedCode, attributes: baseAttributes(baseFont: baseFont))
         if code.isEmpty, para.length > 0 {
@@ -2528,7 +2678,9 @@ enum NativeMarkdownCodec {
             // Back-compat: we used to stash the language in a tooltip-like attribute.
             para.addAttribute(.toolTip, value: "```\(language)", range: NSRange(location: 0, length: min(1, para.length)))
 
-            applySyntaxHighlighting(para, language: language)
+            if syntaxHighlightingEnabled {
+                applySyntaxHighlighting(para, language: language)
+            }
         }
 
         return para
@@ -2547,8 +2699,12 @@ enum NativeMarkdownCodec {
         return out
     }
 
-    private static func makeMermaidAttachmentAttributed(sourceMarkdown: String, baseFont: NSFont) -> NSAttributedString {
-        let attachment = MarkdownMermaidAttachment(sourceMarkdown: sourceMarkdown)
+    private static func makeMermaidAttachmentAttributed(
+        sourceMarkdown: String,
+        baseFont: NSFont,
+        renderMode: Options.MermaidRenderMode
+    ) -> NSAttributedString {
+        let attachment = MarkdownMermaidAttachment(sourceMarkdown: sourceMarkdown, requestedRenderMode: renderMode)
         let out = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
         if out.length > 0 {
             let full = NSRange(location: 0, length: out.length)
@@ -2614,13 +2770,12 @@ enum NativeMarkdownCodec {
 
         func apply(_ pattern: String, color: NSColor, options: NSRegularExpression.Options = []) {
             let cacheKey = pattern + "\0" + String(options.rawValue)
-            let re: NSRegularExpression
-            if let cached = syntaxHighlightingRegexCache[cacheKey] {
-                re = cached
-            } else {
-                guard let compiled = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-                syntaxHighlightingRegexCache[cacheKey] = compiled
-                re = compiled
+            guard let re = cachedSyntaxHighlightingRegex(
+                cacheKey: cacheKey,
+                pattern: pattern,
+                options: options
+            ) else {
+                return
             }
             let full = NSRange(location: 0, length: ns.length)
             re.enumerateMatches(in: attributed.string, options: [], range: full) { m, _, _ in
@@ -3076,7 +3231,7 @@ enum NativeMarkdownCodec {
                 let markerFont = (markerAttr.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) ?? NSFont.systemFont(ofSize: 16)
                 let cacheKey = markerText + "\0" + markerFont.fontName + "\0" + String(Double(markerFont.pointSize))
                 let markerWidth: CGFloat
-                if let cached = markerWidthCache[cacheKey] {
+                if let cached = cachedMarkerWidth(for: cacheKey) {
                     markerWidth = cached
                 } else {
                     let rect = markerAttr.boundingRect(
@@ -3084,7 +3239,7 @@ enum NativeMarkdownCodec {
                         options: [.usesFontLeading, .usesLineFragmentOrigin]
                     )
                     markerWidth = ceil(rect.width)
-                    markerWidthCache[cacheKey] = markerWidth
+                    setCachedMarkerWidth(markerWidth, for: cacheKey)
                 }
                 style.headIndent = baseIndent + max(24, markerWidth + 8)
             }
@@ -3148,9 +3303,56 @@ enum NativeMarkdownCodec {
         var linkReferenceURL: String? = nil
     }
 
+    private static let inlineSyntaxCharacterSet = CharacterSet(charactersIn: "\\!<[$`*_~")
+
+    private static func cachedSyntaxHighlightingRegex(
+        cacheKey: String,
+        pattern: String,
+        options: NSRegularExpression.Options
+    ) -> NSRegularExpression? {
+        syntaxHighlightingRegexCacheLock.lock()
+        if let cached = syntaxHighlightingRegexCache[cacheKey] {
+            syntaxHighlightingRegexCacheLock.unlock()
+            return cached
+        }
+        syntaxHighlightingRegexCacheLock.unlock()
+
+        guard let compiled = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return nil
+        }
+
+        syntaxHighlightingRegexCacheLock.lock()
+        if let cached = syntaxHighlightingRegexCache[cacheKey] {
+            syntaxHighlightingRegexCacheLock.unlock()
+            return cached
+        }
+        syntaxHighlightingRegexCache[cacheKey] = compiled
+        syntaxHighlightingRegexCacheLock.unlock()
+        return compiled
+    }
+
+    private static func cachedMarkerWidth(for cacheKey: String) -> CGFloat? {
+        markerWidthCacheLock.lock()
+        let width = markerWidthCache[cacheKey]
+        markerWidthCacheLock.unlock()
+        return width
+    }
+
+    private static func setCachedMarkerWidth(_ width: CGFloat, for cacheKey: String) {
+        markerWidthCacheLock.lock()
+        markerWidthCache[cacheKey] = width
+        markerWidthCacheLock.unlock()
+    }
+
     /// Internal entry point for micro-benchmarking via `@testable import`.
     static func parseInline(_ text: String, baseFont: NSFont) -> NSAttributedString {
-        let ctx = ImportContext(referenceDefinitions: [:], baseURL: nil, options: .fromUserDefaults(), strictConformanceRoundTripMode: false)
+        let ctx = ImportContext(
+            referenceDefinitions: [:],
+            baseURL: nil,
+            options: .fromUserDefaults(),
+            strictConformanceRoundTripMode: false,
+            syntaxHighlightingEnabled: true
+        )
         return parseInline(text, baseFont: baseFont, style: InlineStyle(), ctx: ctx)
     }
 
@@ -3192,6 +3394,12 @@ enum NativeMarkdownCodec {
                 attr.addAttribute(.kernSourceMarkdown, value: text, range: NSRange(location: 0, length: attr.length))
             }
             return attr
+        }
+
+        // Fast path for lines with no inline syntax delimiters.
+        // This avoids materializing `[Character]` for the common plain-text case.
+        if text.rangeOfCharacter(from: inlineSyntaxCharacterSet) == nil {
+            return makeInlineAttributed(text, baseFont: baseFont, style: style)
         }
 
         // Lightweight inline parser for the native editor subset:

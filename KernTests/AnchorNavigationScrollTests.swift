@@ -115,14 +115,21 @@ final class AnchorNavigationScrollTests: XCTestCase {
 
         let landedNearTop = waitUntil(timeout: 1.0) {
             let afterVisible = editorTextView.visibleRect
-            guard afterVisible.intersects(targetRect) else { return false }
-            let afterDist = distanceFromTop(targetRect: targetRect, visible: afterVisible, isFlipped: editorTextView.isFlipped)
+            guard let (latestTargetRect, _) = rectForParagraph(containing: "Target", in: editorTextView) else {
+                return false
+            }
+            guard afterVisible.intersects(latestTargetRect) else { return false }
+            let afterDist = distanceFromTop(targetRect: latestTargetRect, visible: afterVisible, isFlipped: editorTextView.isFlipped)
             return afterDist < afterVisible.height * 0.35
         }
 
         let afterVisible = editorTextView.visibleRect
-        let afterDist = distanceFromTop(targetRect: targetRect, visible: afterVisible, isFlipped: editorTextView.isFlipped)
-        XCTAssertTrue(afterVisible.intersects(targetRect))
+        guard let (latestTargetRect, _) = rectForParagraph(containing: "Target", in: editorTextView) else {
+            XCTFail("Missing target rect after jump")
+            return
+        }
+        let afterDist = distanceFromTop(targetRect: latestTargetRect, visible: afterVisible, isFlipped: editorTextView.isFlipped)
+        XCTAssertTrue(afterVisible.intersects(latestTargetRect))
         XCTAssertTrue(landedNearTop, "Target should land near the top of the viewport")
         XCTAssertGreaterThan(beforeDist, afterDist, "Jump should move the target closer to the top even if it was already visible")
     }
@@ -179,7 +186,12 @@ final class AnchorNavigationScrollTests: XCTestCase {
         scrollView.reflectScrolledClipView(clip)
 
         // Guard should re-apply the jump shortly after the scroll event.
-        XCTAssertTrue(waitUntil(timeout: 1.0) { editorTextView.visibleRect.intersects(targetRect) })
+        XCTAssertTrue(waitUntil(timeout: 1.0) {
+            guard let (latestTargetRect, _) = rectForParagraph(containing: "Target", in: editorTextView) else {
+                return false
+            }
+            return editorTextView.visibleRect.intersects(latestTargetRect)
+        })
     }
 
     // MARK: - Helpers

@@ -86,14 +86,23 @@ final class NativeEditorSnapshotTests: XCTestCase {
             return
         }
 
+        let deadline = Date().addingTimeInterval(6.0)
         var attachmentCount = 0
         var attachmentsWithCell = 0
-        storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length), options: []) { value, _, _ in
-            guard let attachment = value as? NSTextAttachment else { return }
-            attachmentCount += 1
-            if attachment.attachmentCell != nil {
-                attachmentsWithCell += 1
+        while Date() < deadline {
+            attachmentCount = 0
+            attachmentsWithCell = 0
+            storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length), options: []) { value, _, _ in
+                guard let attachment = value as? NSTextAttachment else { return }
+                attachmentCount += 1
+                if attachment.attachmentCell != nil {
+                    attachmentsWithCell += 1
+                }
             }
+            if attachmentCount >= 4 {
+                break
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
         XCTAssertGreaterThanOrEqual(attachmentCount, 4, "Expected image + HR + math + mermaid attachments in full-spec fixture render pipeline")
         XCTAssertEqual(attachmentsWithCell, attachmentCount, "All rendered attachments must keep a cell")
@@ -174,6 +183,7 @@ final class NativeEditorSnapshotTests: XCTestCase {
             "nativeEditor.orderedTasksEnabled",
             "nativeEditor.headingCheckboxesEnabled",
             "nativeEditor.orderedListNumbering",
+            "nativeEditor.mermaidRenderMode",
         ]
 
         let previous: [String: Any?] = keys.reduce(into: [:]) { acc, k in
@@ -196,12 +206,14 @@ final class NativeEditorSnapshotTests: XCTestCase {
             defaults.set(false, forKey: "nativeEditor.orderedTasksEnabled")
             defaults.set(false, forKey: "nativeEditor.headingCheckboxesEnabled")
             defaults.set("gfmDefault", forKey: "nativeEditor.orderedListNumbering")
+            defaults.set("rich", forKey: "nativeEditor.mermaidRenderMode")
         case .kernExtensions:
             defaults.set("kern", forKey: "nativeEditor.exportDialect")
             defaults.set("kern", forKey: "nativeEditor.taskRendering")
             defaults.set(true, forKey: "nativeEditor.orderedTasksEnabled")
             defaults.set(true, forKey: "nativeEditor.headingCheckboxesEnabled")
             defaults.set("preserveTyped", forKey: "nativeEditor.orderedListNumbering")
+            defaults.set("rich", forKey: "nativeEditor.mermaidRenderMode")
         }
 
         try f()

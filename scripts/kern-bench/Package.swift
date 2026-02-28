@@ -13,7 +13,13 @@ let package = Package(
                 .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreMedia"),
+                .linkedFramework("ApplicationServices"),
             ]
+        ),
+        .testTarget(
+            name: "KernBenchTests",
+            dependencies: ["kern-bench"],
+            path: "Tests/KernBenchTests"
         ),
     ]
 )

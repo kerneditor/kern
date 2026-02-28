@@ -1,5 +1,35 @@
 import AppKit
 
+private actor StagedPromotionComputeWorker {
+    struct ComputedContext {
+        let contextStartUTF16: Int
+        let contextOldMarkdown: String
+        let contextNewMarkdown: String
+    }
+
+    func computeContext(
+        markdown: String,
+        contextStartUTF16: Int,
+        oldEndUTF16: Int,
+        newEndUTF16: Int
+    ) -> ComputedContext {
+        let markdownUTF16Count = markdown.utf16.count
+        let clampedStart = min(max(0, contextStartUTF16), markdownUTF16Count)
+        let clampedOldEnd = min(max(clampedStart, oldEndUTF16), markdownUTF16Count)
+        let clampedNewEnd = min(max(clampedOldEnd, newEndUTF16), markdownUTF16Count)
+
+        let start = String.Index(utf16Offset: clampedStart, in: markdown)
+        let oldEnd = String.Index(utf16Offset: clampedOldEnd, in: markdown)
+        let newEnd = String.Index(utf16Offset: clampedNewEnd, in: markdown)
+
+        return ComputedContext(
+            contextStartUTF16: clampedStart,
+            contextOldMarkdown: String(markdown[start..<oldEnd]),
+            contextNewMarkdown: String(markdown[start..<newEnd])
+        )
+    }
+}
+
 /// Native TextKit-based editor prototype (no WebView).
 ///
 /// Goal: prove the "true WYSIWYG + .md only" approach by:
@@ -72,12 +102,77 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     private var isApplyingInputRules = false
     private var isApplyingAutoNewline = false
     private var exportWorkItem: DispatchWorkItem?
-    /// Avoid full-document layout forcing on very large files; it can stall UI on open/edit.
-    private let fullLayoutForceCharThreshold = 60_000
+    private var hasUnexportedChanges = false
+    /// Avoid full-document layout forcing on medium/large files; it can stall first-open latency.
+    /// Keep force-layout only for small documents where the accuracy benefit is effectively free.
+    private let fullLayoutForceCharThreshold = 12_000
     private var largeDocumentLightLayoutWorkItem: DispatchWorkItem?
+    private var deferredFullRenderWorkItem: DispatchWorkItem?
+    private var scrollChromeUpdateWorkItem: DispatchWorkItem?
+    private var stagedPromotionWorkItem: DispatchWorkItem?
+    private var stagedPromotionLayoutWorkItem: DispatchWorkItem?
+    private var stagedPromotionParseWorkItem: DispatchWorkItem?
+    private var stagedPromotionComputeTask: Task<Void, Never>?
+    private var deferredFullRenderToken: UInt64 = 0
+    private var stagedPromotionToken: UInt64 = 0
+    private var stagedPromotionInFlight = false
+    private var stagedPromotionInFlightToken: UInt64?
+    private let stagedPromotionComputeWorker = StagedPromotionComputeWorker()
+    private var lastUserInteractionUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private var lastScrollEventUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    private var renderGeneration: Int = 0
+    private let stagedOpenCharThreshold = 250_000
+    private let stagedOpenPrefixLineBudget = 900
+    private let stagedOpenPrefixCharBudget = 140_000
+    private let stagedOpenVeryLargeDocCharThreshold = 1_000_000
+    private let stagedOpenVeryLargePrefixLineBudget = 220
+    private let stagedOpenVeryLargePrefixCharBudget = 48_000
+    private let stagedOpenDeferredFullDelayMs = 120
+    private let stagedOpenDeferredQuietPeriodMs = 1_200
+    private let stagedOpenVeryLargeDeferredQuietPeriodMs = 4_000
+    private let stagedOpenDeferredFullDisableThreshold = 250_000
+    private let stagedPromotionDebounceMs = 30
+    private let stagedPromotionFollowupDelayMs = 10
+    private let stagedPromotionStepChars = 450_000
+    private let stagedPromotionMaxCatchupStepChars = 4_000_000
+    private let stagedPromotionTurboFollowupDelayMs = 6
+    private let stagedPromotionTurboStepChars = 4_000_000
+    private let stagedPromotionTurboMaxCatchupStepChars = 8_000_000
+    private let stagedPromotionTurboActivateIdleMs = 800
+    private let stagedPromotionContextChars = 8_000
+    private let stagedPromotionViewportGuardChars = 400
+    private let stagedPromotionViewportMicroStepChars = 512_000
+    private let stagedPromotionViewportMicroStepMinChars = 128_000
+    private let stagedPromotionViewportMicroStepMaxChars = 2_400_000
+    private let stagedPromotionTurboViewportMicroStepMaxChars = 8_000_000
+    private let stagedPromotionIdleQuietPeriodMs = 40
+    private let stagedPromotionScrollQuietPeriodMs = 90
+    private let stagedPromotionLookaheadVisibleChars = 220_000
+    private let stagedPromotionLayoutCoalesceMs = 180
+    private let stagedPromotionFrameBudgetMs = 4.0
+    private let stagedPromotionMaxViewportCorrectionPx: CGFloat = 56
+    private let stagedPromotionJumpMetricThresholdPx: CGFloat = 24
+    private let scrollChromeThrottleCharThreshold = 120_000
+    private let scrollChromeThrottleDelayMs = 120
+    private var stagedRenderedMarkdownUTF16Count: Int?
+    private var stagedRenderedDisplayBoundary: Int?
+    private var stagedRenderGeneration: Int?
+    private var stagedPromotionsAllowed: Bool = false
+    private var stagedAdaptiveViewportMicroStepChars: Int = 512_000
+    private var pendingEditMutation: PendingEditMutation?
+    private var pendingStagedRecoveryAfterExport: Bool = false
     /// Test seam: disables debounced background export work while keeping explicit flush/save behavior.
     /// This avoids runaway async work during exhaustive non-UI typing matrices.
     var disablesDebouncedExportsForTesting = false
+
+    private struct PendingEditMutation {
+        let range: NSRange
+        let replacementUTF16Count: Int
+
+        var deltaUTF16: Int {
+            replacementUTF16Count - range.length
+        }
+    }
 
     /// Markdown source (import/export). Setting this re-renders the text view.
     var stringValue: String = "" {
@@ -140,6 +235,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             .font: baseFont,
             .foregroundColor: NSColor.labelColor,
         ]
+        // Critical for huge documents: allows jumping/scrolling to distant regions without forcing
+        // contiguous layout from document start to destination.
+        textView.layoutManager?.allowsNonContiguousLayout = true
 
         scrollView.documentView = textView
         scrollView.frame = container.bounds
@@ -181,8 +279,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     deinit {
-        NotificationCenter.default.removeObserver(self, name: .nativeEditorPreferencesDidChange, object: nil)
-        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
+        // Selector-based observers are safe to remove wholesale here without touching actor-isolated state.
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLayout() {
@@ -299,15 +397,78 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     private func renderMarkdown(_ markdown: String, preserveSelection: Bool) {
+        noteUserInteraction()
+        if deferredFullRenderWorkItem != nil {
+            WowInternalMetricsRecorder.shared.failFullDocumentFidelityIfMissing(reason: "superseded_by_new_render")
+        }
+        renderGeneration &+= 1
+        let currentGeneration = renderGeneration
+        deferredFullRenderWorkItem?.cancel()
+        deferredFullRenderWorkItem = nil
+        deferredFullRenderToken &+= 1
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionWorkItem = nil
+        stagedPromotionLayoutWorkItem?.cancel()
+        stagedPromotionLayoutWorkItem = nil
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        stagedPromotionComputeTask = nil
+        stagedPromotionToken &+= 1
+        stagedPromotionInFlight = false
+        stagedPromotionInFlightToken = nil
+        stagedRenderedMarkdownUTF16Count = nil
+        stagedRenderedDisplayBoundary = nil
+        stagedRenderGeneration = nil
+        stagedPromotionsAllowed = false
+        pendingEditMutation = nil
+        resetAdaptiveStagedPromotionBudget()
+
+        let wow = WowInternalMetricsRecorder.shared
+        wow.beginRun()
         let selection = preserveSelection ? textView.selectedRange() : nil
         let scrollOrigin = preserveSelection ? scrollView.contentView.bounds.origin : nil
 
         let opt = NativeMarkdownCodec.Options.fromUserDefaults()
-        let attr = NativeMarkdownCodec.importMarkdown(markdown, options: opt, baseURL: documentURL)
+        let useStagedOpen = shouldUseStagedOpen(for: markdown)
+
+        wow.beginOpenReady()
+        wow.beginViewportSemanticReady()
+        wow.beginViewportFidelityReady()
+        wow.beginFullDocumentFidelityReady()
+
+        wow.beginParse()
+        let attr: NSAttributedString
+        if useStagedOpen {
+            let staged = makeStagedInitialAttributed(markdown: markdown, options: opt)
+            attr = staged.attributed
+            stagedRenderedMarkdownUTF16Count = staged.renderedMarkdownUTF16Count
+            stagedRenderedDisplayBoundary = staged.renderedDisplayBoundary
+            stagedRenderGeneration = currentGeneration
+            stagedPromotionsAllowed = staged.renderedMarkdownUTF16Count < markdown.utf16.count
+        } else {
+            attr = NativeMarkdownCodec.importMarkdown(markdown, options: opt, baseURL: documentURL)
+            stagedRenderedMarkdownUTF16Count = nil
+            stagedRenderedDisplayBoundary = nil
+            stagedRenderGeneration = nil
+            stagedPromotionsAllowed = false
+        }
+        wow.endParse()
+
+        wow.beginPaintReady()
         textView.textStorage?.setAttributedString(attr)
+        DispatchQueue.main.async {
+            WowInternalMetricsRecorder.shared.endPaintReady()
+        }
         let forceFullLayout = markdown.utf16.count <= fullLayoutForceCharThreshold
+        wow.beginLayout()
         adjustDocumentViewHeightToContent(forceFullLayout: forceFullLayout)
+        wow.endLayout()
         scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
+
+        wow.endViewportSemanticReady()
+        wow.endViewportFidelityReady()
+        wow.endOpenReady()
 
         if let selection {
             let maxLocation = max(0, textView.string.count)
@@ -326,6 +487,281 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
+
+        if useStagedOpen {
+            if markdown.utf16.count >= stagedDeferredFullDisableThreshold() {
+                // Very large docs skip single-shot deferred full render to avoid giant one-time stalls.
+                // Continue staged promotions in the background while idle.
+                scheduleStagedPromotionFollowupIfNeeded()
+            } else {
+                scheduleDeferredFullRender(
+                    markdown: markdown,
+                    options: opt,
+                    generation: currentGeneration
+                )
+            }
+        } else {
+            wow.endFullDocumentFidelityReady()
+        }
+    }
+
+    private func shouldUseStagedOpen(for markdown: String) -> Bool {
+        if ProcessInfo.processInfo.environment["KERN_FORCE_FULL_MARKDOWN_IMPORT"] == "1" {
+            return false
+        }
+        if ProcessInfo.processInfo.environment["KERN_FORCE_STAGED_OPEN"] == "1" {
+            return true
+        }
+        if ProcessInfo.processInfo.environment["KERN_DISABLE_STAGED_OPEN"] == "1" {
+            return false
+        }
+        let threshold: Int = {
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_THRESHOLD_CHARS"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed > 0 {
+                return parsed
+            }
+            return stagedOpenCharThreshold
+        }()
+        return markdown.utf16.count >= threshold
+    }
+
+    private func stagedDeferredFullDisableThreshold() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_DEFERRED_FULL_DISABLE_THRESHOLD_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        return stagedOpenDeferredFullDisableThreshold
+    }
+
+    private struct StagedAttributedPayload {
+        let attributed: NSAttributedString
+        let renderedMarkdownUTF16Count: Int
+        let renderedDisplayBoundary: Int
+    }
+
+    private func stagedPrefixMarkdown(_ markdown: String) -> (prefix: String, utf16Count: Int) {
+        guard !markdown.isEmpty else { return ("", 0) }
+        let markdownLength = markdown.utf16.count
+        let isVeryLargeDocument = markdownLength >= stagedOpenVeryLargeDocCharThreshold
+
+        let lineBudget: Int = {
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_PREFIX_LINES"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed > 0 {
+                return parsed
+            }
+            return isVeryLargeDocument ? stagedOpenVeryLargePrefixLineBudget : stagedOpenPrefixLineBudget
+        }()
+        let charBudget: Int = {
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_PREFIX_CHARS"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed > 0 {
+                return parsed
+            }
+            return isVeryLargeDocument ? stagedOpenVeryLargePrefixCharBudget : stagedOpenPrefixCharBudget
+        }()
+
+        let ns = markdown as NSString
+        let maxChars = min(ns.length, charBudget)
+        var scanLocation = 0
+        var newlineCount = 0
+        var endLocation = maxChars
+
+        while scanLocation < ns.length, newlineCount < lineBudget, scanLocation < maxChars {
+            let searchRange = NSRange(location: scanLocation, length: ns.length - scanLocation)
+            let nlRange = ns.range(of: "\n", options: [], range: searchRange)
+            if nlRange.location == NSNotFound {
+                endLocation = min(ns.length, maxChars)
+                break
+            }
+            let nextScan = nlRange.location + nlRange.length
+            if nextScan > maxChars {
+                endLocation = maxChars
+                break
+            }
+            newlineCount += 1
+            scanLocation = nextScan
+            endLocation = nextScan
+        }
+
+        if endLocation >= ns.length {
+            return (markdown, markdown.utf16.count)
+        }
+
+        let prefixEnd = String.Index(utf16Offset: max(0, min(endLocation, markdown.utf16.count)), in: markdown)
+        let prefix = String(markdown[..<prefixEnd])
+        return (prefix, prefix.utf16.count)
+    }
+
+    private func stagedPrefixMarkdownForPromotion(
+        _ markdown: String,
+        targetUTF16Count: Int
+    ) -> (prefix: String, utf16Count: Int) {
+        let ns = markdown as NSString
+        guard ns.length > 0 else { return ("", 0) }
+
+        var endLocation = min(max(0, targetUTF16Count), ns.length)
+        if endLocation < ns.length {
+            let searchRange = NSRange(location: endLocation, length: min(ns.length - endLocation, 8_192))
+            let nlRange = ns.range(of: "\n", options: [], range: searchRange)
+            if nlRange.location != NSNotFound {
+                endLocation = nlRange.location + nlRange.length
+            }
+        }
+
+        if endLocation >= ns.length {
+            return (markdown, markdown.utf16.count)
+        }
+        let end = String.Index(utf16Offset: endLocation, in: markdown)
+        let prefix = String(markdown[..<end])
+        return (prefix, prefix.utf16.count)
+    }
+
+    private func makeStagedAttributed(
+        markdown: String,
+        options: NativeMarkdownCodec.Options,
+        prefix: String,
+        prefixUTF16Count: Int,
+        baseURL: URL?
+    ) -> StagedAttributedPayload {
+        if prefixUTF16Count >= markdown.utf16.count {
+            let full = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: baseURL)
+            return StagedAttributedPayload(
+                attributed: full,
+                renderedMarkdownUTF16Count: markdown.utf16.count,
+                renderedDisplayBoundary: full.length
+            )
+        }
+
+        let prefixAttr = NSMutableAttributedString(
+            attributedString: NativeMarkdownCodec.importMarkdown(prefix, options: options, baseURL: baseURL)
+        )
+        let renderedBoundary = prefixAttr.length
+        let suffixStart = String.Index(utf16Offset: min(prefixUTF16Count, markdown.utf16.count), in: markdown)
+        let suffix = String(markdown[suffixStart...])
+        if !suffix.isEmpty {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 16),
+                .foregroundColor: NSColor.labelColor,
+            ]
+            prefixAttr.append(NSAttributedString(string: suffix, attributes: attrs))
+        }
+        return StagedAttributedPayload(
+            attributed: prefixAttr,
+            renderedMarkdownUTF16Count: prefixUTF16Count,
+            renderedDisplayBoundary: renderedBoundary
+        )
+    }
+
+    private func makeStagedInitialAttributed(markdown: String, options: NativeMarkdownCodec.Options) -> StagedAttributedPayload {
+        let initialPrefix = stagedPrefixMarkdown(markdown)
+        return makeStagedAttributed(
+            markdown: markdown,
+            options: options,
+            prefix: initialPrefix.prefix,
+            prefixUTF16Count: initialPrefix.utf16Count,
+            baseURL: documentURL
+        )
+    }
+
+    private func scheduleDeferredFullRender(
+        markdown: String,
+        options: NativeMarkdownCodec.Options,
+        generation: Int,
+        delayOverrideMs: Int? = nil
+    ) {
+        deferredFullRenderWorkItem?.cancel()
+        deferredFullRenderToken &+= 1
+        let token = deferredFullRenderToken
+
+        let delayMs: Int = {
+            if let override = delayOverrideMs, override >= 0 {
+                return override
+            }
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_DELAY_MS"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed >= 0 {
+                return parsed
+            }
+            return stagedOpenDeferredFullDelayMs
+        }()
+        let quietPeriodMs: Int = {
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_OPEN_IDLE_QUIET_MS"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed >= 0 {
+                return parsed
+            }
+            if markdown.utf16.count >= stagedOpenVeryLargeDocCharThreshold {
+                return stagedOpenVeryLargeDeferredQuietPeriodMs
+            }
+            return stagedOpenDeferredQuietPeriodMs
+        }()
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard token == self.deferredFullRenderToken else { return }
+            guard generation == self.renderGeneration else { return }
+            guard self.stringValue == markdown else { return }
+            guard !self.hasUnexportedChanges else { return }
+            let sinceInteraction = ProcessInfo.processInfo.systemUptime - self.lastUserInteractionUptime
+            let quietPeriodSeconds = Double(quietPeriodMs) / 1_000.0
+            if sinceInteraction < quietPeriodSeconds {
+                let retryDelayMs = Int(ceil(max(0.05, quietPeriodSeconds - sinceInteraction) * 1_000.0))
+                self.scheduleDeferredFullRender(
+                    markdown: markdown,
+                    options: options,
+                    generation: generation,
+                    delayOverrideMs: retryDelayMs
+                )
+                return
+            }
+            let sinceScroll = ProcessInfo.processInfo.systemUptime - self.lastScrollEventUptime
+            let minScrollIdleSeconds = max(0.15, Double(self.scrollChromeThrottleDelayMs) / 1_000.0)
+            if sinceScroll < minScrollIdleSeconds {
+                let retryDelayMs = Int(ceil(max(0.05, minScrollIdleSeconds - sinceScroll) * 1_000.0))
+                self.scheduleDeferredFullRender(
+                    markdown: markdown,
+                    options: options,
+                    generation: generation,
+                    delayOverrideMs: retryDelayMs
+                )
+                return
+            }
+
+            let selection = self.textView.selectedRange()
+            let scrollOrigin = self.scrollView.contentView.bounds.origin
+
+            let full = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: self.documentURL)
+            guard token == self.deferredFullRenderToken else { return }
+            guard generation == self.renderGeneration else { return }
+            guard self.stringValue == markdown else { return }
+            guard !self.hasUnexportedChanges else { return }
+
+            // Deferred full render is an external visual upgrade, not a user edit.
+            // Keep it out of textDidChange side-effects (dirty state, export debounce).
+            self.isApplyingExternalUpdate = true
+            defer { self.isApplyingExternalUpdate = false }
+            self.textView.textStorage?.setAttributedString(full)
+            self.adjustDocumentViewHeightToContent(forceFullLayout: false)
+            self.scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
+
+            let safeLocation = min(selection.location, max(0, self.textView.string.utf16.count))
+            let safeLength = min(selection.length, max(0, self.textView.string.utf16.count - safeLocation))
+            self.textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
+            self.scrollView.contentView.scroll(to: scrollOrigin)
+            self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+
+            self.updateCodeBlockChrome()
+            self.scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
+
+            self.finalizeStagedPromotionCompletion()
+            self.deferredFullRenderWorkItem = nil
+        }
+
+        deferredFullRenderWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
     }
 
     // MARK: - Checkbox Toggle
@@ -457,9 +893,32 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     // MARK: - NSTextViewDelegate
 
     func textDidChange(_ notification: Notification) {
+        noteUserInteraction()
         guard !isApplyingExternalUpdate else { return }
         guard !isApplyingInputRules else { return }
         guard !isApplyingAutoNewline else { return }
+
+        let hadActiveStagedPipeline =
+            stagedPromotionsAllowed ||
+            stagedRenderGeneration != nil ||
+            stagedRenderedMarkdownUTF16Count != nil ||
+            stagedRenderedDisplayBoundary != nil
+
+        let mutation = pendingEditMutation
+        pendingEditMutation = nil
+        let preservedStagedPipeline = preserveStagedPipelineAfterEditIfPossible(mutation: mutation)
+        if !preservedStagedPipeline, hadActiveStagedPipeline {
+            resetStagedPipelineStateForEdit()
+            pendingStagedRecoveryAfterExport = true
+        }
+
+        if deferredFullRenderWorkItem != nil {
+            deferredFullRenderWorkItem?.cancel()
+            deferredFullRenderWorkItem = nil
+            deferredFullRenderToken &+= 1
+        }
+
+        WowInternalMetricsRecorder.shared.endEditApply()
 
         // Mark the document edited immediately so Save is enabled even if export is debounced.
         // The markdown string itself is still produced by export (debounced or flushed on save).
@@ -475,9 +934,106 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         scheduleExport()
     }
 
+    private func preserveStagedPipelineAfterEditIfPossible(mutation: PendingEditMutation?) -> Bool {
+        guard let mutation else { return false }
+        // On very large files, tiny accounting drift between markdown/display boundaries
+        // can stall staged promotion after edits. Prefer deterministic reset+recovery.
+        guard stringValue.utf16.count < stagedOpenVeryLargeDocCharThreshold else { return false }
+        guard stagedPromotionsAllowed else { return false }
+        guard stagedRenderGeneration == renderGeneration else { return false }
+        guard var renderedBoundary = stagedRenderedDisplayBoundary else { return false }
+        guard var renderedMarkdownUTF16 = stagedRenderedMarkdownUTF16Count else { return false }
+
+        let editStart = max(0, mutation.range.location)
+        let editEnd = editStart + max(0, mutation.range.length)
+        guard editEnd <= renderedBoundary else { return false }
+
+        let delta = mutation.deltaUTF16
+        if editStart <= renderedBoundary {
+            renderedBoundary = max(0, renderedBoundary + delta)
+        }
+        if editStart <= renderedMarkdownUTF16 {
+            renderedMarkdownUTF16 = max(0, renderedMarkdownUTF16 + delta)
+        }
+
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionWorkItem = nil
+        stagedPromotionLayoutWorkItem?.cancel()
+        stagedPromotionLayoutWorkItem = nil
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        stagedPromotionComputeTask = nil
+        stagedPromotionToken &+= 1
+        stagedPromotionInFlight = false
+        stagedPromotionInFlightToken = nil
+
+        stagedRenderedDisplayBoundary = renderedBoundary
+        stagedRenderedMarkdownUTF16Count = renderedMarkdownUTF16
+        pendingStagedRecoveryAfterExport = false
+        return true
+    }
+
+    private func resetStagedPipelineStateForEdit() {
+        stagedPromotionsAllowed = false
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionWorkItem = nil
+        stagedPromotionLayoutWorkItem?.cancel()
+        stagedPromotionLayoutWorkItem = nil
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        stagedPromotionComputeTask = nil
+        stagedPromotionToken &+= 1
+        stagedPromotionInFlight = false
+        stagedPromotionInFlightToken = nil
+        stagedRenderedMarkdownUTF16Count = nil
+        stagedRenderedDisplayBoundary = nil
+        stagedRenderGeneration = nil
+        resetAdaptiveStagedPromotionBudget()
+    }
+
+    private func finalizeStagedPromotionCompletion(markFullDocumentFidelityReady: Bool = true) {
+        if markFullDocumentFidelityReady {
+            WowInternalMetricsRecorder.shared.endFullDocumentFidelityReady()
+        }
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionWorkItem = nil
+        stagedPromotionLayoutWorkItem?.cancel()
+        stagedPromotionLayoutWorkItem = nil
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        stagedPromotionComputeTask = nil
+        stagedPromotionToken &+= 1
+        stagedPromotionInFlight = false
+        stagedPromotionInFlightToken = nil
+        stagedRenderedMarkdownUTF16Count = nil
+        stagedRenderedDisplayBoundary = nil
+        stagedRenderGeneration = nil
+        stagedPromotionsAllowed = false
+        resetAdaptiveStagedPromotionBudget()
+    }
+
+    private func rescheduleStagedPromotionAfterNoProgress() {
+        guard stagedPromotionsAllowed else { return }
+        scheduleStagedPromotionFollowupIfNeeded()
+    }
+
     func textView(_ textView: NSTextView, shouldChangeTextIn affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        guard !isApplyingExternalUpdate else { return true }
+        guard !isApplyingExternalUpdate else {
+            pendingEditMutation = nil
+            return true
+        }
         guard let storage = textView.textStorage, storage.length > 0 else { return true }
+        pendingEditMutation = PendingEditMutation(
+            range: affectedCharRange,
+            replacementUTF16Count: replacementString?.utf16.count ?? 0
+        )
+
+        if let replacementString, !replacementString.isEmpty {
+            WowInternalMetricsRecorder.shared.beginEditApply()
+        }
 
         // Keyboard shortcut: space toggles a checkbox when the caret is on (or immediately after)
         // the checkbox marker. This avoids fragile click targeting and matches common editor UX.
@@ -526,6 +1082,9 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
+        if !isApplyingExternalUpdate {
+            noteUserInteraction()
+        }
         updateCodeBlockChrome()
         maybeReapplyAnchorJumpIfNeeded()
     }
@@ -635,9 +1194,21 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         guard var guardState = anchorJumpGuard else { return }
 
         let now = Date()
-        if now >= guardState.expiresAt || guardState.remainingRejumps <= 0 {
+        if now >= guardState.expiresAt {
             anchorJumpGuard = nil
             return
+        }
+
+        let sel = textView.selectedRange()
+        let selLen = max(sel.length, 1) // treat a caret as a 1-char range for containment checks
+        let containsLinkIndex = sel.location <= guardState.linkCharIndex && guardState.linkCharIndex < sel.location + selLen
+        if guardState.remainingRejumps <= 0 {
+            if containsLinkIndex {
+                // Keep one emergency retry available for explicit link-selection snap-backs.
+                guardState.remainingRejumps = 1
+            } else {
+                return
+            }
         }
 
         guard let storage = textView.textStorage,
@@ -647,10 +1218,6 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         let ns = storage.string as NSString
         let visible = textView.visibleRect
-
-        let sel = textView.selectedRange()
-        let selLen = max(sel.length, 1) // treat a caret as a 1-char range for containment checks
-        let containsLinkIndex = sel.location <= guardState.linkCharIndex && guardState.linkCharIndex < sel.location + selLen
 
         func paragraphRect(forCharIndex charIndex: Int) -> (para: NSRange, rect: NSRect)? {
             guard ns.length > 0 else { return nil }
@@ -754,7 +1321,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if let lm = textView.layoutManager, let tc = textView.textContainer {
             // TextKit can be lazy about layout for far-down content. Ensure the document view has
             // correct height + layout before we compute a rect to scroll to.
-            adjustDocumentViewHeightToContent()
+            adjustDocumentViewHeightToContent(forceFullLayout: true)
 
             let glyphRange = lm.glyphRange(forCharacterRange: paraRange, actualCharacterRange: nil)
             lm.ensureLayout(forGlyphRange: glyphRange)
@@ -792,6 +1359,8 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     // MARK: - Export
 
     private func scheduleExport() {
+        hasUnexportedChanges = true
+
         if disablesDebouncedExportsForTesting {
             return
         }
@@ -801,8 +1370,14 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let opt = NativeMarkdownCodec.Options.fromUserDefaults()
+            WowInternalMetricsRecorder.shared.beginSaveSerialize()
             let markdown = NativeMarkdownCodec.exportMarkdown(self.textView.attributedString(), options: opt)
+            WowInternalMetricsRecorder.shared.endSaveSerialize()
             self.onContentChanged?(markdown)
+            self.syncStringValueWithoutRender(markdown)
+            self.hasUnexportedChanges = false
+            self.recoverStagedRenderingAfterExportIfNeeded(markdown: markdown, options: opt)
+            self.resumeStagedPromotionAfterExportIfNeeded()
         }
 
         exportWorkItem = workItem
@@ -812,12 +1387,98 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     /// Force an immediate export of the current editor state, cancelling any pending debounce.
     /// Used for correctness on explicit Save operations.
     func flushPendingExport() {
+        guard hasUnexportedChanges else { return }
+
         exportWorkItem?.cancel()
         exportWorkItem = nil
 
         let opt = NativeMarkdownCodec.Options.fromUserDefaults()
+        WowInternalMetricsRecorder.shared.beginSaveSerialize()
         let markdown = NativeMarkdownCodec.exportMarkdown(textView.attributedString(), options: opt)
+        WowInternalMetricsRecorder.shared.endSaveSerialize()
         onContentChanged?(markdown)
+        syncStringValueWithoutRender(markdown)
+        hasUnexportedChanges = false
+        recoverStagedRenderingAfterExportIfNeeded(markdown: markdown, options: opt)
+        resumeStagedPromotionAfterExportIfNeeded()
+    }
+
+    private func syncStringValueWithoutRender(_ markdown: String) {
+        isApplyingExternalUpdate = true
+        stringValue = markdown
+        isApplyingExternalUpdate = false
+    }
+
+    private func recoverStagedRenderingAfterExportIfNeeded(
+        markdown: String,
+        options: NativeMarkdownCodec.Options
+    ) {
+        guard pendingStagedRecoveryAfterExport else { return }
+        pendingStagedRecoveryAfterExport = false
+        guard shouldUseStagedOpen(for: markdown) else { return }
+
+        let staged = makeStagedInitialAttributed(markdown: markdown, options: options)
+        let selection = textView.selectedRange()
+        let scrollOrigin = scrollView.contentView.bounds.origin
+
+        isApplyingExternalUpdate = true
+        defer { isApplyingExternalUpdate = false }
+        textView.textStorage?.setAttributedString(staged.attributed)
+        adjustDocumentViewHeightToContent(forceFullLayout: false)
+        scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
+
+        let maxLocation = max(0, textView.string.utf16.count)
+        let safeLocation = min(selection.location, maxLocation)
+        let safeLength = min(selection.length, max(0, maxLocation - safeLocation))
+        textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
+        scrollView.contentView.scroll(to: scrollOrigin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateCodeBlockChrome()
+        scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
+
+        stagedRenderedMarkdownUTF16Count = staged.renderedMarkdownUTF16Count
+        stagedRenderedDisplayBoundary = staged.renderedDisplayBoundary
+        stagedRenderGeneration = renderGeneration
+        stagedPromotionsAllowed = staged.renderedMarkdownUTF16Count < markdown.utf16.count
+        guard stagedPromotionsAllowed else {
+            finalizeStagedPromotionCompletion()
+            return
+        }
+    }
+
+    private func resumeStagedPromotionAfterExportIfNeeded() {
+        guard stagedPromotionsAllowed else { return }
+        guard stagedRenderGeneration == renderGeneration else { return }
+        guard deferredFullRenderWorkItem == nil else { return }
+        guard !hasUnexportedChanges else { return }
+        scheduleStagedPromotionFollowupIfNeeded()
+    }
+
+    /// Closing fast-path: drop non-critical deferred work to avoid shutdown lag on huge documents.
+    func cancelDeferredWorkForClose() {
+        deferredFullRenderWorkItem?.cancel()
+        deferredFullRenderWorkItem = nil
+        deferredFullRenderToken &+= 1
+        largeDocumentLightLayoutWorkItem?.cancel()
+        largeDocumentLightLayoutWorkItem = nil
+        scrollChromeUpdateWorkItem?.cancel()
+        scrollChromeUpdateWorkItem = nil
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionWorkItem = nil
+        stagedPromotionLayoutWorkItem?.cancel()
+        stagedPromotionLayoutWorkItem = nil
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        stagedPromotionComputeTask = nil
+        stagedPromotionToken &+= 1
+        stagedPromotionInFlight = false
+        stagedPromotionInFlightToken = nil
+        stagedPromotionsAllowed = false
+        stagedRenderedMarkdownUTF16Count = nil
+        stagedRenderedDisplayBoundary = nil
+        stagedRenderGeneration = nil
+        resetAdaptiveStagedPromotionBudget()
     }
 
     // MARK: - Input Rules (Very Small MVP)
@@ -1964,8 +2625,848 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     }
 
     @objc private func scrollViewDidScroll(_ notification: Notification) {
-        updateCodeBlockChrome()
+        let isUserScrollEvent = NSApp.currentEvent?.type == .scrollWheel
+        if isUserScrollEvent, !isApplyingExternalUpdate {
+            noteUserInteraction()
+            lastScrollEventUptime = ProcessInfo.processInfo.systemUptime
+        }
+        scheduleStagedViewportPromotionIfNeeded()
+        scheduleCodeBlockChromeUpdateForScrollIfNeeded()
         maybeReapplyAnchorJumpIfNeeded()
+    }
+
+    private func noteUserInteraction() {
+        lastUserInteractionUptime = ProcessInfo.processInfo.systemUptime
+    }
+
+    private func scheduleStagedViewportPromotionIfNeeded() {
+        guard stagedPromotionsAllowed else { return }
+        guard stagedRenderGeneration == renderGeneration else { return }
+        guard deferredFullRenderWorkItem == nil else { return }
+        guard !hasUnexportedChanges else { return }
+        guard !stagedPromotionInFlight else { return }
+        guard let renderedDisplayBoundary = stagedRenderedDisplayBoundary,
+              let renderedMarkdownUTF16Count = stagedRenderedMarkdownUTF16Count else { return }
+        let totalMarkdownUTF16Count = stringValue.utf16.count
+        guard renderedMarkdownUTF16Count < totalMarkdownUTF16Count else {
+            finalizeStagedPromotionCompletion()
+            return
+        }
+        guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+        let visibleRange = visibleCharacterRangeForChrome(layoutManager: lm, textContainer: tc)
+        let visibleEnd = visibleRange.location + visibleRange.length
+        if visibleEnd + stagedPromotionLookaheadVisibleChars < renderedDisplayBoundary {
+            return
+        }
+
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionToken &+= 1
+        let token = stagedPromotionToken
+        let work = DispatchWorkItem { [weak self] in
+            self?.applyNextStagedViewportPromotion(token: token)
+        }
+        stagedPromotionWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(stagedPromotionDebounceMsValue()),
+            execute: work
+        )
+    }
+
+    private func applyNextStagedViewportPromotion(token: UInt64) {
+        WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_cycle_invocation_count")
+        guard stagedPromotionsAllowed else { return }
+        guard token == stagedPromotionToken else { return }
+        guard stagedRenderGeneration == renderGeneration else { return }
+        guard deferredFullRenderWorkItem == nil else { return }
+        guard !hasUnexportedChanges else { return }
+        guard !stagedPromotionInFlight else { return }
+        guard NSEvent.pressedMouseButtons == 0 else {
+            scheduleStagedPromotionFollowupIfNeeded()
+            return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let sinceScroll = now - lastScrollEventUptime
+        let sinceInteraction = now - lastUserInteractionUptime
+        let scrollQuietSeconds = Double(stagedPromotionScrollQuietPeriodMsValue()) / 1_000.0
+        if sinceScroll < scrollQuietSeconds {
+            scheduleStagedPromotionFollowupIfNeeded()
+            return
+        }
+        let idleQuietSeconds = Double(stagedPromotionIdleQuietPeriodMsValue()) / 1_000.0
+        if sinceInteraction < idleQuietSeconds {
+            // Keep the full-document catch-up pipeline alive after short interaction bursts
+            // (typing pulses, brief clicks) so fidelity can complete without requiring the
+            // user to scroll near the staged boundary again.
+            scheduleStagedPromotionFollowupIfNeeded()
+            return
+        }
+        let useTurbo = shouldUseTurboStagedPromotion(
+            sinceInteraction: sinceInteraction,
+            sinceScroll: sinceScroll
+        )
+
+        guard let currentRenderedUTF16 = stagedRenderedMarkdownUTF16Count else { return }
+        guard let currentRenderedDisplayBoundary = stagedRenderedDisplayBoundary else { return }
+        let markdown = stringValue
+        let totalUTF16 = markdown.utf16.count
+        guard currentRenderedUTF16 < totalUTF16 else {
+            finalizeStagedPromotionCompletion()
+            return
+        }
+
+        guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
+        let visibleRange = visibleCharacterRangeForChrome(layoutManager: lm, textContainer: tc)
+        let visibleEnd = visibleRange.location + visibleRange.length
+
+        let viewportAnchor = captureViewportAnchor()
+        let minStepTarget = currentRenderedUTF16 + stagedPromotionStepCharsValue(useTurbo: useTurbo)
+        let catchupTarget = estimatedMarkdownUTF16CatchupTarget(
+            visibleDisplayEnd: visibleEnd,
+            renderedDisplayBoundary: currentRenderedDisplayBoundary,
+            renderedMarkdownUTF16Count: currentRenderedUTF16,
+            totalMarkdownUTF16Count: totalUTF16,
+            useTurbo: useTurbo
+        )
+        let maxCatchupTarget = currentRenderedUTF16 + stagedPromotionMaxCatchupStepCharsValue(useTurbo: useTurbo)
+        var targetUTF16 = min(
+            totalUTF16,
+            max(
+                minStepTarget,
+                min(catchupTarget, maxCatchupTarget)
+            )
+        )
+        var promotedPrefix = stagedPrefixMarkdownForPromotion(markdown, targetUTF16Count: targetUTF16)
+        guard promotedPrefix.utf16Count > currentRenderedUTF16 else {
+            rescheduleStagedPromotionAfterNoProgress()
+            return
+        }
+        var rawDeltaUTF16 = promotedPrefix.utf16Count - currentRenderedUTF16
+        guard rawDeltaUTF16 > 0 else {
+            rescheduleStagedPromotionAfterNoProgress()
+            return
+        }
+
+        let parseDeltaCap = stagedPromotionViewportMicroStepCharsValue(
+            useTurbo: useTurbo,
+            sinceInteraction: sinceInteraction,
+            sinceScroll: sinceScroll
+        )
+        if rawDeltaUTF16 > parseDeltaCap {
+            targetUTF16 = min(totalUTF16, currentRenderedUTF16 + parseDeltaCap)
+            promotedPrefix = stagedPrefixMarkdownForPromotion(markdown, targetUTF16Count: targetUTF16)
+            rawDeltaUTF16 = promotedPrefix.utf16Count - currentRenderedUTF16
+            guard rawDeltaUTF16 > 0 else {
+                rescheduleStagedPromotionAfterNoProgress()
+                return
+            }
+        }
+
+        if let viewportAnchor {
+            let guardChars = stagedPromotionViewportGuardCharsValue()
+            let anchorSlack = viewportAnchor.characterLocation - currentRenderedDisplayBoundary - guardChars
+            let cappedDelta: Int
+            if anchorSlack > 0 {
+                cappedDelta = max(1, min(rawDeltaUTF16, anchorSlack))
+            } else {
+                cappedDelta = max(1, min(rawDeltaUTF16, stagedPromotionViewportMicroStepCharsValue(useTurbo: useTurbo)))
+            }
+            if cappedDelta < rawDeltaUTF16 {
+                targetUTF16 = min(totalUTF16, currentRenderedUTF16 + cappedDelta)
+                promotedPrefix = stagedPrefixMarkdownForPromotion(markdown, targetUTF16Count: targetUTF16)
+                rawDeltaUTF16 = promotedPrefix.utf16Count - currentRenderedUTF16
+                guard rawDeltaUTF16 > 0 else {
+                    rescheduleStagedPromotionAfterNoProgress()
+                    return
+                }
+            }
+        }
+
+        let options = NativeMarkdownCodec.Options.fromUserDefaults()
+        let contextStartUTF16 = stagedPromotionContextStartUTF16(
+            markdown: markdown,
+            renderedUTF16Count: currentRenderedUTF16
+        )
+
+        stagedPromotionInFlight = true
+        stagedPromotionInFlightToken = token
+        stagedPromotionParseWorkItem?.cancel()
+        stagedPromotionParseWorkItem = nil
+        stagedPromotionComputeTask?.cancel()
+        WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_compute_launch_count")
+        let computeWorker = stagedPromotionComputeWorker
+        stagedPromotionComputeTask = Task(priority: .userInitiated) { [weak self] in
+            let computeStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            let computed = await computeWorker.computeContext(
+                markdown: markdown,
+                contextStartUTF16: contextStartUTF16,
+                oldEndUTF16: currentRenderedUTF16,
+                newEndUTF16: promotedPrefix.utf16Count
+            )
+            let computeMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - computeStart) / 1_000_000
+            guard !Task.isCancelled else {
+                await MainActor.run {
+                    self?.cancelStagedPromotionInFlightIfMatching(token: token)
+                    self?.scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: 20)
+                }
+                return
+            }
+            await MainActor.run {
+                self?.applyParsedStagedViewportPromotion(
+                    token: token,
+                    markdown: markdown,
+                    totalUTF16: totalUTF16,
+                    rawDeltaUTF16: rawDeltaUTF16,
+                    currentRenderedDisplayBoundary: currentRenderedDisplayBoundary,
+                    promotedPrefixUTF16Count: promotedPrefix.utf16Count,
+                    viewportAnchor: viewportAnchor,
+                    useTurbo: useTurbo,
+                    contextOldMarkdown: computed.contextOldMarkdown,
+                    contextNewMarkdown: computed.contextNewMarkdown,
+                    promotionComputeMs: computeMs,
+                    options: options
+                )
+            }
+        }
+    }
+
+    private func applyParsedStagedViewportPromotion(
+        token: UInt64,
+        markdown: String,
+        totalUTF16: Int,
+        rawDeltaUTF16: Int,
+        currentRenderedDisplayBoundary: Int,
+        promotedPrefixUTF16Count: Int,
+        viewportAnchor: ViewportAnchor?,
+        useTurbo: Bool,
+        contextOldMarkdown: String,
+        contextNewMarkdown: String,
+        promotionComputeMs: Double,
+        options: NativeMarkdownCodec.Options
+    ) {
+        WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_attempt_count")
+        defer {
+            if stagedPromotionInFlightToken == token {
+                stagedPromotionInFlight = false
+                stagedPromotionInFlightToken = nil
+                stagedPromotionComputeTask = nil
+                stagedPromotionParseWorkItem = nil
+            }
+        }
+        guard stagedPromotionsAllowed else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_no_promotions_allowed_count")
+            return
+        }
+        guard token == stagedPromotionToken else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_token_mismatch_count")
+            scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: 20)
+            return
+        }
+        guard stagedRenderGeneration == renderGeneration else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_generation_mismatch_count")
+            return
+        }
+        guard deferredFullRenderWorkItem == nil else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_deferred_full_render_active_count")
+            return
+        }
+        guard !hasUnexportedChanges else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_unexported_changes_count")
+            return
+        }
+        if stringValue != markdown {
+            // The source snapshot changed while background compute was running
+            // (typically because a debounced export normalized markdown without
+            // a user-visible edit). Re-enqueue promotion against the latest
+            // markdown snapshot instead of stalling the staged pipeline.
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_skipped_markdown_snapshot_mismatch_count")
+            scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: 20)
+            return
+        }
+
+        WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
+            "wow_staged_promotion_compute_latency_ms_max",
+            candidate: promotionComputeMs
+        )
+        WowInternalMetricsRecorder.shared.recordAuxSample(
+            "wow_staged_promotion_compute_latency_ms",
+            sample: promotionComputeMs
+        )
+        WowInternalMetricsRecorder.shared.incrementAuxCounter(
+            "wow_staged_promotion_compute_latency_ms_total",
+            by: promotionComputeMs
+        )
+
+        let promotionParseStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        let contextOldAttributed = NativeMarkdownCodec.importMarkdown(
+            contextOldMarkdown,
+            options: options,
+            baseURL: documentURL
+        )
+        let contextNewAttributed = NativeMarkdownCodec.importMarkdown(
+            contextNewMarkdown,
+            options: options,
+            baseURL: documentURL
+        )
+        let promotionParseMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - promotionParseStart) / 1_000_000
+
+        WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
+            "wow_staged_promotion_parse_latency_ms_max",
+            candidate: promotionParseMs
+        )
+        WowInternalMetricsRecorder.shared.recordAuxSample(
+            "wow_staged_promotion_parse_latency_ms",
+            sample: promotionParseMs
+        )
+        WowInternalMetricsRecorder.shared.incrementAuxCounter(
+            "wow_staged_promotion_parse_latency_ms_total",
+            by: promotionParseMs
+        )
+        WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
+            "wow_staged_promotion_delta_utf16_max",
+            candidate: Double(rawDeltaUTF16)
+        )
+        WowInternalMetricsRecorder.shared.recordAuxSample(
+            "wow_staged_promotion_delta_utf16",
+            sample: Double(rawDeltaUTF16)
+        )
+
+        let preludeDisplayLength = contextOldAttributed.length
+        let contextDisplayStart = max(0, currentRenderedDisplayBoundary - preludeDisplayLength)
+        let replacementAttributed = contextNewAttributed
+        let promotedDisplayBoundary = contextDisplayStart + replacementAttributed.length
+
+        guard let storage = textView.textStorage else { return }
+
+        let replaceLength = preludeDisplayLength + rawDeltaUTF16
+        let replaceRange = NSRange(location: contextDisplayStart, length: replaceLength)
+        guard replaceRange.location >= 0, replaceRange.location + replaceRange.length <= storage.length else { return }
+        let selection = textView.selectedRange()
+        let replacementLength = replacementAttributed.length
+        let selectionNeedsAdjustment =
+            selection.location >= replaceRange.location ||
+            NSIntersectionRange(selection, replaceRange).length > 0
+
+        let promotionApplyStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        isApplyingExternalUpdate = true
+        defer { isApplyingExternalUpdate = false }
+        storage.beginEditing()
+        storage.replaceCharacters(in: replaceRange, with: replacementAttributed)
+        storage.endEditing()
+        scheduleStagedPromotionLayoutRefresh(markdown: markdown)
+
+        // Preserve text selection semantics if promotion edits happened before the caret.
+        if selectionNeedsAdjustment,
+           let adjustedSelection = adjustedRangeAfterReplacement(
+            selection,
+            replaceRange: replaceRange,
+            replacementLength: replacementLength,
+            maxLength: textView.string.utf16.count
+           ),
+           !NSEqualRanges(adjustedSelection, selection) {
+            textView.setSelectedRange(adjustedSelection)
+        }
+        restoreViewportAnchor(
+            viewportAnchor,
+            replaceRange: replaceRange,
+            replacementLength: replacementLength
+        )
+        let promotionApplyMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - promotionApplyStart) / 1_000_000
+        WowInternalMetricsRecorder.shared.recordMaxAuxMetric(
+            "wow_staged_promotion_apply_latency_ms_max",
+            candidate: promotionApplyMs
+        )
+        WowInternalMetricsRecorder.shared.recordAuxSample(
+            "wow_staged_promotion_apply_latency_ms",
+            sample: promotionApplyMs,
+            p99MetricKey: "promotion_apply_slice_p99_ms"
+        )
+        WowInternalMetricsRecorder.shared.incrementAuxCounter(
+            "wow_staged_promotion_apply_latency_ms_total",
+            by: promotionApplyMs
+        )
+        WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_count")
+        if promotionApplyMs > 16 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_over_16ms_count")
+        }
+        if promotionApplyMs > 33 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_over_33ms_count")
+        }
+        if promotionApplyMs > 50 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_over_50ms_count")
+        }
+        if promotionApplyMs > 100 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_apply_over_100ms_count")
+        }
+        tuneAdaptiveStagedPromotionBudget(
+            lastApplyMs: promotionApplyMs,
+            lastParseMs: promotionParseMs,
+            useTurbo: useTurbo
+        )
+
+        stagedRenderedMarkdownUTF16Count = promotedPrefixUTF16Count
+        stagedRenderedDisplayBoundary = promotedDisplayBoundary
+        stagedPromotionsAllowed = promotedPrefixUTF16Count < totalUTF16
+
+        if !stagedPromotionsAllowed {
+            scheduleStagedPromotionLayoutRefresh(markdown: markdown, immediate: true)
+            finalizeStagedPromotionCompletion()
+        }
+
+        updateCodeBlockChrome()
+        scheduleStagedPromotionFollowupIfNeeded()
+    }
+
+    private func cancelStagedPromotionInFlightIfMatching(token: UInt64) {
+        if stagedPromotionInFlightToken == token {
+            stagedPromotionInFlight = false
+            stagedPromotionInFlightToken = nil
+            stagedPromotionComputeTask = nil
+            stagedPromotionParseWorkItem = nil
+        }
+    }
+
+    private struct ViewportAnchor {
+        let characterLocation: Int
+        let verticalOffset: CGFloat
+        let clipOriginY: CGFloat
+    }
+
+    private func captureViewportAnchor() -> ViewportAnchor? {
+        guard
+            let lm = textView.layoutManager,
+            let tc = textView.textContainer,
+            let storage = textView.textStorage,
+            storage.length > 0
+        else { return nil }
+
+        let visible = textView.visibleRect
+        let probe = NSPoint(
+            x: max(0, visible.minX + 8 - textView.textContainerOrigin.x),
+            y: max(0, visible.minY + 8 - textView.textContainerOrigin.y)
+        )
+
+        var fraction: CGFloat = 0
+        let glyphIndex = lm.glyphIndex(for: probe, in: tc, fractionOfDistanceThroughGlyph: &fraction)
+        guard glyphIndex < lm.numberOfGlyphs else { return nil }
+        let characterLocation = min(storage.length - 1, lm.characterIndexForGlyph(at: glyphIndex))
+
+        let glyphRange = lm.glyphRange(
+            forCharacterRange: NSRange(location: characterLocation, length: 1),
+            actualCharacterRange: nil
+        )
+        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+        rect.origin.x += textView.textContainerOrigin.x
+        rect.origin.y += textView.textContainerOrigin.y
+
+        return ViewportAnchor(
+            characterLocation: characterLocation,
+            verticalOffset: rect.minY - visible.minY,
+            clipOriginY: scrollView.contentView.bounds.origin.y
+        )
+    }
+
+    private func restoreViewportAnchor(
+        _ anchor: ViewportAnchor?,
+        replaceRange: NSRange,
+        replacementLength: Int
+    ) {
+        guard
+            let anchor,
+            let lm = textView.layoutManager,
+            let tc = textView.textContainer,
+            let storage = textView.textStorage,
+            storage.length > 0
+        else { return }
+
+        let adjustedLocation = adjustedLocationAfterReplacement(
+            anchor.characterLocation,
+            replaceRange: replaceRange,
+            replacementLength: replacementLength,
+            maxLength: storage.length
+        )
+        guard adjustedLocation >= 0, adjustedLocation < storage.length else {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("anchor_rebase_fail_count")
+            return
+        }
+
+        let replaceEnd = replaceRange.location + replaceRange.length
+        let replacementIsEntirelyBeforeAnchor = replaceEnd <= anchor.characterLocation
+
+        let glyphRange = lm.glyphRange(
+            forCharacterRange: NSRange(location: adjustedLocation, length: 1),
+            actualCharacterRange: nil
+        )
+        lm.ensureLayout(forGlyphRange: glyphRange)
+        var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+        rect.origin.x += textView.textContainerOrigin.x
+        rect.origin.y += textView.textContainerOrigin.y
+
+        let desiredY = rect.minY - anchor.verticalOffset
+        let clip = scrollView.contentView
+        let currentY = clip.bounds.origin.y
+        let maxY = max(0, (scrollView.documentView?.bounds.height ?? 0) - clip.bounds.height)
+        let clampedY = max(0, min(maxY, desiredY))
+        // Always re-anchor to the same visual character during staged promotion. Limiting this to
+        // "before-anchor" replacements causes cumulative drift/jumps when style promotions touch
+        // the active viewport and line metrics change.
+        let deltaY = clampedY - currentY
+        let maxCorrection = stagedPromotionMaxViewportCorrectionPxValue()
+        let adjustedY: CGFloat
+        if abs(deltaY) > maxCorrection {
+            adjustedY = currentY + (deltaY.sign == .minus ? -maxCorrection : maxCorrection)
+        } else {
+            adjustedY = clampedY
+        }
+        if !replacementIsEntirelyBeforeAnchor, abs(adjustedY - currentY) < 0.5 {
+            return
+        }
+        let finalY = max(0, min(maxY, adjustedY))
+        let effectiveDelta = abs(finalY - currentY)
+        if effectiveDelta > 0.5 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("anchor_rebase_count")
+            WowInternalMetricsRecorder.shared.recordMaxAuxMetric("scroll_jump_max_px", candidate: Double(effectiveDelta))
+            if effectiveDelta >= stagedPromotionJumpMetricThresholdPxValue() {
+                WowInternalMetricsRecorder.shared.incrementAuxCounter("scroll_jump_count")
+            }
+        }
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: finalY))
+        scrollView.reflectScrolledClipView(clip)
+    }
+
+    private func adjustedRangeAfterReplacement(
+        _ range: NSRange,
+        replaceRange: NSRange,
+        replacementLength: Int,
+        maxLength: Int
+    ) -> NSRange? {
+        let location = adjustedLocationAfterReplacement(
+            range.location,
+            replaceRange: replaceRange,
+            replacementLength: replacementLength,
+            maxLength: maxLength
+        )
+        guard location >= 0 else { return nil }
+        let safeLocation = min(location, maxLength)
+        let safeLength = min(range.length, max(0, maxLength - safeLocation))
+        return NSRange(location: safeLocation, length: safeLength)
+    }
+
+    private func adjustedLocationAfterReplacement(
+        _ location: Int,
+        replaceRange: NSRange,
+        replacementLength: Int,
+        maxLength: Int
+    ) -> Int {
+        if location < replaceRange.location {
+            return min(maxLength, max(0, location))
+        }
+        let replaceEnd = replaceRange.location + replaceRange.length
+        if location >= replaceEnd {
+            let replacementDelta = replacementLength - replaceRange.length
+            return min(maxLength, max(0, location + replacementDelta))
+        }
+
+        guard replaceRange.length > 0, replacementLength > 0 else {
+            return min(maxLength, max(0, replaceRange.location))
+        }
+
+        // Preserve relative position when anchor/caret lands inside replaced region.
+        // This avoids snapping to the start of the promoted chunk, which causes visible
+        // viewport jumps during staged catch-up.
+        let relative = Double(location - replaceRange.location) / Double(replaceRange.length)
+        let mappedOffset = Int((relative * Double(replacementLength)).rounded())
+        let mappedLocation = replaceRange.location + mappedOffset
+        return min(maxLength, max(0, mappedLocation))
+    }
+
+    private func stagedPromotionContextStartUTF16(markdown: String, renderedUTF16Count: Int) -> Int {
+        let ns = markdown as NSString
+        guard renderedUTF16Count > 0, ns.length > 0 else { return 0 }
+        let minStart = max(0, renderedUTF16Count - stagedPromotionContextChars)
+        let searchRange = NSRange(location: minStart, length: renderedUTF16Count - minStart)
+        let lineBreak = ns.range(of: "\n", options: [.backwards], range: searchRange)
+        if lineBreak.location != NSNotFound {
+            return min(renderedUTF16Count, lineBreak.location + lineBreak.length)
+        }
+        return 0
+    }
+
+    private func stagedPromotionDebounceMsValue() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_DEBOUNCE_MS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        return stagedPromotionDebounceMs
+    }
+
+    private func stagedPromotionStepCharsValue(useTurbo: Bool) -> Int {
+        if useTurbo,
+           let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_TURBO_STEP_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_STEP_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        return useTurbo ? stagedPromotionTurboStepChars : stagedPromotionStepChars
+    }
+
+    private func stagedPromotionMaxCatchupStepCharsValue(useTurbo: Bool) -> Int {
+        if useTurbo,
+           let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_TURBO_MAX_CATCHUP_STEP_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_MAX_CATCHUP_STEP_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        return useTurbo ? stagedPromotionTurboMaxCatchupStepChars : stagedPromotionMaxCatchupStepChars
+    }
+
+    private func stagedPromotionViewportGuardCharsValue() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_VIEWPORT_GUARD_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        return stagedPromotionViewportGuardChars
+    }
+
+    private func stagedPromotionViewportMicroStepCharsValue(
+        useTurbo: Bool,
+        sinceInteraction: TimeInterval? = nil,
+        sinceScroll: TimeInterval? = nil
+    ) -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        let maxChars = useTurbo ? stagedPromotionTurboViewportMicroStepMaxChars : stagedPromotionViewportMicroStepMaxChars
+        let baseline = max(
+            stagedPromotionViewportMicroStepMinChars,
+            min(stagedAdaptiveViewportMicroStepChars, maxChars)
+        )
+        guard
+            let sinceInteraction,
+            let sinceScroll
+        else {
+            return baseline
+        }
+
+        // Spinner prevention: immediately after scroll/input, keep promotion slices tiny so
+        // parse+apply work cannot monopolize the main thread.
+        if sinceScroll < 0.35 || sinceInteraction < 0.35 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_micro_cap_tight_count")
+            return min(baseline, 64_000)
+        }
+        if sinceScroll < 0.9 || sinceInteraction < 0.9 {
+            WowInternalMetricsRecorder.shared.incrementAuxCounter("wow_staged_promotion_micro_cap_medium_count")
+            return min(baseline, 128_000)
+        }
+        return baseline
+    }
+
+    private func stagedPromotionFrameBudgetMsValue() -> Double {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_FRAME_BUDGET_MS"],
+           let parsed = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return parsed
+        }
+        return stagedPromotionFrameBudgetMs
+    }
+
+    private func stagedPromotionMaxViewportCorrectionPxValue() -> CGFloat {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_MAX_VIEWPORT_CORRECTION_PX"],
+           let parsed = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return CGFloat(parsed)
+        }
+        return stagedPromotionMaxViewportCorrectionPx
+    }
+
+    private func stagedPromotionJumpMetricThresholdPxValue() -> CGFloat {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_JUMP_THRESHOLD_PX"],
+           let parsed = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed > 0 {
+            return CGFloat(parsed)
+        }
+        return stagedPromotionJumpMetricThresholdPx
+    }
+
+    private func resetAdaptiveStagedPromotionBudget() {
+        stagedAdaptiveViewportMicroStepChars = stagedPromotionViewportMicroStepChars
+    }
+
+    private func tuneAdaptiveStagedPromotionBudget(lastApplyMs: Double, lastParseMs: Double, useTurbo: Bool) {
+        guard stagedPromotionsAllowed else { return }
+        let frameBudgetMs = stagedPromotionFrameBudgetMsValue()
+        let overHardBudget = lastApplyMs > max(16, frameBudgetMs * 4)
+        let overSoftBudget = lastApplyMs > max(8, frameBudgetMs * 2)
+        let floorChars = stagedPromotionViewportMicroStepMinChars
+        var next = stagedAdaptiveViewportMicroStepChars
+        if lastApplyMs > 50 {
+            next = Int(Double(next) * 0.8)
+        } else if overHardBudget {
+            next = Int(Double(next) * 0.9)
+        } else if overSoftBudget {
+            next = Int(Double(next) * 0.82)
+        } else if lastApplyMs < max(2.0, frameBudgetMs * 0.65), lastParseMs < 160 {
+            next = Int(Double(next) * 1.08)
+        } else {
+            return
+        }
+        let maxChars = useTurbo ? stagedPromotionTurboViewportMicroStepMaxChars : stagedPromotionViewportMicroStepMaxChars
+        stagedAdaptiveViewportMicroStepChars = max(
+            max(stagedPromotionViewportMicroStepMinChars, floorChars),
+            min(next, maxChars)
+        )
+    }
+
+    private func stagedPromotionIdleQuietPeriodMsValue() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_IDLE_QUIET_MS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        return stagedPromotionIdleQuietPeriodMs
+    }
+
+    private func stagedPromotionScrollQuietPeriodMsValue() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_SCROLL_QUIET_MS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        return stagedPromotionScrollQuietPeriodMs
+    }
+
+    private func stagedPromotionFollowupDelayMsValue(useTurbo: Bool) -> Int {
+        if useTurbo,
+           let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS"],
+           let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+           parsed >= 0 {
+            return parsed
+        }
+        return useTurbo ? stagedPromotionTurboFollowupDelayMs : stagedPromotionFollowupDelayMs
+    }
+
+    private func shouldUseTurboStagedPromotion(sinceInteraction: TimeInterval, sinceScroll: TimeInterval) -> Bool {
+        let thresholdMs: Int = {
+            if let raw = ProcessInfo.processInfo.environment["KERN_STAGED_PROMOTION_TURBO_IDLE_MS"],
+               let parsed = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+               parsed >= 0 {
+                return parsed
+            }
+            return stagedPromotionTurboActivateIdleMs
+        }()
+        let thresholdSeconds = Double(thresholdMs) / 1_000.0
+        return sinceInteraction >= thresholdSeconds && sinceScroll >= thresholdSeconds
+    }
+
+    private func scheduleStagedPromotionLayoutRefresh(markdown: String, immediate: Bool = false) {
+        stagedPromotionLayoutWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.adjustDocumentViewHeightToContent(forceFullLayout: false)
+            self.scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
+        }
+        stagedPromotionLayoutWorkItem = work
+        if immediate {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + .milliseconds(stagedPromotionLayoutCoalesceMs),
+                execute: work
+            )
+        }
+    }
+
+    private func scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: Int? = nil) {
+        guard stagedPromotionsAllowed else { return }
+        guard stagedRenderGeneration == renderGeneration else { return }
+        guard deferredFullRenderWorkItem == nil else { return }
+        guard !hasUnexportedChanges else { return }
+
+        stagedPromotionWorkItem?.cancel()
+        stagedPromotionToken &+= 1
+        let token = stagedPromotionToken
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if NSEvent.pressedMouseButtons != 0 {
+                self.scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: 20)
+                return
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            let sinceInteraction = now - self.lastUserInteractionUptime
+            let sinceScroll = now - self.lastScrollEventUptime
+            let quietSeconds = Double(self.stagedPromotionIdleQuietPeriodMsValue()) / 1_000.0
+            let scrollQuietSeconds = Double(self.stagedPromotionScrollQuietPeriodMsValue()) / 1_000.0
+            if sinceInteraction < quietSeconds || sinceScroll < scrollQuietSeconds {
+                let quietRemainingMs = max(0, Int(ceil((quietSeconds - sinceInteraction) * 1_000.0)))
+                let scrollRemainingMs = max(0, Int(ceil((scrollQuietSeconds - sinceScroll) * 1_000.0)))
+                let retryDelayMs = max(20, max(quietRemainingMs, scrollRemainingMs))
+                self.scheduleStagedPromotionFollowupIfNeeded(delayOverrideMs: retryDelayMs)
+                return
+            }
+            self.applyNextStagedViewportPromotion(token: token)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let useTurbo = shouldUseTurboStagedPromotion(
+            sinceInteraction: now - lastUserInteractionUptime,
+            sinceScroll: now - lastScrollEventUptime
+        )
+        let followupDelayMs = max(4, delayOverrideMs ?? stagedPromotionFollowupDelayMsValue(useTurbo: useTurbo))
+        stagedPromotionWorkItem = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + .milliseconds(followupDelayMs),
+            execute: work
+        )
+    }
+
+    private func estimatedMarkdownUTF16CatchupTarget(
+        visibleDisplayEnd: Int,
+        renderedDisplayBoundary: Int,
+        renderedMarkdownUTF16Count: Int,
+        totalMarkdownUTF16Count: Int,
+        useTurbo: Bool
+    ) -> Int {
+        guard visibleDisplayEnd > renderedDisplayBoundary else {
+            return min(totalMarkdownUTF16Count, renderedMarkdownUTF16Count + stagedPromotionStepCharsValue(useTurbo: useTurbo))
+        }
+        let overflowDisplayChars = visibleDisplayEnd - renderedDisplayBoundary
+        let desired = renderedMarkdownUTF16Count +
+            overflowDisplayChars +
+            stagedPromotionLookaheadVisibleChars +
+            stagedPromotionStepCharsValue(useTurbo: useTurbo)
+        return min(totalMarkdownUTF16Count, max(renderedMarkdownUTF16Count, desired))
+    }
+
+    private func scheduleCodeBlockChromeUpdateForScrollIfNeeded() {
+        let textLength = textView.textStorage?.length ?? 0
+        guard textLength > scrollChromeThrottleCharThreshold else {
+            updateCodeBlockChrome()
+            return
+        }
+        scrollChromeUpdateWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.updateCodeBlockChrome()
+        }
+        scrollChromeUpdateWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(scrollChromeThrottleDelayMs), execute: work)
     }
 
     private func updateCodeBlockChrome() {
@@ -1993,9 +3494,39 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             return
         }
 
+        let textLength = storage.length
+        let optimizeForLargeDocument = textLength > scrollChromeThrottleCharThreshold
+        let visibleCharacterRange: NSRange? = {
+            guard optimizeForLargeDocument else { return nil }
+            guard let lm = textView.layoutManager, let tc = textView.textContainer else { return nil }
+            return visibleCharacterRangeForChrome(layoutManager: lm, textContainer: tc)
+        }()
+
         let selection = textView.selectedRange()
-        let hoverRange = validatedHoverCodeBlockRange(in: storage)
-        let caretRange = caretCodeBlockRange(in: storage, selection: selection)
+        let caretProbe: Int = {
+            guard textLength > 0 else { return 0 }
+            return min(max(0, selection.location), textLength - 1)
+        }()
+        let shouldResolveCaretRange: Bool = {
+            guard optimizeForLargeDocument, selection.length == 0 else { return true }
+            guard let visibleCharacterRange else { return true }
+            return NSLocationInRange(caretProbe, visibleCharacterRange)
+        }()
+
+        let hoverRange: NSRange? = {
+            guard let hover = validatedHoverCodeBlockRange(in: storage) else { return nil }
+            guard let visibleCharacterRange else { return hover }
+            return NSIntersectionRange(hover, visibleCharacterRange).length > 0 ? hover : nil
+        }()
+        let caretRange: NSRange? = shouldResolveCaretRange ? caretCodeBlockRange(in: storage, selection: selection) : nil
+
+        if optimizeForLargeDocument, hoverRange == nil, caretRange == nil {
+            caretCodeBlockChrome.isHidden = true
+            hoverCodeBlockChrome.isHidden = true
+            caretCodeCopyCharacterRange = nil
+            hoverCodeCopyCharacterRange = nil
+            return
+        }
 
         // If hover and caret are the same code block, show only the caret chrome.
         let effectiveHoverRange: NSRange? = rangesEqual(hoverRange, caretRange) ? nil : hoverRange
@@ -2004,6 +3535,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             chrome: caretCodeBlockChrome,
             for: caretRange,
             storage: storage,
+            visibleCharacterRange: visibleCharacterRange,
             copyRange: &caretCodeCopyCharacterRange,
             lastBackgroundRect: &caretLastCodeBlockBackgroundRect
         )
@@ -2012,9 +3544,18 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             chrome: hoverCodeBlockChrome,
             for: effectiveHoverRange,
             storage: storage,
+            visibleCharacterRange: visibleCharacterRange,
             copyRange: &hoverCodeCopyCharacterRange,
             lastBackgroundRect: &hoverLastCodeBlockBackgroundRect
         )
+    }
+
+    private func visibleCharacterRangeForChrome(layoutManager lm: NSLayoutManager, textContainer tc: NSTextContainer) -> NSRange {
+        var visible = textView.visibleRect
+        visible.origin.x -= textView.textContainerOrigin.x
+        visible.origin.y -= textView.textContainerOrigin.y
+        let glyphRange = lm.glyphRange(forBoundingRect: visible, in: tc)
+        return lm.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
     }
 
     private func validatedHoverCodeBlockRange(in storage: NSTextStorage) -> NSRange? {
@@ -2103,10 +3644,17 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         chrome: CodeBlockChromeView,
         for range: NSRange?,
         storage: NSTextStorage,
+        visibleCharacterRange: NSRange?,
         copyRange: inout NSRange?,
         lastBackgroundRect: inout NSRect?
     ) {
         guard let range, range.length > 0 else {
+            chrome.isHidden = true
+            copyRange = nil
+            return
+        }
+
+        if let visibleCharacterRange, NSIntersectionRange(range, visibleCharacterRange).length == 0 {
             chrome.isHidden = true
             copyRange = nil
             return

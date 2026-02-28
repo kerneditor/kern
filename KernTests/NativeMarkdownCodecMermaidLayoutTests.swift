@@ -148,6 +148,60 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testMermaidASCIIRenderModeUsesCompactBounds() {
+        let markdown = """
+        ```mermaid
+        flowchart TD
+          A[Start] --> B[Load]
+          B --> C[Parse]
+          C --> D[Render]
+        ```
+        """
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .ascii
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        guard let mermaid = mermaids.first else { return }
+
+        XCTAssertEqual(mermaid.debugEffectiveRenderModeForTesting, .ascii)
+        let bounds = mermaid.attachmentBounds(
+            for: nil,
+            proposedLineFragment: NSRect(x: 0, y: 0, width: 700, height: 28),
+            glyphPosition: .zero,
+            characterIndex: 0
+        )
+        XCTAssertGreaterThanOrEqual(bounds.width, 280)
+        XCTAssertLessThan(bounds.height, 420, "ASCII mode should remain compact")
+    }
+
+    @MainActor
+    func testMermaidAutoRenderModeCanSelectASCIIForHeavyDiagram() {
+        var lines: [String] = [
+            "```mermaid",
+            "sequenceDiagram",
+        ]
+        for i in 0..<18 {
+            lines.append("  participant P\(i) as Participant \(i)")
+        }
+        for i in 0..<32 {
+            let a = i % 12
+            let b = (i + 1) % 12
+            lines.append("  P\(a)->>P\(b): very long edge label \(i) to increase complexity score")
+        }
+        lines.append("```")
+        let markdown = lines.joined(separator: "\n")
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .auto
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        XCTAssertEqual(mermaids.first?.debugEffectiveRenderModeForTesting, .ascii)
+    }
+
     private func collectMermaidAttachments(in attributed: NSAttributedString) -> [MarkdownMermaidAttachment] {
         var out: [MarkdownMermaidAttachment] = []
         attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length), options: []) { value, _, _ in

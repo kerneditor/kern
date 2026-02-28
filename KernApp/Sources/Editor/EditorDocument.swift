@@ -117,6 +117,33 @@ final class EditorDocument: NSDocument {
 
     // MARK: - Save Hooks
 
+    override func save(_ sender: Any?) {
+        flushPendingExportBeforeSave()
+        super.save(sender)
+    }
+
+    override func saveAs(_ sender: Any?) {
+        flushPendingExportBeforeSave()
+        super.saveAs(sender)
+    }
+
+    private func flushPendingExportBeforeSave() {
+        let flush = { [self] in
+            MainActor.assumeIsolated {
+                let nativeVC = windowControllers
+                    .compactMap { $0.contentViewController as? NativeEditorViewController }
+                    .first
+                nativeVC?.flushPendingExport()
+            }
+        }
+
+        if Thread.isMainThread {
+            flush()
+        } else {
+            DispatchQueue.main.sync(execute: flush)
+        }
+    }
+
     override func writeSafely(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType) throws {
         try super.writeSafely(to: url, ofType: typeName, for: saveOperation)
         // Use the actual on-disk mod date to prevent false-positive reloads from filesystem timestamp

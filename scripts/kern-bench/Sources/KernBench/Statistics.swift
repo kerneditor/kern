@@ -15,26 +15,53 @@ struct Stats: Codable {
     let p99: Double
     let ciLower: Double
     let ciUpper: Double
+    let failures: Int?
+    let timeouts: Int?
+    let failureRatePct: Double?
 
     enum CodingKeys: String, CodingKey {
-        case n, min, max, median, mean, std, p25, p75, iqr, p95, p99
+        case n, min, max, median, mean, std, p25, p75, iqr, p95, p99, failures, timeouts
         case cvPct = "cv_pct"
         case ciLower = "ci_lower"
         case ciUpper = "ci_upper"
+        case failureRatePct = "failure_rate_pct"
     }
 }
 
-func computeStats(_ values: [Double]) -> Stats {
+func computeStats(
+    _ values: [Double],
+    failures: Int = 0,
+    timeouts: Int = 0,
+    totalAttempts: Int? = nil
+) -> Stats {
+    let attempts = max(totalAttempts ?? values.count, values.count)
+    let failureRatePct = attempts > 0 ? (Double(failures) / Double(attempts)) * 100.0 : 0.0
+
     guard !values.isEmpty else {
-        return Stats(n: 0, min: 0, max: 0, median: 0, mean: 0, std: 0,
-                     cvPct: 0, p25: 0, p75: 0, iqr: 0, p95: 0, p99: 0,
-                     ciLower: 0, ciUpper: 0)
+        return Stats(
+            n: 0,
+            min: 0,
+            max: 0,
+            median: 0,
+            mean: 0,
+            std: 0,
+            cvPct: 0,
+            p25: 0,
+            p75: 0,
+            iqr: 0,
+            p95: 0,
+            p99: 0,
+            ciLower: 0,
+            ciUpper: 0,
+            failures: failures,
+            timeouts: timeouts,
+            failureRatePct: round(failureRatePct * 10) / 10
+        )
     }
 
     let sorted = values.sorted()
     let n = sorted.count
 
-    // No outlier removal — report raw percentiles.
     let med = percentile(sorted, p: 0.5)
     let sum = sorted.reduce(0, +)
     let avg = sum / Double(n)
@@ -45,7 +72,6 @@ func computeStats(_ values: [Double]) -> Stats {
     let q1 = percentile(sorted, p: 0.25)
     let q3 = percentile(sorted, p: 0.75)
 
-    // Bootstrap 95% CI for the median: 10,000 resamples, seeded PRNG.
     let (ciLo, ciHi) = bootstrapMedianCI(sorted, resamples: 10_000, seed: 42)
 
     return Stats(
@@ -62,7 +88,10 @@ func computeStats(_ values: [Double]) -> Stats {
         p95: round(percentile(sorted, p: 0.95) * 100) / 100,
         p99: round(percentile(sorted, p: 0.99) * 100) / 100,
         ciLower: round(ciLo * 100) / 100,
-        ciUpper: round(ciHi * 100) / 100
+        ciUpper: round(ciHi * 100) / 100,
+        failures: failures,
+        timeouts: timeouts,
+        failureRatePct: round(failureRatePct * 10) / 10
     )
 }
 
@@ -77,8 +106,6 @@ func percentile(_ sorted: [Double], p: Double) -> Double {
     return sorted[lower] * (1 - frac) + sorted[upper] * frac
 }
 
-/// Bootstrap 95% CI for the median using percentile method.
-/// Uses a simple seeded LCG for reproducibility without importing GameplayKit.
 private func bootstrapMedianCI(_ sorted: [Double], resamples: Int, seed: UInt64) -> (lower: Double, upper: Double) {
     guard sorted.count >= 2 else {
         let val = sorted.first ?? 0
@@ -91,7 +118,6 @@ private func bootstrapMedianCI(_ sorted: [Double], resamples: Int, seed: UInt64)
     bootstrapMedians.reserveCapacity(resamples)
 
     for _ in 0..<resamples {
-        // Resample with replacement.
         var sample = [Double]()
         sample.reserveCapacity(n)
         for _ in 0..<n {
@@ -108,7 +134,6 @@ private func bootstrapMedianCI(_ sorted: [Double], resamples: Int, seed: UInt64)
     return (lo, hi)
 }
 
-/// Simple seeded linear congruential generator for reproducible bootstrap.
 private struct SeededLCG {
     private var state: UInt64
 
@@ -117,7 +142,6 @@ private struct SeededLCG {
     }
 
     mutating func next() -> UInt64 {
-        // LCG constants from Numerical Recipes.
         state = state &* 6364136223846793005 &+ 1442695040888963407
         return state
     }

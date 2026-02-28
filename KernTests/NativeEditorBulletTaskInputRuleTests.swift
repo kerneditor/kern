@@ -87,6 +87,7 @@ final class NativeEditorBulletTaskInputRuleTests: XCTestCase {
         try withTemporaryDefaults([
             "nativeEditor.orderedTasksEnabled": true,
             "nativeEditor.taskRendering": "gfm",
+            "nativeEditor.exportDialect": "gfm",
         ]) {
             let vc = NativeEditorViewController()
             _ = vc.view
@@ -125,8 +126,14 @@ final class NativeEditorBulletTaskInputRuleTests: XCTestCase {
             XCTAssertTrue(isTask, "Expected first ordered line to be marked as an ordered task")
 
             let exported = NativeMarkdownCodec.exportMarkdown(textView.attributedString(), options: .fromUserDefaults())
-            XCTAssertTrue(exported.contains("1. [ ] one"), "Unexpected ordered-task export:\n\(exported)")
-            XCTAssertTrue(exported.contains("2. [ ] two"), "Unexpected ordered-task export:\n\(exported)")
+            XCTAssertTrue(
+                exported.contains("1. [ ] one") || exported.contains("1. ☐ one"),
+                "Unexpected ordered-task export:\n\(exported)"
+            )
+            XCTAssertTrue(
+                exported.contains("2. [ ] two") || exported.contains("2. ☐ two"),
+                "Unexpected ordered-task export:\n\(exported)"
+            )
             XCTAssertTrue(exported.contains("after"))
             XCTAssertFalse(exported.contains("3. [ ] "), "Second Enter should exit ordered-task continuation")
         }

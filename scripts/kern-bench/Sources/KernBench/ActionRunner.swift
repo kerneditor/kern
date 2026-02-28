@@ -57,10 +57,17 @@ struct ActionRunner {
             guard accessibilityAvailable else {
                 throw StageError.failure("accessibility_permission_missing")
             }
+            guard let expectedFileName, !expectedFileName.isEmpty else {
+                throw StageError.failure("expected_document_missing")
+            }
             let deadline = nowNs() + UInt64(timeout * 1_000_000_000)
-            let fallbackWindowOnlyBudgetNs = min(UInt64(timeout * 1_000_000_000), 20_000_000)
-            let documentLoadBudgetNs = min(UInt64(timeout * 1_000_000_000), 2_500_000_000)
             var stablePreparedPolls = 0
+            let prepareIntervalNs: UInt64 = 30_000_000
+            var lastPrepareAttemptNs: UInt64 = 0
+            var sawDocumentMatch = false
+            var firstDocumentMatchNs: UInt64?
+            let softReadyAfterDocumentMatchNs: UInt64 = 120_000_000
+            var prepareAttempts = 0
 
             while nowNs() <= deadline {
                 guard isProcessAlive(pid) else {
@@ -70,63 +77,85 @@ struct ActionRunner {
                     throw StageError.failure("window_missing")
                 }
 
-                if editorRequiresDocumentWindowValidation(editor.displayName),
-                   let expectedFileName,
-                   !expectedFileName.isEmpty {
-                    let expectedPath = expectedFilePath ?? ""
-                    if !documentWindowMatchesExpectedFile(
-                        processID: pid,
-                        expectedFileName: expectedFileName,
-                        expectedFilePath: expectedPath
-                    ) {
-                        if nowNs() - started >= documentLoadBudgetNs {
-                            throw StageError.failure("document_not_loaded")
-                        }
-                        try? await Task.sleep(for: .milliseconds(2))
-                        continue
+                let expectedPath = expectedFilePath ?? ""
+                let documentMatched = documentWindowMatchesExpectedFile(
+                    processID: pid,
+                    expectedFileName: expectedFileName,
+                    expectedFilePath: expectedPath
+                ) || cgWindowMatchesExpectedFile(
+                    pid: pid,
+                    windowID: windowID,
+                    expectedFileName: expectedFileName
+                )
+                if documentMatched {
+                    sawDocumentMatch = true
+                    if firstDocumentMatchNs == nil {
+                        firstDocumentMatchNs = nowNs()
                     }
                 }
 
                 // Best-effort focus nudge (non-fatal; some editors won't activate via NSRunningApplication
                 // from CLI-launched automation, but can still accept posted keyboard events by PID).
-                let prepared = quickPrepareEditorForInput(processID: pid, windowID: windowID)
-                if prepared {
-                    stablePreparedPolls += 1
-                    if stablePreparedPolls >= 2 {
-                        return elapsedMs(since: started)
+                let now = nowNs()
+                if now >= lastPrepareAttemptNs, (now - lastPrepareAttemptNs) >= prepareIntervalNs {
+                    prepareAttempts += 1
+                    let prepared = quickPrepareEditorForInput(processID: pid, windowID: windowID)
+                    if prepared {
+                        stablePreparedPolls += 1
+                        if stablePreparedPolls >= 2, documentMatched {
+                            return elapsedMs(since: started)
+                        }
+                    } else {
+                        stablePreparedPolls = 0
                     }
-                } else {
-                    stablePreparedPolls = 0
+                    lastPrepareAttemptNs = now
                 }
 
-                if nowNs() - started >= fallbackWindowOnlyBudgetNs {
-                    // Fallback: window is alive/visible but AX focus signal is unavailable.
-                    // Returning here avoids timeout pollution while still bounding "ready"
-                    // to post-window-visible initialization.
+                // Some editors can expose a fully loaded/readable document but intermittently reject
+                // synthetic edit probes due focus quirks. Avoid false timeouts once the target document
+                // has been stably detected for long enough.
+                if let firstDocumentMatchNs, now - firstDocumentMatchNs >= softReadyAfterDocumentMatchNs {
                     return elapsedMs(since: started)
                 }
-                try? await Task.sleep(for: .milliseconds(2))
+
+                try await Task.sleep(for: .milliseconds(2))
             }
 
-            throw StageError.timeout("typing_ready_timeout")
+            if verbose {
+                print(
+                    "  [\(editor.displayName)] open-ready timeout debug: " +
+                        "sawDocumentMatch=\(sawDocumentMatch) " +
+                        "prepareAttempts=\(prepareAttempts) " +
+                        "stablePreparedPolls=\(stablePreparedPolls)"
+                )
+            }
+            if !sawDocumentMatch && editor.isElectron {
+                throw StageError.timeout("document_not_loaded_timeout")
+            }
+            throw StageError.timeout("open_ready_timeout")
         }
     }
 
     func runTyping(timeout: TimeInterval, payload: String) async -> StageResult {
         await measureStage(timeout: timeout) {
-            guard isProcessAlive(pid), isWindowPresent(pid: pid, windowID: windowID) else {
+            guard isProcessAlive(pid), hasUsableWindow(pid: pid, windowID: windowID) else {
                 throw StageError.failure("focus_or_text_target_unavailable")
             }
             _ = quickPrepareEditorForInput(processID: pid, windowID: windowID)
-            if let windowID, editorNeedsCaretClick(editor.displayName) {
+            if let windowID {
                 _ = clickWindowCenter(windowID: windowID)
             }
 
             let started = nowNs()
 
-            if !sendTypingPayload(processID: pid, text: payload) {
+            if !sendTypingPayload(processID: pid, text: payload),
+               !pasteText(processID: pid, text: payload) {
                 _ = quickPrepareEditorForInput(processID: pid, windowID: windowID, forceFocus: true)
-                guard sendTypingPayload(processID: pid, text: payload) else {
+                if let windowID {
+                    _ = clickWindowCenter(windowID: windowID)
+                }
+                guard sendTypingPayload(processID: pid, text: payload) ||
+                    pasteText(processID: pid, text: payload) else {
                     throw StageError.failure("typing_dispatch_failed")
                 }
             }
@@ -168,7 +197,7 @@ struct ActionRunner {
                         throw StageError.failure("find_sequence_failed")
                     }
                 }
-                try? await Task.sleep(for: .milliseconds(3))
+                try await Task.sleep(for: .milliseconds(3))
             }
 
             // Close find UI where applicable so subsequent scroll/edit actions target content.
@@ -180,7 +209,7 @@ struct ActionRunner {
     }
 
     /// Lightweight interaction pulse to ensure keyboard focus is bound to editor content.
-    /// Used in the minimal wow flow before save, where we otherwise have very few interactions.
+    /// Used in the minimal benchmark flow before save, where we otherwise have very few interactions.
     func runFocusPulse(timeout: TimeInterval) async -> StageResult {
         await measureStage(timeout: timeout) {
             guard accessibilityAvailable else {
@@ -193,17 +222,17 @@ struct ActionRunner {
             guard sendPageDown(processID: pid), sendPageUp(processID: pid) else {
                 throw StageError.failure("focus_pulse_dispatch_failed")
             }
-            try? await Task.sleep(for: .milliseconds(60))
+            try await Task.sleep(for: .milliseconds(60))
             return elapsedMs(since: started)
         }
     }
 
     func runSave(timeoutUI: TimeInterval, timeoutDurable: TimeInterval, filePath: String) async -> (StageResult, StageResult) {
         let beforeMtime = fileMtime(filePath)
-        let beforeHash = sha256Hash(ofFile: filePath)
+        let beforeSize = fileSizeBytes(filePath)
 
         let uiAck = await measureStage(timeout: timeoutUI) {
-            guard isProcessAlive(pid), isWindowPresent(pid: pid, windowID: windowID) else {
+            guard isProcessAlive(pid), hasUsableWindow(pid: pid, windowID: windowID) else {
                 throw StageError.failure("focus_or_text_target_unavailable")
             }
             _ = quickPrepareEditorForInput(processID: pid, windowID: windowID)
@@ -214,63 +243,67 @@ struct ActionRunner {
                     throw StageError.failure("save_command_failed")
                 }
             }
-            return elapsedMs(since: started)
+
+            let deadline = nowNs() + UInt64(max(timeoutUI, 0.05) * 1_000_000_000)
+            while nowNs() <= deadline {
+                let currentMtime = fileMtime(filePath)
+                let currentSize = fileSizeBytes(filePath)
+                if currentMtime != beforeMtime || currentSize != beforeSize {
+                    return elapsedMs(since: started)
+                }
+                try await Task.sleep(for: .milliseconds(2))
+            }
+
+            throw StageError.timeout("save_ui_ack_timeout_no_file_change")
         }
 
         if timeoutDurable <= 0 {
             return (uiAck, StageResult(valueMs: nil, failureReason: nil, timedOut: false))
         }
 
+        if uiAck.failureReason != nil {
+            return (uiAck, StageResult(valueMs: nil, failureReason: nil, timedOut: false))
+        }
+
         let durable = await measureStage(timeout: timeoutDurable) {
             let started = nowNs()
             let deadline = nowNs() + UInt64(timeoutDurable * 1_000_000_000)
-            // We expect this stage to follow an edit operation; no file mutation indicates
-            // automation drift (focus/input miss) and should fail fast instead of returning
-            // a synthetic success latency.
-            let noWriteBudgetNs = min(UInt64(timeoutDurable * 1_000_000_000), 450_000_000)
-            let saveResendNs: UInt64 = 90_000_000
 
-            var sawWrite = false
+            var sawMutation = false
             var stableStreak = 0
-            var didResendSave = false
             var lastMtime = fileMtime(filePath)
-            var lastHash = sha256Hash(ofFile: filePath)
+            var lastSize = fileSizeBytes(filePath)
 
             while nowNs() <= deadline {
                 let currentMtime = fileMtime(filePath)
-                let currentHash = sha256Hash(ofFile: filePath)
-                let changedFromBaseline = (currentMtime != beforeMtime || currentHash != beforeHash)
-
-                if changedFromBaseline {
-                    sawWrite = true
+                let currentSize = fileSizeBytes(filePath)
+                if currentMtime != beforeMtime || currentSize != beforeSize {
+                    sawMutation = true
                 }
 
-                if sawWrite, currentMtime == lastMtime, currentHash == lastHash {
+                if sawMutation, currentMtime == lastMtime, currentSize == lastSize {
                     stableStreak += 1
                     if stableStreak >= 2 {
-                        return elapsedMs(since: started)
+                        // One-time content check at stability boundary to avoid expensive
+                        // full-file hashing on every poll iteration.
+                        let hashA = sha256Hash(ofFile: filePath)
+                        try await Task.sleep(for: .milliseconds(2))
+                        let hashB = sha256Hash(ofFile: filePath)
+                        if hashA == hashB {
+                            return elapsedMs(since: started)
+                        }
+                        stableStreak = 0
                     }
-                } else {
+                    } else {
                     stableStreak = 0
                 }
 
-                if !sawWrite, nowNs() - started >= noWriteBudgetNs {
-                    throw StageError.failure("save_no_file_mutation")
-                }
-
-                if !sawWrite, !didResendSave, nowNs() - started >= saveResendNs {
-                    // Some editors process the preceding edit asynchronously; if the first
-                    // save races the edit commit, re-issue save once before failing.
-                    _ = sendCommand(processID: pid, key: "s")
-                    didResendSave = true
-                }
-
                 lastMtime = currentMtime
-                lastHash = currentHash
-                try? await Task.sleep(for: .milliseconds(12))
+                lastSize = currentSize
+                try await Task.sleep(for: .milliseconds(12))
             }
 
-            throw StageError.failure("save_durable_unobserved")
+            throw StageError.timeout(sawMutation ? "save_durable_timeout" : "save_durable_no_mutation")
         }
 
         return (uiAck, durable)
@@ -278,7 +311,7 @@ struct ActionRunner {
 
     func runSaveUI(timeout: TimeInterval) async -> StageResult {
         await measureStage(timeout: timeout) {
-            guard isProcessAlive(pid), isWindowPresent(pid: pid, windowID: windowID) else {
+            guard isProcessAlive(pid), hasUsableWindow(pid: pid, windowID: windowID) else {
                 throw StageError.failure("focus_or_text_target_unavailable")
             }
             _ = quickPrepareEditorForInput(processID: pid, windowID: windowID)
@@ -296,8 +329,8 @@ struct ActionRunner {
 
     func runQuit(timeout: TimeInterval) async -> StageResult {
         await measureStage(timeout: timeout) {
-            guard isProcessAlive(pid), isWindowPresent(pid: pid, windowID: windowID) else {
-                throw StageError.failure("focus_or_text_target_unavailable")
+            guard isProcessAlive(pid) else {
+                throw StageError.failure("process_not_running")
             }
             _ = quickPrepareEditorForInput(processID: pid, windowID: windowID)
 
@@ -308,7 +341,24 @@ struct ActionRunner {
                     throw StageError.failure("quit_command_failed")
                 }
             }
-            return elapsedMs(since: started)
+
+            let timeoutNs = UInt64(max(timeout, 0.05) * 1_000_000_000)
+            let resendQuitNs = min(UInt64(400_000_000), max(UInt64(120_000_000), timeoutNs / 2))
+            let deadline = nowNs() + timeoutNs
+            var didResend = false
+            while nowNs() <= deadline {
+                if !isProcessAlive(pid) {
+                    return elapsedMs(since: started)
+                }
+                if !didResend, nowNs() - started >= resendQuitNs {
+                    _ = quickPrepareEditorForInput(processID: pid, windowID: windowID, forceFocus: true)
+                    _ = sendCommand(processID: pid, key: "q")
+                    didResend = true
+                }
+                try await Task.sleep(for: .milliseconds(8))
+            }
+
+            throw StageError.timeout("quit_timeout")
         }
     }
 
@@ -345,12 +395,12 @@ struct ActionRunner {
                     }
                     continue
                 }
-                try? await Task.sleep(for: .milliseconds(45))
+                try await Task.sleep(for: .milliseconds(45))
             }
             guard sendPageUp(processID: pid) else {
                 throw StageError.failure("scroll_dispatch_failed")
             }
-            try? await Task.sleep(for: .milliseconds(80))
+            try await Task.sleep(for: .milliseconds(80))
             return elapsedMs(since: started)
         }
 
@@ -428,7 +478,7 @@ func hasAccessibilityPermission() -> Bool {
     AXIsProcessTrusted()
 }
 
-private func withTimeout<T>(
+func withTimeout<T>(
     seconds: TimeInterval,
     _ operation: @escaping () async throws -> T
 ) async throws -> T {
@@ -475,7 +525,7 @@ private func quickPrepareEditorForInput(processID: pid_t, windowID: CGWindowID?)
 }
 
 private func quickPrepareEditorForInput(processID: pid_t, windowID: CGWindowID?, forceFocus: Bool) -> Bool {
-    guard isProcessAlive(processID), isWindowPresent(pid: processID, windowID: windowID) else {
+    guard isProcessAlive(processID), hasUsableWindow(pid: processID, windowID: windowID) else {
         return false
     }
 
@@ -594,6 +644,29 @@ private func sendTypingPayload(processID: pid_t, text: String) -> Bool {
     return true
 }
 
+private func pasteText(processID: pid_t, text: String) -> Bool {
+    guard !text.isEmpty else { return true }
+
+    let pasteboard = NSPasteboard.general
+    let previous = pasteboard.string(forType: .string)
+    pasteboard.clearContents()
+    guard pasteboard.setString(text, forType: .string) else {
+        if let previous {
+            pasteboard.clearContents()
+            _ = pasteboard.setString(previous, forType: .string)
+        }
+        return false
+    }
+
+    let didPaste = sendCommand(processID: processID, key: "v")
+
+    pasteboard.clearContents()
+    if let previous {
+        _ = pasteboard.setString(previous, forType: .string)
+    }
+    return didPaste
+}
+
 private func sendPageDown(processID: pid_t) -> Bool {
     sendKeyCode(processID: processID, keyCode: 121)
 }
@@ -684,6 +757,49 @@ private func isWindowPresent(pid: pid_t, windowID: CGWindowID?) -> Bool {
     return false
 }
 
+private func hasUsableWindow(pid: pid_t, windowID: CGWindowID?) -> Bool {
+    if isWindowPresent(pid: pid, windowID: windowID) {
+        return true
+    }
+    return isWindowPresent(pid: pid, windowID: nil)
+}
+
+private func cgWindowMatchesExpectedFile(
+    pid: pid_t,
+    windowID: CGWindowID?,
+    expectedFileName: String
+) -> Bool {
+    let expectedLower = expectedFileName.lowercased()
+    guard !expectedLower.isEmpty else { return false }
+    let expectedStem = (expectedFileName as NSString).deletingPathExtension.lowercased()
+
+    let listOptions: CGWindowListOption = windowID == nil
+        ? [.optionOnScreenOnly, .excludeDesktopElements]
+        : [.optionIncludingWindow, .excludeDesktopElements]
+    let targetWindowID = windowID ?? kCGNullWindowID
+
+    guard let infos = CGWindowListCopyWindowInfo(listOptions, targetWindowID) as? [[String: Any]] else {
+        return false
+    }
+
+    for info in infos {
+        if let owner = info[kCGWindowOwnerPID as String] as? Int32, owner != pid {
+            continue
+        }
+        if let windowID, let wid = info[kCGWindowNumber as String] as? CGWindowID, wid != windowID {
+            continue
+        }
+        let title = ((info[kCGWindowName as String] as? String) ?? "").lowercased()
+        if title.contains(expectedLower) {
+            return true
+        }
+        if !expectedStem.isEmpty, title.contains(expectedStem) {
+            return true
+        }
+    }
+    return false
+}
+
 private func windowBounds(for windowID: CGWindowID) -> CGRect? {
     guard let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
           let first = info.first,
@@ -716,13 +832,26 @@ private func clickWindowCenter(windowID: CGWindowID) -> Bool {
     return true
 }
 
-private func editorNeedsCaretClick(_ editorName: String) -> Bool {
-    switch editorName.lowercased() {
-    case "textedit", "vs code":
-        return true
-    default:
+private func deterministicEditProbe(processID: pid_t, windowID: CGWindowID?) -> Bool {
+    guard quickPrepareEditorForInput(processID: processID, windowID: windowID, forceFocus: true) else {
         return false
     }
+    if let windowID {
+        _ = clickWindowCenter(windowID: windowID)
+    }
+
+    // Minimal mutation + revert probe. This avoids false-ready signals where the
+    // window exists but the text surface is not yet truly editable.
+    let token = "kb"
+    guard sendTypingPayload(processID: processID, text: token) || sendText(processID: processID, text: token) else {
+        return false
+    }
+    usleep(4_000)
+    guard sendCommand(processID: processID, key: "z") else {
+        return false
+    }
+    usleep(3_000)
+    return true
 }
 
 private func documentWindowMatchesExpectedFile(
@@ -732,7 +861,10 @@ private func documentWindowMatchesExpectedFile(
 ) -> Bool {
     let normalizedExpectedName = expectedFileName.lowercased()
     guard !normalizedExpectedName.isEmpty else { return false }
-    let normalizedExpectedPath = expectedFilePath.lowercased()
+    let normalizedExpectedPath = URL(fileURLWithPath: expectedFilePath)
+        .standardizedFileURL
+        .path
+        .lowercased()
     let expectedStem = (expectedFileName as NSString).deletingPathExtension.lowercased()
 
     let appElement = AXUIElementCreateApplication(processID)
@@ -764,7 +896,16 @@ private func documentWindowMatchesExpectedFile(
             if docLower.contains(normalizedExpectedName) {
                 return true
             }
-            if !normalizedExpectedPath.isEmpty, docLower.contains(normalizedExpectedPath) {
+
+            if let docURL = URL(string: document), docURL.isFileURL {
+                let docPath = docURL.standardizedFileURL.path.lowercased()
+                if !normalizedExpectedPath.isEmpty, docPath == normalizedExpectedPath {
+                    return true
+                }
+                if docPath.hasSuffix("/\(normalizedExpectedName)") {
+                    return true
+                }
+            } else if !normalizedExpectedPath.isEmpty, docLower.contains(normalizedExpectedPath) {
                 return true
             }
         }
@@ -791,17 +932,20 @@ private func documentWindowMatchesExpectedFile(
     return false
 }
 
-private func editorRequiresDocumentWindowValidation(_ editorName: String) -> Bool {
-    _ = editorName
-    return false
-}
-
 private func fileMtime(_ path: String) -> TimeInterval {
     guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
           let mod = attrs[.modificationDate] as? Date else {
         return 0
     }
     return mod.timeIntervalSince1970
+}
+
+private func fileSizeBytes(_ path: String) -> UInt64 {
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+          let size = attrs[.size] as? NSNumber else {
+        return 0
+    }
+    return size.uint64Value
 }
 
 private func nowNs() -> UInt64 {

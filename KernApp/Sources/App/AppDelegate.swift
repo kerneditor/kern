@@ -235,6 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for doc in NSDocumentController.shared.documents {
             if let editorDoc = doc as? EditorDocument,
                let hostVC = editorDoc.hostNativeViewController {
+                hostVC.cancelDeferredWorkForClose()
                 hostVC.flushPendingExport()
             }
         }

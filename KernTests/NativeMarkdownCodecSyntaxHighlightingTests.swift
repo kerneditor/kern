@@ -61,6 +61,30 @@ final class NativeMarkdownCodecSyntaxHighlightingTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testSyntaxHighlighting_RemainsEnabledForLargeDocument() {
+        let fillerLine = String(repeating: "Large markdown filler line with prose only.\n", count: 8_000)
+        let markdown = fillerLine + """
+        ```typescript
+        interface Foo { bar: string }
+        const x: number = 42
+        console.log(x)
+        ```
+        """
+
+        XCTAssertGreaterThan(markdown.utf16.count, 250_000)
+
+        let attr = NativeMarkdownCodec.importMarkdown(markdown)
+        guard let range = firstCodeBlockRange(in: attr) else {
+            XCTFail("missing code-block range in large document")
+            return
+        }
+        XCTAssertTrue(
+            hasMultipleForegroundColors(attr: attr, range: range),
+            "expected syntax highlighting to stay enabled for large documents"
+        )
+    }
+
     private func firstCodeBlockRange(in attr: NSAttributedString) -> NSRange? {
         guard attr.length > 0 else { return nil }
         var start: Int?
@@ -90,4 +114,3 @@ final class NativeMarkdownCodecSyntaxHighlightingTests: XCTestCase {
         return colors.count >= 2
     }
 }
-

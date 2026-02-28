@@ -20,6 +20,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
     private let gfmExtensionStrategyPopup = NSPopUpButton()
     private let taskRenderingPopup = NSPopUpButton()
     private let orderedNumberingPopup = NSPopUpButton()
+    private let mermaidRenderModePopup = NSPopUpButton()
     private let checkboxHitTargetPopup = NSPopUpButton()
 
     private let orderedTasksCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -31,7 +32,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
         self.notificationCenter = notificationCenter
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 460),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -71,6 +72,11 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
             defaults.string(forKey: "nativeEditor.orderedListNumbering")
                 ?? NativeMarkdownCodec.Options.OrderedListNumbering.gfmDefault.rawValue,
             in: orderedNumberingPopup
+        )
+        selectValue(
+            defaults.string(forKey: "nativeEditor.mermaidRenderMode")
+                ?? NativeMarkdownCodec.Options.MermaidRenderMode.rich.rawValue,
+            in: mermaidRenderModePopup
         )
         selectValue(
             defaults.string(forKey: "nativeEditor.checkboxHitTarget") ?? "glyph",
@@ -113,6 +119,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
             NativeMarkdownCodec.Options.OrderedListNumbering.gfmDefault.rawValue,
             forKey: "nativeEditor.orderedListNumbering"
         )
+        defaults.set(
+            NativeMarkdownCodec.Options.MermaidRenderMode.rich.rawValue,
+            forKey: "nativeEditor.mermaidRenderMode"
+        )
         defaults.set("glyph", forKey: "nativeEditor.checkboxHitTarget")
         defaults.set(true, forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
 
@@ -132,6 +142,9 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
         }
         if let value = selectedValue(from: orderedNumberingPopup) {
             defaults.set(value, forKey: "nativeEditor.orderedListNumbering")
+        }
+        if let value = selectedValue(from: mermaidRenderModePopup) {
+            defaults.set(value, forKey: "nativeEditor.mermaidRenderMode")
         }
         if let value = selectedValue(from: checkboxHitTargetPopup) {
             defaults.set(value, forKey: "nativeEditor.checkboxHitTarget")
@@ -164,6 +177,8 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
             "Editor rendering only. GFM shows checkbox-only tasks; Kern shows bullet plus checkbox for bulleted tasks."
         let orderedNumberingHelp =
             "Controls ordered-list numbering export. GFM default may normalize numbering; Preserve typed keeps your exact numbers."
+        let mermaidRenderModeHelp =
+            "Mermaid render mode: Rich draws full native diagrams, ASCII is a lightweight text diagram, Auto switches by complexity."
         let checkboxHitTargetHelp =
             "Click behavior for toggling tasks. Glyph-only toggles only on the checkbox; marker-region toggles from anywhere in the list marker area."
         let orderedTasksHelp =
@@ -203,6 +218,14 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
             ]
         )
         configurePopup(
+            mermaidRenderModePopup,
+            choices: [
+                Choice(title: "Rich (native diagram)", value: NativeMarkdownCodec.Options.MermaidRenderMode.rich.rawValue),
+                Choice(title: "ASCII (lightweight)", value: NativeMarkdownCodec.Options.MermaidRenderMode.ascii.rawValue),
+                Choice(title: "Auto (complexity-based)", value: NativeMarkdownCodec.Options.MermaidRenderMode.auto.rawValue),
+            ]
+        )
+        configurePopup(
             checkboxHitTargetPopup,
             choices: [
                 Choice(title: "Checkbox glyph only", value: "glyph"),
@@ -218,6 +241,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
         gfmExtensionStrategyPopup.toolTip = gfmExtensionStrategyHelp
         taskRenderingPopup.toolTip = taskRenderingHelp
         orderedNumberingPopup.toolTip = orderedNumberingHelp
+        mermaidRenderModePopup.toolTip = mermaidRenderModeHelp
         checkboxHitTargetPopup.toolTip = checkboxHitTargetHelp
         orderedTasksCheckbox.toolTip = orderedTasksHelp
         headingCheckboxesCheckbox.toolTip = headingCheckboxesHelp
@@ -230,6 +254,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
         let gfmExtensionStrategyLabel = makeRowLabel("GFM extension strategy", tooltip: gfmExtensionStrategyHelp)
         let taskRenderingLabel = makeRowLabel("Task rendering", tooltip: taskRenderingHelp)
         let orderedNumberingLabel = makeRowLabel("Ordered list numbering", tooltip: orderedNumberingHelp)
+        let mermaidRenderModeLabel = makeRowLabel("Mermaid render mode", tooltip: mermaidRenderModeHelp)
         let checkboxHitTargetLabel = makeRowLabel("Checkbox hit target", tooltip: checkboxHitTargetHelp)
         let orderedTasksLabel = makeRowLabel("Enable ordered tasks", tooltip: orderedTasksHelp)
         let headingCheckboxesLabel = makeRowLabel("Enable heading checkboxes", tooltip: headingCheckboxesHelp)
@@ -240,6 +265,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
             [gfmExtensionStrategyLabel, gfmExtensionStrategyPopup],
             [taskRenderingLabel, taskRenderingPopup],
             [orderedNumberingLabel, orderedNumberingPopup],
+            [mermaidRenderModeLabel, mermaidRenderModePopup],
             [checkboxHitTargetLabel, checkboxHitTargetPopup],
             [orderedTasksLabel, orderedTasksCheckbox],
             [headingCheckboxesLabel, headingCheckboxesCheckbox],
@@ -291,7 +317,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController {
         window.contentView = root
 
         // Apply minimum control widths for a stable layout.
-        [exportDialectPopup, gfmExtensionStrategyPopup, taskRenderingPopup, orderedNumberingPopup, checkboxHitTargetPopup].forEach {
+        [exportDialectPopup, gfmExtensionStrategyPopup, taskRenderingPopup, orderedNumberingPopup, mermaidRenderModePopup, checkboxHitTargetPopup].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             $0.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         }
