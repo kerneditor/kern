@@ -115,6 +115,62 @@ final class NativeMarkdownTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
+    override func paste(_ sender: Any?) {
+        if let plainText = plainTextFromPasteboard(NSPasteboard.general) {
+            insertPlainPastedText(plainText)
+            return
+        }
+        super.paste(sender)
+    }
+
+    /// Test seam: simulates pasting rich text while ensuring only plain text is inserted.
+    func _debugPasteAttributedStringForTests(_ attributed: NSAttributedString) {
+        insertPlainPastedText(attributed.string)
+    }
+
+    /// Test seam: simulates plain-text paste handling without touching the system pasteboard.
+    func _debugPastePlainStringForTests(_ text: String) {
+        insertPlainPastedText(text)
+    }
+
+    private func insertPlainPastedText(_ text: String) {
+        let normalized = normalizePastedText(text)
+        guard !normalized.isEmpty else { return }
+        suppressNextAutoNewlineContinuation = true
+        insertText(normalized, replacementRange: selectedRange())
+    }
+
+    private func normalizePastedText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+    }
+
+    private func plainTextFromPasteboard(_ pasteboard: NSPasteboard) -> String? {
+        if let string = pasteboard.string(forType: .string), !string.isEmpty {
+            return normalizePastedText(string)
+        }
+        if let data = pasteboard.data(forType: .rtf),
+           let attributed = try? NSAttributedString(
+               data: data,
+               options: [.documentType: NSAttributedString.DocumentType.rtf],
+               documentAttributes: nil
+           ),
+           !attributed.string.isEmpty {
+            return normalizePastedText(attributed.string)
+        }
+        if let data = pasteboard.data(forType: .rtfd),
+           let attributed = try? NSAttributedString(
+               data: data,
+               options: [.documentType: NSAttributedString.DocumentType.rtfd],
+               documentAttributes: nil
+           ),
+           !attributed.string.isEmpty {
+            return normalizePastedText(attributed.string)
+        }
+        return nil
+    }
+
     // MARK: - Hover Code Block Detection
 
     /// Used by tests to simulate hover without relying on WindowServer mouse-move plumbing.
