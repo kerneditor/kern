@@ -13,6 +13,8 @@ final class NativeMarkdownTextView: NSTextView {
     var suppressNextAutoNewlineContinuation = false
     var onHoverCodeBlockRangeChanged: ((NSRange?) -> Void)?
 
+    static let kernMarkdownPasteboardType = NSPasteboard.PasteboardType("com.gradigit.kern.markdown")
+
     private var hoverTrackingArea: NSTrackingArea?
     private var lastHoverCodeBlockRange: NSRange?
 
@@ -123,6 +125,18 @@ final class NativeMarkdownTextView: NSTextView {
         super.paste(sender)
     }
 
+    override func copy(_ sender: Any?) {
+        if let markdown = markdownStringForCopySelection(),
+           !markdown.isEmpty {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(markdown, forType: .string)
+            pasteboard.setString(markdown, forType: Self.kernMarkdownPasteboardType)
+            return
+        }
+        super.copy(sender)
+    }
+
     /// Test seam: simulates pasting rich text while ensuring only plain text is inserted.
     func _debugPasteAttributedStringForTests(_ attributed: NSAttributedString) {
         insertPlainPastedText(attributed.string)
@@ -131,6 +145,18 @@ final class NativeMarkdownTextView: NSTextView {
     /// Test seam: simulates plain-text paste handling without touching the system pasteboard.
     func _debugPastePlainStringForTests(_ text: String) {
         insertPlainPastedText(text)
+    }
+
+    /// Test seam: returns the markdown payload that `copy(_:)` would publish when copy-fidelity
+    /// override is active for the current selection.
+    func _debugCopyMarkdownStringForCurrentSelectionForTests() -> String? {
+        markdownStringForCopySelection()
+    }
+
+    /// Test seam: convert attributed rich text into markdown-like semantic text without
+    /// touching pasteboard state.
+    func _debugMarkdownFromAttributedPasteForTests(_ attributed: NSAttributedString) -> String {
+        markdownFromAttributedForPaste(attributed)
     }
 
     private func insertPlainPastedText(_ text: String) {
@@ -146,18 +172,41 @@ final class NativeMarkdownTextView: NSTextView {
             .replacingOccurrences(of: "\r", with: "\n")
     }
 
+    private func markdownStringForCopySelection() -> String? {
+        guard let storage = textStorage else { return nil }
+        let fullRange = NSRange(location: 0, length: storage.length)
+        guard fullRange.length > 0 else { return nil }
+        let selection = selectedRange()
+        guard NSEqualRanges(selection, fullRange) else { return nil }
+        let options = NativeMarkdownCodec.Options.fromUserDefaults()
+        return NativeMarkdownCodec.exportMarkdown(storage, options: options)
+    }
+
     private func plainTextFromPasteboard(_ pasteboard: NSPasteboard) -> String? {
+        if let markdown = pasteboard.string(forType: Self.kernMarkdownPasteboardType), !markdown.isEmpty {
+            return normalizePastedText(markdown)
+        }
+        if let rich = attributedStringFromPasteboard(pasteboard), rich.length > 0 {
+            let semanticMarkdown = markdownFromAttributedForPaste(rich)
+            if !semanticMarkdown.isEmpty {
+                return normalizePastedText(semanticMarkdown)
+            }
+        }
         if let string = pasteboard.string(forType: .string), !string.isEmpty {
             return normalizePastedText(string)
         }
+        return nil
+    }
+
+    private func attributedStringFromPasteboard(_ pasteboard: NSPasteboard) -> NSAttributedString? {
         if let data = pasteboard.data(forType: .rtf),
            let attributed = try? NSAttributedString(
                data: data,
                options: [.documentType: NSAttributedString.DocumentType.rtf],
                documentAttributes: nil
            ),
-           !attributed.string.isEmpty {
-            return normalizePastedText(attributed.string)
+           attributed.length > 0 {
+            return attributed
         }
         if let data = pasteboard.data(forType: .rtfd),
            let attributed = try? NSAttributedString(
@@ -165,10 +214,117 @@ final class NativeMarkdownTextView: NSTextView {
                options: [.documentType: NSAttributedString.DocumentType.rtfd],
                documentAttributes: nil
            ),
-           !attributed.string.isEmpty {
-            return normalizePastedText(attributed.string)
+           attributed.length > 0 {
+            return attributed
         }
         return nil
+    }
+
+    private func markdownFromAttributedForPaste(_ attributed: NSAttributedString) -> String {
+        guard attributed.length > 0 else { return "" }
+        let ns = attributed.string as NSString
+        var out = ""
+        attributed.enumerateAttributes(in: NSRange(location: 0, length: attributed.length), options: []) { attrs, range, _ in
+            guard range.length > 0 else { return }
+            let raw = ns.substring(with: range)
+            out += markdownInlineFragment(raw: raw, attributes: attrs)
+        }
+        return out
+    }
+
+    private func markdownInlineFragment(raw: String, attributes: [NSAttributedString.Key: Any]) -> String {
+        if raw.isEmpty { return raw }
+
+        let font = attributes[.font] as? NSFont
+        let traits = font?.fontDescriptor.symbolicTraits ?? []
+        let isBold = traits.contains(.bold)
+        let isItalic = traits.contains(.italic)
+        let isMonospace = traits.contains(.monoSpace) || (font?.fontName.lowercased().contains("mono") ?? false)
+        let hasStrike = ((attributes[.strikethroughStyle] as? Int) ?? 0) != 0
+        let linkURL = normalizedLinkURL(attributes[.link])
+
+        if isMonospace {
+            return wrapCorePreservingBoundaryWhitespace(raw) { core in
+                let delimiter = core.contains("`") ? "``" : "`"
+                return "\(delimiter)\(core)\(delimiter)"
+            }
+        }
+
+        if let url = linkURL {
+            return wrapCorePreservingBoundaryWhitespace(raw) { core in
+                let escaped = escapeMarkdownText(core)
+                if escaped == url {
+                    return "<\(url)>"
+                }
+                return "[\(escaped)](\(url))"
+            }
+        }
+
+        var result = wrapCorePreservingBoundaryWhitespace(raw) { core in
+            var escaped = escapeMarkdownText(core)
+            if isBold, isItalic {
+                escaped = "***\(escaped)***"
+            } else if isBold {
+                escaped = "**\(escaped)**"
+            } else if isItalic {
+                escaped = "*\(escaped)*"
+            }
+            if hasStrike {
+                escaped = "~~\(escaped)~~"
+            }
+            return escaped
+        }
+
+        // If there is only strike and boundary-preserving wrapper returned the original text
+        // (all-whitespace case), preserve original as-is.
+        if hasStrike, result == raw, raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            result = raw
+        }
+        return result
+    }
+
+    private func normalizedLinkURL(_ value: Any?) -> String? {
+        if let url = value as? URL {
+            return url.absoluteString
+        }
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
+
+    private func wrapCorePreservingBoundaryWhitespace(_ text: String, _ transform: (String) -> String) -> String {
+        guard !text.isEmpty else { return text }
+        let chars = Array(text)
+        var start = 0
+        while start < chars.count, chars[start].isWhitespaceOrNewline {
+            start += 1
+        }
+        var end = chars.count
+        while end > start, chars[end - 1].isWhitespaceOrNewline {
+            end -= 1
+        }
+        if start >= end { return text }
+        let leading = String(chars[0..<start])
+        let core = String(chars[start..<end])
+        let trailing = String(chars[end..<chars.count])
+        return leading + transform(core) + trailing
+    }
+
+    private func escapeMarkdownText(_ text: String) -> String {
+        var out = ""
+        out.reserveCapacity(text.count)
+        for ch in text {
+            switch ch {
+            case "\\", "`", "*", "_", "[", "]", "(", ")", "~":
+                out.append("\\")
+                out.append(ch)
+            default:
+                out.append(ch)
+            }
+        }
+        return out
     }
 
     // MARK: - Hover Code Block Detection
@@ -468,5 +624,11 @@ final class NativeMarkdownTextView: NSTextView {
         let charIndex = lm.characterIndexForGlyph(at: glyphIndex)
         guard charIndex >= 0, let storage = textStorage, charIndex < storage.length else { return nil }
         return charIndex
+    }
+}
+
+private extension Character {
+    var isWhitespaceOrNewline: Bool {
+        unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
     }
 }

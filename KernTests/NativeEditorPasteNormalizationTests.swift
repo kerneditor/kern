@@ -49,6 +49,44 @@ final class NativeEditorPasteNormalizationTests: XCTestCase {
         XCTAssertEqual(textView.string, "a\nb\nc")
     }
 
+    @MainActor
+    func testSemanticMarkdownConversionFromRichTextAttributes() {
+        let (_, textView) = makeController(markdown: "")
+        let rich = NSMutableAttributedString()
+
+        rich.append(NSAttributedString(
+            string: "Bold",
+            attributes: [.font: NSFont.systemFont(ofSize: 14, weight: .bold)]
+        ))
+        rich.append(NSAttributedString(string: " "))
+        rich.append(NSAttributedString(
+            string: "Italic",
+            attributes: [.font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: 14), toHaveTrait: .italicFontMask)]
+        ))
+        rich.append(NSAttributedString(string: " "))
+        rich.append(NSAttributedString(
+            string: "Link",
+            attributes: [.link: URL(string: "https://example.com/docs")!]
+        ))
+
+        let markdown = textView._debugMarkdownFromAttributedPasteForTests(rich)
+        XCTAssertEqual(markdown, "**Bold** *Italic* [Link](https://example.com/docs)")
+    }
+
+    @MainActor
+    func testCopyFullDocumentSelectionExportsMarkdownSource() {
+        let markdown = """
+        # Heading
+
+        - [ ] task
+        """
+        let (_, textView) = makeController(markdown: markdown)
+        textView.setSelectedRange(NSRange(location: 0, length: textView.string.utf16.count))
+
+        let copied = textView._debugCopyMarkdownStringForCurrentSelectionForTests()
+        XCTAssertEqual(copied, markdown)
+    }
+
     // MARK: - Helpers
 
     @MainActor

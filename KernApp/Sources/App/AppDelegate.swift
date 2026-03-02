@@ -117,6 +117,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentDocument()?.saveAs(sender)
     }
 
+    @objc func copyFullPath(_ sender: Any?) {
+        guard let fileURL = currentDocument()?.fileURL else {
+            NSSound.beep()
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(fileURL.path, forType: .string)
+    }
+
+    @objc func revealInFinder(_ sender: Any?) {
+        guard let fileURL = currentDocument()?.fileURL else {
+            NSSound.beep()
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+    }
+
     private func currentDocument() -> NSDocument? {
         // Prefer ordered windows (front-most first); menu actions can temporarily clear keyWindow.
         for window in NSApp.orderedWindows {
@@ -308,8 +325,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(NSMenuItem.separator())
         let saveItem = fileMenu.addItem(withTitle: "Save", action: #selector(saveDocument(_:)), keyEquivalent: "s")
         saveItem.target = self
-        let saveAsItem = fileMenu.addItem(withTitle: "Save As…", action: #selector(saveDocumentAs(_:)), keyEquivalent: "S")
+        let saveAsItem = NSMenuItem(title: "Save As…", action: #selector(saveDocumentAs(_:)), keyEquivalent: "s")
+        saveAsItem.keyEquivalentModifierMask = [.command, .shift]
         saveAsItem.target = self
+        fileMenu.addItem(saveAsItem)
+        fileMenu.addItem(NSMenuItem.separator())
+        let copyPathItem = NSMenuItem(title: "Copy Full Path", action: #selector(copyFullPath(_:)), keyEquivalent: "c")
+        copyPathItem.keyEquivalentModifierMask = [.command, .option]
+        copyPathItem.target = self
+        fileMenu.addItem(copyPathItem)
+        let revealItem = NSMenuItem(title: "Reveal in Finder", action: #selector(revealInFinder(_:)), keyEquivalent: "r")
+        revealItem.keyEquivalentModifierMask = [.command, .shift]
+        revealItem.target = self
+        fileMenu.addItem(revealItem)
         fileMenu.addItem(NSMenuItem.separator())
         fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         fileMenuItem.submenu = fileMenu
@@ -378,6 +406,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        let nextTabItem = NSMenuItem(title: "Select Next Tab", action: #selector(NSWindow.selectNextTab(_:)), keyEquivalent: "\t")
+        nextTabItem.keyEquivalentModifierMask = [.control]
+        windowMenu.addItem(nextTabItem)
+        let prevTabItem = NSMenuItem(title: "Select Previous Tab", action: #selector(NSWindow.selectPreviousTab(_:)), keyEquivalent: "\t")
+        prevTabItem.keyEquivalentModifierMask = [.control, .shift]
+        windowMenu.addItem(prevTabItem)
         windowMenuItem.submenu = windowMenu
         mainMenu.addItem(windowMenuItem)
 
@@ -394,6 +429,8 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)):
             // Enable whenever there is an active document window.
             return currentDocument() != nil
+        case #selector(copyFullPath(_:)), #selector(revealInFinder(_:)):
+            return currentDocument()?.fileURL != nil
         case #selector(showPreferences(_:)):
             return true
         case #selector(toggleKeepRunning(_:)):
