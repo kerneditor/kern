@@ -2,7 +2,7 @@
 # test-native-editor.sh — Run native-editor unit tests and collect artifacts.
 #
 # Usage:
-#   ./scripts/test-native-editor.sh [--unit-only] [--skip-xcodegen] [--exhaustive] [--snapshots] [--record-snapshots] [--snapshots-only] [--ultra] [--ultra-full]
+#   ./scripts/test-native-editor.sh [--unit-only] [--skip-xcodegen] [--exhaustive] [--snapshots|--no-snapshots] [--record-snapshots] [--snapshots-only] [--ultra] [--ultra-full]
 #
 # Notes:
 # - Results are written under test-results/native-editor/<timestamp>/
@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 RUN_UNIT=true
 SKIP_XCODEGEN=false
 ENABLE_EXHAUSTIVE=false
-ENABLE_SNAPSHOTS=false
+ENABLE_SNAPSHOTS=true
 RECORD_SNAPSHOTS=false
 SNAPSHOTS_ONLY=false
 ENABLE_ULTRA=false
@@ -28,6 +28,7 @@ for arg in "$@"; do
     --skip-xcodegen) SKIP_XCODEGEN=true ;;
     --exhaustive) ENABLE_EXHAUSTIVE=true ;;
     --snapshots) ENABLE_SNAPSHOTS=true ;;
+    --no-snapshots) ENABLE_SNAPSHOTS=false ;;
     --record-snapshots) ENABLE_SNAPSHOTS=true; RECORD_SNAPSHOTS=true ;;
     --snapshots-only) ENABLE_SNAPSHOTS=true; SNAPSHOTS_ONLY=true ;;
     --ultra) ENABLE_ULTRA=true; ENABLE_EXHAUSTIVE=true ;;
@@ -141,6 +142,9 @@ if [ "$ENABLE_EXHAUSTIVE" = true ]; then
   set_default_kernel_value "KERN_ENABLE_EXHAUSTIVE_TESTS" "1"
 
   if [ "$RUN_UNIT" = true ]; then
+    set_default_kernel_value "KERN_TYPING_STATEFUL_ENFORCE" "1"
+    set_default_kernel_value "KERN_TYPING_STATEFUL_SEEDS" "24"
+    set_default_kernel_value "KERN_TYPING_STATEFUL_STEPS" "50"
     set_default_kernel_value "KERN_EXHAUSTIVE_ACTION_FULL" "1"
     set_default_kernel_value "KERN_EXHAUSTIVE_ULTIMATE_FULL" "1"
     set_default_kernel_value "KERN_EXHAUSTIVE_ULTIMATE_INTERLEAVED_FULL" "1"
@@ -161,18 +165,34 @@ if [ "$RECORD_SNAPSHOTS" = true ]; then
   set_default_kernel_value "KERN_RECORD_SNAPSHOTS" "1"
 fi
 
+if [ "$ENABLE_ULTRA" = true ]; then
+  set_default_kernel_value "KERN_TYPING_STATEFUL_ENFORCE" "1"
+  set_default_kernel_value "KERN_TYPING_STATEFUL_SEEDS" "120"
+  set_default_kernel_value "KERN_TYPING_STATEFUL_STEPS" "120"
+fi
+
+if [ "$ENABLE_ULTRA_FULL" = true ]; then
+  set_default_kernel_value "KERN_TYPING_STATEFUL_ENFORCE" "1"
+  set_default_kernel_value "KERN_TYPING_STATEFUL_SEEDS" "500"
+  set_default_kernel_value "KERN_TYPING_STATEFUL_STEPS" "200"
+fi
+
 echo "=== Kern Native Editor Tests ==="
 echo "Output: $OUT_DIR"
 echo "DerivedData: $DERIVED_DATA_PATH"
 echo ""
 echo "Modes:"
-echo "  --snapshots          Run snapshot tests (via scheme: KernTextKitSnapshots)"
+echo "  --snapshots          Run snapshot tests (enabled by default)"
+echo "  --no-snapshots       Disable snapshot tests for this run"
 echo "  --record-snapshots   Record snapshot baselines (via scheme: KernTextKitRecordSnapshots)"
 echo "  --exhaustive         Enable exhaustive (slow) tests (via *Exhaustive schemes)"
 echo "  --snapshots-only     Run only snapshot tests (skips non-snapshot unit tests)"
 echo ""
 echo "Env toggles (optional):"
 echo "  KERN_EXHAUSTIVE_PROFILE_LIMIT=N                Cap non-UI exhaustive profile permutations"
+echo "  KERN_TYPING_STATEFUL_ENFORCE=1                 Make stateful typing sequence lane blocking"
+echo "  KERN_TYPING_STATEFUL_SEEDS=N                   Stateful sequence seed count"
+echo "  KERN_TYPING_STATEFUL_STEPS=N                   Stateful sequence max steps per seed"
 echo "  KERN_EXHAUSTIVE_ACTION_FULL=1                  Run full feature x action x profile matrix"
 echo "  KERN_EXHAUSTIVE_ACTION_SCENARIO_BUDGET=N       Budget for bounded action matrix mode"
 echo "  KERN_EXHAUSTIVE_ACTION_LOG_LIMIT=N             Max per-scenario action rows in report"
@@ -308,6 +328,12 @@ if [ "$RUN_UNIT" = true ]; then
     echo "  (record mode exit $RECORD_STATUS is expected)"
     echo ""
 
+    # Clear record mode before verification. Snapshot record mode can be
+    # sourced from both environment and defaults suite, and if left enabled
+    # the verify lane will intentionally fail every snapshot assertion.
+    unset KERN_RECORD_SNAPSHOTS || true
+    /usr/bin/defaults delete "$DEFAULTS_DOMAIN" "KERN_RECORD_SNAPSHOTS" >/dev/null 2>&1 || true
+
     echo "▸ Verifying snapshots (scheme: $VERIFY_SCHEME)..."
     set +e
     xcodebuild \
@@ -352,6 +378,13 @@ if [ "$RUN_UNIT" = true ]; then
     echo "  ✓ Unit tests passed"
     echo ""
   fi
+fi
+
+if [ "${KERN_ENFORCE_TODO_CHECKLIST_HYGIENE:-1}" = "1" ]; then
+  echo "▸ Checking complete-todo checklist hygiene..."
+  python3 scripts/check-todo-complete-checklists.py
+  echo "  ✓ Todo checklist hygiene passed"
+  echo ""
 fi
 
 echo "All selected test suites completed."
