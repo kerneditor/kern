@@ -7,6 +7,53 @@ final class NativeEditorInitialViewportTests: XCTestCase {
         let metrics: [String: Double]
     }
 
+    private static let managedEnvironmentKeys: [String] = [
+        "KERN_FORCE_STAGED_OPEN",
+        "KERN_STAGED_OPEN_PREFIX_LINES",
+        "KERN_STAGED_OPEN_PREFIX_CHARS",
+        "KERN_STAGED_OPEN_DELAY_MS",
+        "KERN_STAGED_OPEN_IDLE_QUIET_MS",
+        "KERN_STAGED_OPEN_DEFERRED_FULL_DISABLE_THRESHOLD_CHARS",
+        "KERN_STAGED_PROMOTION_CONTEXT_CHARS",
+        "KERN_STAGED_PROMOTION_DEBOUNCE_MS",
+        "KERN_STAGED_PROMOTION_STEP_CHARS",
+        "KERN_STAGED_PROMOTION_MAX_CATCHUP_STEP_CHARS",
+        "KERN_STAGED_PROMOTION_VIEWPORT_GUARD_CHARS",
+        "KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS",
+        "KERN_STAGED_PROMOTION_FRAME_BUDGET_MS",
+        "KERN_STAGED_PROMOTION_MAX_VIEWPORT_CORRECTION_PX",
+        "KERN_STAGED_PROMOTION_JUMP_THRESHOLD_PX",
+        "KERN_STAGED_PROMOTION_IDLE_QUIET_MS",
+        "KERN_STAGED_PROMOTION_SCROLL_QUIET_MS",
+        "KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS",
+        "KERN_STAGED_PROMOTION_TURBO_STEP_CHARS",
+        "KERN_STAGED_PROMOTION_TURBO_MAX_CATCHUP_STEP_CHARS",
+        "KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS",
+        "KERN_STAGED_PROMOTION_TURBO_IDLE_MS",
+        "KERN_FORCE_FULL_MARKDOWN_IMPORT",
+        "KERN_FORCE_PLAIN_MARKDOWN_IMPORT",
+        "KERN_ALLOW_PLAIN_IMPORT_OVERRIDE",
+        "KERN_WOW_INTERNAL_METRICS_PATH",
+    ]
+
+    nonisolated(unsafe) private static var baselineEnvironment: [String: String?]?
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        if Self.baselineEnvironment == nil {
+            var snapshot: [String: String?] = [:]
+            for key in Self.managedEnvironmentKeys {
+                snapshot[key] = getenv(key).map { String(cString: $0) }
+            }
+            Self.baselineEnvironment = snapshot
+        }
+    }
+
+    override func tearDownWithError() throws {
+        restoreManagedEnvironmentToBaseline()
+        try super.tearDownWithError()
+    }
+
     @MainActor
     func testInitialRenderStartsAtDocumentTopWithCaretAtZero() {
         let markdown = """
@@ -210,13 +257,34 @@ final class NativeEditorInitialViewportTests: XCTestCase {
         }
 
         vc.stringValue = markdown
+        vc.view.layoutSubtreeIfNeeded()
+        guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+            XCTFail("Missing NativeEditor.TextView")
+            return
+        }
+        XCTAssertTrue(textView.string.contains("**tailbold**"), "Staged render should initially leave deferred tail raw")
 
         let settled = expectation(description: "Deferred full render settles")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            settled.fulfill()
+        let deadline = Date().addingTimeInterval(2.0)
+        func pollUntilRendered() {
+            if textView.string.contains("**tailbold**") == false,
+               textView.string.contains("tailbold") {
+                settled.fulfill()
+                return
+            }
+            if Date() >= deadline {
+                settled.fulfill()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                pollUntilRendered()
+            }
         }
-        wait(for: [settled], timeout: 1.0)
+        pollUntilRendered()
+        wait(for: [settled], timeout: 3.0)
 
+        XCTAssertFalse(textView.string.contains("**tailbold**"), "Deferred full render should replace raw tail markdown")
+        XCTAssertTrue(textView.string.contains("tailbold"), "Deferred full render should keep semantic content")
         XCTAssertEqual(callbackCount, 0, "Deferred full render should not mark content dirty or trigger export callback")
     }
 
@@ -554,6 +622,103 @@ final class NativeEditorInitialViewportTests: XCTestCase {
     }
 
     @MainActor
+    func testDeferredFullRenderDefersDuringRapidScrollThenCompletesWithoutSnapback() {
+        let env: [String: String?] = [
+            "KERN_FORCE_STAGED_OPEN": "1",
+            "KERN_STAGED_OPEN_PREFIX_LINES": "1",
+            "KERN_STAGED_OPEN_PREFIX_CHARS": "12",
+            "KERN_STAGED_OPEN_DELAY_MS": "20",
+            "KERN_STAGED_OPEN_DEFERRED_FULL_DISABLE_THRESHOLD_CHARS": "99999999",
+            "KERN_STAGED_PROMOTION_DEBOUNCE_MS": "0",
+            "KERN_STAGED_PROMOTION_STEP_CHARS": "120000",
+            "KERN_STAGED_PROMOTION_MAX_CATCHUP_STEP_CHARS": "1200000",
+            "KERN_STAGED_PROMOTION_IDLE_QUIET_MS": "40",
+            "KERN_STAGED_PROMOTION_SCROLL_QUIET_MS": "90",
+            "KERN_FORCE_FULL_MARKDOWN_IMPORT": nil,
+        ]
+
+        withTemporaryEnvironment(env) {
+            let filler = String(repeating: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n", count: 15_000)
+            let markdown = """
+            # Top Heading
+
+            \(filler)
+            # Tail Heading
+
+            **tailbold**
+            """
+
+            let vc = NativeEditorViewController()
+            _ = vc.view
+            vc.stringValue = markdown
+            vc.view.layoutSubtreeIfNeeded()
+
+            guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+                XCTFail("Missing NativeEditor.TextView")
+                return
+            }
+            guard let scrollView = findSubview(withAXIdentifier: "NativeEditor.ScrollView", in: vc.view) as? NSScrollView else {
+                XCTFail("Missing NativeEditor.ScrollView")
+                return
+            }
+
+            XCTAssertTrue(textView.string.contains("**tailbold**"), "Initial staged render should keep tail raw before deferred full render")
+
+            let clip = scrollView.contentView
+            let burstDeadline = Date().addingTimeInterval(1.2)
+            var tick = 0
+            var lastTickAt = Date()
+            var maxHeartbeatGap: TimeInterval = 0
+            while Date() < burstDeadline {
+                let now = Date()
+                maxHeartbeatGap = max(maxHeartbeatGap, now.timeIntervalSince(lastTickAt))
+                lastTickAt = now
+
+                tick += 1
+                let currentMaxY = max(0, (scrollView.documentView?.bounds.height ?? 0) - clip.bounds.height)
+                let targetY: CGFloat
+                if tick % 2 == 0 {
+                    targetY = currentMaxY
+                } else {
+                    targetY = max(0, currentMaxY - 2200)
+                }
+                clip.scroll(to: NSPoint(x: 0, y: targetY))
+                scrollView.reflectScrolledClipView(clip)
+                vc.view.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+
+            let yAtScrollStop = clip.bounds.origin.y
+            let topCharAtScrollStop = visibleTopCharacterLocation(in: textView)
+
+            let settled = expectation(description: "deferred full render converges after rapid scroll burst")
+            let deadline = Date().addingTimeInterval(6.0)
+            func poll() {
+                let done = !textView.string.contains("**tailbold**")
+                    && !textView.string.contains("# Tail Heading")
+                if done || Date() >= deadline {
+                    settled.fulfill()
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    poll()
+                }
+            }
+            poll()
+            wait(for: [settled], timeout: 7.0)
+
+            XCTAssertFalse(textView.string.contains("**tailbold**"), "Deferred full render should eventually style tail emphasis")
+            XCTAssertFalse(textView.string.contains("# Tail Heading"), "Deferred full render should eventually style tail heading")
+            XCTAssertLessThanOrEqual(maxHeartbeatGap, 0.8, "Main loop heartbeat gap should stay bounded during rapid scroll burst")
+
+            let finalY = clip.bounds.origin.y
+            let finalTopChar = visibleTopCharacterLocation(in: textView)
+            XCTAssertLessThanOrEqual(abs(finalY - yAtScrollStop), 2_500, "Viewport should not snap back drastically after deferred full render")
+            XCTAssertLessThan(abs(finalTopChar - topCharAtScrollStop), 8_000, "Top visible content should remain broadly stable after deferred convergence")
+        }
+    }
+
+    @MainActor
     func testStagedPromotionMetricsStayWithinJankBudget() {
         let metricsPath = uniqueTempWowMetricsPath()
         defer { try? FileManager.default.removeItem(atPath: metricsPath) }
@@ -611,7 +776,7 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             while Date() < deadline {
                 contentDone = !textView.string.contains("**tailbold**")
                     && !textView.string.contains("# Tail Heading")
-                let metrics = loadWowMetrics(at: metricsPath)
+                let metrics = Self.loadWowMetrics(at: metricsPath)
                 hasFullReady = metrics?["wow_full_document_fidelity_ready_latency_ms"] != nil
                 if contentDone && hasFullReady {
                     break
@@ -622,7 +787,7 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             XCTAssertTrue(contentDone, "Promotion should finish styling tail content")
             XCTAssertTrue(hasFullReady, "Full fidelity metric should be emitted before deadline")
 
-            guard let metrics = loadWowMetrics(at: metricsPath) else {
+            guard let metrics = Self.loadWowMetrics(at: metricsPath) else {
                 XCTFail("Missing WOW metrics payload")
                 return
             }
@@ -655,6 +820,72 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             XCTAssertLessThanOrEqual(jumpMax, 120, "Scroll jump max should stay bounded")
             XCTAssertGreaterThanOrEqual(anchorRebaseCount, 0)
             XCTAssertEqual(anchorRebaseFailCount, 0, "Anchor remap should not fail")
+        }
+    }
+
+    @MainActor
+    func testStagedPromotionStylesTailBlockMathWithoutCrashing() {
+        let env: [String: String?] = [
+            "KERN_FORCE_STAGED_OPEN": "1",
+            "KERN_STAGED_OPEN_PREFIX_LINES": "1",
+            "KERN_STAGED_OPEN_PREFIX_CHARS": "12",
+            "KERN_STAGED_OPEN_DELAY_MS": "0",
+            "KERN_STAGED_OPEN_DEFERRED_FULL_DISABLE_THRESHOLD_CHARS": "1",
+            "KERN_STAGED_PROMOTION_DEBOUNCE_MS": "0",
+            "KERN_STAGED_PROMOTION_STEP_CHARS": "140000",
+            "KERN_STAGED_PROMOTION_MAX_CATCHUP_STEP_CHARS": "1400000",
+            "KERN_STAGED_PROMOTION_IDLE_QUIET_MS": "0",
+            "KERN_STAGED_PROMOTION_SCROLL_QUIET_MS": "0",
+            "KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS": "8",
+            "KERN_FORCE_FULL_MARKDOWN_IMPORT": nil,
+        ]
+
+        withTemporaryEnvironment(env) {
+            let filler = String(repeating: "Line filler for staged promotion coverage.\n", count: 18_000)
+            let markdown = """
+            # Top Heading
+
+            \(filler)
+            ## Tail Math
+
+            $$
+            E = mc^2
+            $$
+
+            Tail paragraph
+            """
+
+            let vc = NativeEditorViewController()
+            _ = vc.view
+            vc.stringValue = markdown
+            vc.view.layoutSubtreeIfNeeded()
+
+            guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+                XCTFail("Missing NativeEditor.TextView")
+                return
+            }
+
+            XCTAssertTrue(textView.string.contains("$$"), "Initial staged render should keep far-tail block math raw")
+
+            let settled = expectation(description: "staged promotion styles tail math")
+            let deadline = Date().addingTimeInterval(7.0)
+            func poll() {
+                let done = !textView.string.contains("$$")
+                    && textView.string.contains("Tail Math")
+                    && textView.string.contains("Tail paragraph")
+                if done || Date() >= deadline {
+                    settled.fulfill()
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    poll()
+                }
+            }
+            poll()
+            wait(for: [settled], timeout: 8.0)
+
+            XCTAssertFalse(textView.string.contains("$$"), "Tail block math should be promoted into rendered attachment form")
+            XCTAssertTrue(textView.string.contains("Tail paragraph"))
         }
     }
 
@@ -702,11 +933,16 @@ final class NativeEditorInitialViewportTests: XCTestCase {
 
             let clip = scrollView.contentView
             var maxTargetError: CGFloat = 0
+            var lastTickAt = Date()
+            var maxHeartbeatGap: TimeInterval = 0
 
             let deadline = Date().addingTimeInterval(5.0)
             var tick = 0
             var done = false
             while Date() < deadline {
+                let now = Date()
+                maxHeartbeatGap = max(maxHeartbeatGap, now.timeIntervalSince(lastTickAt))
+                lastTickAt = now
                 tick += 1
                 let currentMaxY = max(0, (scrollView.documentView?.bounds.height ?? 0) - clip.bounds.height)
                 let targetY: CGFloat
@@ -732,6 +968,110 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             XCTAssertTrue(done, "Rapid scroll promotion should style tail content before deadline")
 
             XCTAssertLessThanOrEqual(maxTargetError, 2_500, "Rapid scroll path should stay reasonably close to commanded viewport targets")
+            XCTAssertLessThanOrEqual(maxHeartbeatGap, 0.8, "Main loop heartbeat gap should stay bounded during rapid scroll stress")
+        }
+    }
+
+    @MainActor
+    func testStagedPromotionDefersWhileLiveScrollAndResumesAfterEnd() {
+        let metricsPath = uniqueTempWowMetricsPath()
+        defer { try? FileManager.default.removeItem(atPath: metricsPath) }
+
+        let env: [String: String?] = [
+            "KERN_FORCE_STAGED_OPEN": "1",
+            "KERN_STAGED_OPEN_PREFIX_LINES": "1",
+            "KERN_STAGED_OPEN_PREFIX_CHARS": "12",
+            "KERN_STAGED_OPEN_DELAY_MS": "0",
+            "KERN_STAGED_OPEN_DEFERRED_FULL_DISABLE_THRESHOLD_CHARS": "1",
+            "KERN_STAGED_PROMOTION_DEBOUNCE_MS": "0",
+            "KERN_STAGED_PROMOTION_STEP_CHARS": "180000",
+            "KERN_STAGED_PROMOTION_MAX_CATCHUP_STEP_CHARS": "1800000",
+            "KERN_STAGED_PROMOTION_IDLE_QUIET_MS": "0",
+            "KERN_STAGED_PROMOTION_SCROLL_QUIET_MS": "0",
+            "KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS": "8",
+            "KERN_FORCE_FULL_MARKDOWN_IMPORT": nil,
+            "KERN_WOW_INTERNAL_METRICS_PATH": metricsPath,
+        ]
+
+        withTemporaryEnvironment(env) {
+            let filler = String(repeating: "Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n", count: 16_000)
+            let markdown = """
+            # Top Heading
+
+            \(filler)
+            # Tail Heading
+
+            **tailbold**
+            """
+
+            let vc = NativeEditorViewController()
+            _ = vc.view
+            vc.stringValue = markdown
+            vc.view.layoutSubtreeIfNeeded()
+
+            guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+                XCTFail("Missing NativeEditor.TextView")
+                return
+            }
+            guard let scrollView = findSubview(withAXIdentifier: "NativeEditor.ScrollView", in: vc.view) as? NSScrollView else {
+                XCTFail("Missing NativeEditor.ScrollView")
+                return
+            }
+
+            let clip = scrollView.contentView
+            NotificationCenter.default.post(
+                name: NSScrollView.willStartLiveScrollNotification,
+                object: scrollView
+            )
+
+            let liveScrollDeadline = Date().addingTimeInterval(1.1)
+            var tick = 0
+            while Date() < liveScrollDeadline {
+                tick += 1
+                let maxY = max(0, (scrollView.documentView?.bounds.height ?? 0) - clip.bounds.height)
+                let targetY: CGFloat = (tick % 2 == 0) ? maxY : max(0, maxY - 2200)
+                clip.scroll(to: NSPoint(x: 0, y: targetY))
+                scrollView.reflectScrolledClipView(clip)
+                vc.view.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+
+            let metricsDuringLiveScroll = Self.loadWowMetrics(at: metricsPath) ?? [:]
+            let skippedDuringLiveScroll = metricsDuringLiveScroll["wow_staged_promotion_skipped_live_scroll_count"] ?? 0
+            XCTAssertGreaterThan(
+                skippedDuringLiveScroll,
+                0,
+                "Expected staged promotion scheduling/apply to defer during live scroll"
+            )
+
+            NotificationCenter.default.post(
+                name: NSScrollView.didEndLiveScrollNotification,
+                object: scrollView
+            )
+
+            let settled = expectation(description: "staged promotion resumes after live scroll ends")
+            let deadline = Date().addingTimeInterval(8.0)
+            func poll() {
+                let done = !textView.string.contains("**tailbold**")
+                    && !textView.string.contains("# Tail Heading")
+                let fullReady = (Self.loadWowMetrics(at: metricsPath)?["wow_full_document_fidelity_ready_latency_ms"]) != nil
+                if (done && fullReady) || Date() >= deadline {
+                    settled.fulfill()
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    poll()
+                }
+            }
+            poll()
+            wait(for: [settled], timeout: 9.0)
+
+            XCTAssertFalse(textView.string.contains("**tailbold**"), "Tail emphasis should eventually style after live scroll ends")
+            XCTAssertFalse(textView.string.contains("# Tail Heading"), "Tail heading should eventually style after live scroll ends")
+            XCTAssertNotNil(
+                Self.loadWowMetrics(at: metricsPath)?["wow_full_document_fidelity_ready_latency_ms"],
+                "Full-document fidelity metric should eventually emit after live scroll ends"
+            )
         }
     }
 
@@ -772,7 +1112,7 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             .path
     }
 
-    private func loadWowMetrics(at path: String) -> [String: Double]? {
+    private static func loadWowMetrics(at path: String) -> [String: Double]? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
         guard let payload = try? JSONDecoder().decode(WowMetricsPayload.self, from: data) else { return nil }
         return payload.metrics
@@ -803,5 +1143,16 @@ final class NativeEditorInitialViewportTests: XCTestCase {
         }
 
         body()
+    }
+
+    private func restoreManagedEnvironmentToBaseline() {
+        guard let baseline = Self.baselineEnvironment else { return }
+        for key in Self.managedEnvironmentKeys {
+            if let value = baseline[key] ?? nil {
+                setenv(key, value, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
     }
 }

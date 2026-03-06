@@ -5,12 +5,13 @@ import AppKit
 enum CodeBlockChromeGeometry {
     // Background padding around the glyph bounding rect (matches the visual design of the block).
     static let backgroundInsetX: CGFloat = 10
-    static let backgroundInsetY: CGFloat = 2
+    static let backgroundInsetY: CGFloat = 6
 
-    // Extra space at the top of the rounded background reserved for chrome (language pill + copy button).
-    // The first code line already sits below this region because we expand the background upward from
-    // the glyph rect; keep this compact so stacked code blocks don't look overly spaced.
-    static let chromeTopExtra: CGFloat = 18
+    // Code-block chrome should not distort the inactive block geometry.
+    // Keep the rounded background symmetric; chrome may visually float slightly above the block.
+    static let chromeOverlayTopOverflow: CGFloat = 4
+    static let chromeOverlayInsetX: CGFloat = 10
+    static let chromeOverlayInsetY: CGFloat = 4
 
     static let cornerRadius: CGFloat = 8
 
@@ -25,14 +26,6 @@ enum CodeBlockChromeGeometry {
             // This avoids "shrink-to-content" blocks that clip chrome (language + copy).
             rect.origin.x = lineFragmentRect.minX - backgroundInsetX
             rect.size.width = lineFragmentRect.width + backgroundInsetX * 2
-        }
-        if isFlipped {
-            // Flipped coordinates grow downward; extending "top" means moving origin up.
-            rect.origin.y -= chromeTopExtra
-            rect.size.height += chromeTopExtra
-        } else {
-            // Non-flipped: origin is the bottom; increasing height extends upward (top).
-            rect.size.height += chromeTopExtra
         }
         return rect
     }

@@ -134,6 +134,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.activateFileViewerSelecting([fileURL])
     }
 
+    @objc func openContainingFolder(_ sender: Any?) {
+        guard let fileURL = currentDocument()?.fileURL else {
+            NSSound.beep()
+            return
+        }
+        let folderURL = fileURL.deletingLastPathComponent()
+        NSWorkspace.shared.open(folderURL)
+    }
+
     @objc func quickOpen(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -164,6 +173,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         tabs[index].makeKeyAndOrderFront(sender)
+    }
+
+    @objc func moveCurrentTabToNewWindow(_ sender: Any?) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            NSSound.beep()
+            return
+        }
+        guard (window.tabbedWindows?.count ?? 1) > 1 else {
+            NSSound.beep()
+            return
+        }
+        window.moveTabToNewWindow(sender)
+    }
+
+    @objc func closeOtherTabs(_ sender: Any?) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            NSSound.beep()
+            return
+        }
+        guard let tabs = window.tabbedWindows, tabs.count > 1 else {
+            NSSound.beep()
+            return
+        }
+        for tab in tabs where tab != window {
+            tab.performClose(sender)
+        }
     }
 
     private func currentDocument() -> NSDocument? {
@@ -220,6 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func useSelectionForFind(_ sender: Any?) {
         currentNativeEditorViewController()?.useSelectionForFind(sender)
+    }
+
+    @objc func toggleHeadingOutline(_ sender: Any?) {
+        currentNativeEditorViewController()?.toggleHeadingOutline(sender)
     }
 
     // MARK: - New Window / New Tab
@@ -369,6 +408,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copyPathItem.keyEquivalentModifierMask = [.command, .option]
         copyPathItem.target = self
         fileMenu.addItem(copyPathItem)
+        let openContainingFolderItem = NSMenuItem(title: "Open Containing Folder", action: #selector(openContainingFolder(_:)), keyEquivalent: "r")
+        openContainingFolderItem.keyEquivalentModifierMask = [.command, .shift, .option]
+        openContainingFolderItem.target = self
+        fileMenu.addItem(openContainingFolderItem)
         let revealItem = NSMenuItem(title: "Reveal in Finder", action: #selector(revealInFinder(_:)), keyEquivalent: "r")
         revealItem.keyEquivalentModifierMask = [.command, .shift]
         revealItem.target = self
@@ -430,6 +473,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // View menu
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
+        let outlineItem = NSMenuItem(title: "Show Heading Outline", action: #selector(toggleHeadingOutline(_:)), keyEquivalent: "0")
+        outlineItem.keyEquivalentModifierMask = [.command, .option]
+        outlineItem.target = self
+        viewMenu.addItem(outlineItem)
+        viewMenu.addItem(NSMenuItem.separator())
         let fullScreenItem = NSMenuItem(title: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreenItem.keyEquivalentModifierMask = [.control, .command]
         viewMenu.addItem(fullScreenItem)
@@ -448,6 +496,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let prevTabItem = NSMenuItem(title: "Select Previous Tab", action: #selector(NSWindow.selectPreviousTab(_:)), keyEquivalent: "\t")
         prevTabItem.keyEquivalentModifierMask = [.control, .shift]
         windowMenu.addItem(prevTabItem)
+        let moveToNewWindowItem = NSMenuItem(title: "Move Tab to New Window", action: #selector(moveCurrentTabToNewWindow(_:)), keyEquivalent: "")
+        moveToNewWindowItem.target = self
+        windowMenu.addItem(moveToNewWindowItem)
+        let closeOtherTabsItem = NSMenuItem(title: "Close Other Tabs", action: #selector(closeOtherTabs(_:)), keyEquivalent: "w")
+        closeOtherTabsItem.keyEquivalentModifierMask = [.command, .option]
+        closeOtherTabsItem.target = self
+        windowMenu.addItem(closeOtherTabsItem)
         windowMenu.addItem(NSMenuItem.separator())
         for tabIndex in 1...9 {
             let item = NSMenuItem(
@@ -476,11 +531,21 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(saveDocument(_:)), #selector(saveDocumentAs(_:)):
             // Enable whenever there is an active document window.
             return currentDocument() != nil
-        case #selector(copyFullPath(_:)), #selector(revealInFinder(_:)):
+        case #selector(copyFullPath(_:)), #selector(revealInFinder(_:)), #selector(openContainingFolder(_:)):
             return currentDocument()?.fileURL != nil
         case #selector(selectTabByIndexFromMenu(_:)):
             guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return false }
             return (window.tabbedWindows?.isEmpty == false) || window.isVisible
+        case #selector(moveCurrentTabToNewWindow(_:)), #selector(closeOtherTabs(_:)):
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return false }
+            return (window.tabbedWindows?.count ?? 1) > 1
+        case #selector(toggleHeadingOutline(_:)):
+            guard let editor = currentNativeEditorViewController() else {
+                menuItem.state = .off
+                return false
+            }
+            menuItem.state = editor.isHeadingOutlineVisibleForMenuState() ? .on : .off
+            return true
         case #selector(showPreferences(_:)):
             return true
         case #selector(toggleKeepRunning(_:)):

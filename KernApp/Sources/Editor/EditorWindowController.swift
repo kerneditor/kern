@@ -36,6 +36,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         self.init(window: window)
 
         window.delegate = self
+        NativeEditorAppearance.applyTheme(to: window)
 
         // Deterministic window sizing for UI tests and visual baselines.
         if isUITesting || testSize != nil {

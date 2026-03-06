@@ -8,6 +8,12 @@ final class NativeEditorPasteNormalizationTests: XCTestCase {
         let (_, textView) = makeController(markdown: "Hello")
         textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
 
+        guard let storage = textView.textStorage,
+              let contextFont = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont else {
+            XCTFail("Missing context font")
+            return
+        }
+
         let expectedFont = NSFont.systemFont(ofSize: 17, weight: .medium)
         let expectedColor = NSColor.labelColor
         textView.typingAttributes = [
@@ -28,12 +34,9 @@ final class NativeEditorPasteNormalizationTests: XCTestCase {
         let pastedRange = ns.range(of: "Pasted")
         XCTAssertNotEqual(pastedRange.location, NSNotFound)
 
-        guard let storage = textView.textStorage else {
-            XCTFail("Missing text storage")
-            return
-        }
         let pastedFont = storage.attribute(.font, at: pastedRange.location, effectiveRange: nil) as? NSFont
-        XCTAssertEqual(pastedFont?.pointSize ?? 0, expectedFont.pointSize, accuracy: 0.01)
+        XCTAssertEqual(pastedFont?.fontName, contextFont.fontName)
+        XCTAssertEqual(pastedFont?.pointSize ?? 0, contextFont.pointSize, accuracy: 0.01)
 
         let pastedColor = storage.attribute(.foregroundColor, at: pastedRange.location, effectiveRange: nil) as? NSColor
         XCTAssertNotNil(pastedColor)
@@ -47,6 +50,42 @@ final class NativeEditorPasteNormalizationTests: XCTestCase {
 
         textView._debugPastePlainStringForTests("a\r\nb\rc")
         XCTAssertEqual(textView.string, "a\nb\nc")
+    }
+
+    @MainActor
+    func testPlainPasteSanitizesContaminatedTypingAttributes() {
+        let (_, textView) = makeController(markdown: "Hello")
+        textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
+
+        guard let storage = textView.textStorage,
+              let contextFont = storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont else {
+            XCTFail("Missing context font")
+            return
+        }
+
+        textView.typingAttributes = [
+            .font: NSFont.systemFont(ofSize: 28, weight: .bold),
+            .foregroundColor: NSColor.black,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .link: URL(string: "https://example.com/contaminated")!,
+        ]
+
+        textView._debugPastePlainStringForTests(" world")
+
+        let ns = textView.string as NSString
+        let pastedRange = ns.range(of: "world")
+        XCTAssertNotEqual(pastedRange.location, NSNotFound)
+
+        let pastedFont = storage.attribute(.font, at: pastedRange.location, effectiveRange: nil) as? NSFont
+        XCTAssertEqual(pastedFont?.fontName, contextFont.fontName)
+        XCTAssertEqual(pastedFont?.pointSize ?? 0, contextFont.pointSize, accuracy: 0.01)
+
+        let pastedColor = storage.attribute(.foregroundColor, at: pastedRange.location, effectiveRange: nil) as? NSColor
+        XCTAssertTrue(pastedColor?.isEqual(NSColor.labelColor) ?? false)
+
+        let pastedUnderline = (storage.attribute(.underlineStyle, at: pastedRange.location, effectiveRange: nil) as? Int) ?? 0
+        XCTAssertEqual(pastedUnderline, 0)
+        XCTAssertNil(storage.attribute(.link, at: pastedRange.location, effectiveRange: nil))
     }
 
     @MainActor
@@ -85,6 +124,64 @@ final class NativeEditorPasteNormalizationTests: XCTestCase {
 
         let copied = textView._debugCopyMarkdownStringForCurrentSelectionForTests()
         XCTAssertEqual(copied, markdown)
+    }
+
+    @MainActor
+    func testBulkMarkdownPasteRehydratesWysiwygAfterFlush() {
+        let previousForceFull = getenv("KERN_FORCE_FULL_MARKDOWN_IMPORT").map { String(cString: $0) }
+        let previousForcePlain = getenv("KERN_FORCE_PLAIN_MARKDOWN_IMPORT").map { String(cString: $0) }
+        let previousAllowPlain = getenv("KERN_ALLOW_PLAIN_IMPORT_OVERRIDE").map { String(cString: $0) }
+        setenv("KERN_FORCE_FULL_MARKDOWN_IMPORT", "1", 1)
+        unsetenv("KERN_FORCE_PLAIN_MARKDOWN_IMPORT")
+        unsetenv("KERN_ALLOW_PLAIN_IMPORT_OVERRIDE")
+        defer {
+            if let previousForceFull {
+                setenv("KERN_FORCE_FULL_MARKDOWN_IMPORT", previousForceFull, 1)
+            } else {
+                unsetenv("KERN_FORCE_FULL_MARKDOWN_IMPORT")
+            }
+            if let previousForcePlain {
+                setenv("KERN_FORCE_PLAIN_MARKDOWN_IMPORT", previousForcePlain, 1)
+            } else {
+                unsetenv("KERN_FORCE_PLAIN_MARKDOWN_IMPORT")
+            }
+            if let previousAllowPlain {
+                setenv("KERN_ALLOW_PLAIN_IMPORT_OVERRIDE", previousAllowPlain, 1)
+            } else {
+                unsetenv("KERN_ALLOW_PLAIN_IMPORT_OVERRIDE")
+            }
+        }
+
+        let (vc, textView) = makeController(markdown: "")
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+
+        let pasted = """
+        ### Paste Heading
+
+        Paragraph with **bold** text.
+        """
+        textView._debugPastePlainStringForTests(pasted)
+
+        XCTAssertTrue(
+            textView.string.contains("**bold**"),
+            "Before export flush, bulk paste may still be raw markdown"
+        )
+
+        vc.flushPendingExport()
+
+        XCTAssertFalse(textView.string.contains("### Paste Heading"))
+        XCTAssertFalse(textView.string.contains("**bold**"))
+        XCTAssertTrue(textView.string.contains("Paste Heading"))
+        XCTAssertTrue(textView.string.contains("bold"))
+
+        guard let storage = textView.textStorage else {
+            XCTFail("Missing text storage")
+            return
+        }
+        let headingRange = (textView.string as NSString).range(of: "Paste Heading")
+        XCTAssertNotEqual(headingRange.location, NSNotFound)
+        let headingLevel = storage.attribute(.kernHeadingLevel, at: headingRange.location, effectiveRange: nil) as? Int
+        XCTAssertEqual(headingLevel, 3, "Heading metadata should be restored after rehydration")
     }
 
     // MARK: - Helpers

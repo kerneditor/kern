@@ -45,6 +45,47 @@ final class NativeEditorCodeBlockBackgroundSpacingTests: XCTestCase {
     }
 
     @MainActor
+    func testCodeBlockBackgroundDoesNotOverlapParagraphAbove() {
+        let md = """
+        Paragraph above the block.
+
+        ```javascript
+        console.log(\"hi\")
+        ```
+        """
+
+        let vc = NativeEditorViewController()
+        _ = vc.view
+        vc.stringValue = md
+
+        let window = hostInWindow(vc: vc, size: NSSize(width: 900, height: 650), appearance: .init(named: .aqua))
+        window.displayIfNeeded()
+
+        guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NSTextView else {
+            XCTFail("Missing NativeEditor.TextView")
+            return
+        }
+        guard let lm = textView.layoutManager, let tc = textView.textContainer, let storage = textView.textStorage else {
+            XCTFail("Missing TextKit components")
+            return
+        }
+
+        let ns = storage.string as NSString
+        let paragraphToken = ns.range(of: "Paragraph above the block.")
+        XCTAssertNotEqual(paragraphToken.location, NSNotFound)
+
+        let paragraphRange = ns.paragraphRange(for: NSRange(location: paragraphToken.location, length: 0))
+        let paragraphGlyphs = lm.glyphRange(forCharacterRange: paragraphRange, actualCharacterRange: nil)
+        var paragraphRect = lm.boundingRect(forGlyphRange: paragraphGlyphs, in: tc)
+        paragraphRect.origin.x += textView.textContainerOrigin.x
+        paragraphRect.origin.y += textView.textContainerOrigin.y
+
+        let blocks = codeBlockRects(in: textView)
+        XCTAssertEqual(blocks.count, 1, "Expected 1 fenced code block")
+        XCTAssertFalse(blocks[0].intersects(paragraphRect), "Code block background should not overlap the paragraph above")
+    }
+
+    @MainActor
     func testAdjacentCodeBlockBackgroundsDoNotOverlap() {
         let md = """
         ```javascript

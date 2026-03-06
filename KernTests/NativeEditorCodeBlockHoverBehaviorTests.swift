@@ -98,6 +98,60 @@ final class NativeEditorCodeBlockHoverBehaviorTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testHoverChromeRemainsVisibleWhenMovingOntoHoverCopyButton() {
+        let md = """
+        Intro
+
+        ```python
+        print(\"two\")
+        ```
+        """
+
+        let vc = NativeEditorViewController()
+        _ = vc.view
+        vc.stringValue = md
+
+        let window = hostInWindow(vc: vc, size: NSSize(width: 900, height: 650), appearance: .init(named: .darkAqua))
+        window.displayIfNeeded()
+
+        guard let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: vc.view) as? NativeMarkdownTextView else {
+            XCTFail("Missing NativeEditor.TextView")
+            return
+        }
+        guard let hoverCopyButton = findSubview(withAXIdentifier: "NativeEditor.CodeCopyButton.Hover", in: vc.view) as? NSButton,
+              let hoverChrome = findSubview(withAXIdentifier: "NativeEditor.CodeBlockChrome.Hover", in: vc.view) as? CodeBlockChromeView else {
+            XCTFail("Missing hover chrome")
+            return
+        }
+
+        let blocks = codeBlockRects(in: textView)
+        XCTAssertEqual(blocks.count, 1, "Expected 1 fenced code block")
+        guard let block = blocks.first else { return }
+
+        let hoverPoint = NSPoint(x: min(block.maxX - 6, max(block.minX + 6, block.midX)),
+                                 y: min(block.maxY - 6, max(block.minY + 6, block.midY)))
+        textView._debugSimulateHover(at: hoverPoint)
+
+        vc.view.layoutSubtreeIfNeeded()
+        vc.viewDidLayout()
+
+        XCTAssertFalse(hoverChrome.isHidden, "Hover chrome should be visible after hovering the block")
+
+        textView._debugSimulateHoverExit()
+        hoverChrome._debugSimulatePointerInside(true)
+
+        vc.view.layoutSubtreeIfNeeded()
+        vc.viewDidLayout()
+
+        XCTAssertFalse(hoverChrome.isHidden, "Hover chrome should stay visible when the pointer leaves the text view and enters the hover chrome")
+
+        NSPasteboard.general.clearContents()
+        hoverCopyButton.performClick(nil)
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+        XCTAssertTrue(copied.contains("print(\"two\")"), "Hover copy button should remain reachable after moving onto the button")
+    }
+
     // MARK: - Helpers
 
     @MainActor

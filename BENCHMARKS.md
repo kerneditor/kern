@@ -77,6 +77,16 @@ KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
   -destination 'platform=macOS' \
   -only-testing:KernTextKitTests/NativeEditorRenderPerformanceTests
 
+# Staged promotion slice parse scaling benchmark
+defaults write com.gradigit.kern.tests KERN_ENABLE_PERF_TESTS -bool YES
+defaults write com.gradigit.kern.tests KERN_STAGED_SLICE_BENCH_RUNS -int 7
+xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeMarkdownCodecPerformanceTests/testStagedPromotionSliceParseBenchmark
+defaults delete com.gradigit.kern.tests KERN_ENABLE_PERF_TESTS
+defaults delete com.gradigit.kern.tests KERN_STAGED_SLICE_BENCH_RUNS
+
 # Mermaid render-mode benchmark (rich vs ascii vs auto)
 defaults write com.gradigit.kern.tests KERN_ENABLE_MERMAID_MODE_BENCHMARKS -bool YES
 defaults write com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS -int 7
@@ -92,6 +102,7 @@ defaults delete com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS
 
 Benchmark artifacts are written to:
 - `benchmark-archive/mermaid-render-modes/`
+- `benchmark-archive/staged-slice-benchmark/`
 
 ### Cross-Editor Comparison
 
@@ -115,6 +126,27 @@ Benchmark artifacts are written to:
 # - Defaults: Zed hook required + styled_stable mode
 ./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --runs 10
 
+# Optional deterministic profile for full-fidelity stability studies
+./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --profile full-fidelity-stable --runs 10
+
+# Variance gate (example: ensure Kern full-fidelity stability, then compare against Zed)
+python3 scripts/benchmark-variance-gate.py \
+  --results benchmark-archive/full-fidelity-latest.json \
+  --editor Kern \
+  --metric full_fidelity_end_to_end_latency \
+  --max-p95-over-p50 1.10 \
+  --max-cv-pct 10 \
+  --max-failure-rate-pct 0 \
+  --max-timeouts 0 \
+  --max-failures 0
+
+python3 scripts/benchmark-variance-gate.py \
+  --results benchmark-archive/full-fidelity-latest.json \
+  --editor Kern \
+  --metric full_fidelity_end_to_end_latency \
+  --compare-editor Zed \
+  --max-p50-gap-ms 0
+
 # Fewer runs for quick comparison
 ./scripts/cross-editor-benchmark.sh --runs 5 --verbose
 
@@ -134,6 +166,21 @@ Benchmark artifacts are written to:
 ./scripts/observer-effect-benchmark.sh 10 test-fixtures/cross-editor-benchmark.md
 # (script forces --kern-open-metric-source probe for both variants)
 ```
+
+### Exploratory competitor compatibility notes (non-official roster)
+
+- **Date**: 2026-03-04
+- **Editor**: Typora 1.12.6 (macOS)
+- **Fixture**: `test-fixtures/native-editor-benchmark.md` (~3.6MB)
+- **Observed result**: Typora UI rejected the file with message: `The file is too large to render in Typora.`
+
+Implication:
+- Typora cannot currently participate in our large-fixture open-ready or full-fidelity apples-to-apples runs on this dataset.
+- For benchmark reporting, this is tracked as a **compatibility ceiling** (cannot render fixture), not as a latency number.
+
+Policy:
+- Keep Typora out of official roster latency claims (locked roster v1 unchanged).
+- If we include Typora in external comparisons, report as: **“cannot render benchmark fixture”** with the fixture size and date.
 
 #### Phase 2: Swift CLI core runner
 
@@ -197,7 +244,13 @@ python3 scripts/bench-regression-check.py --baseline baseline.json --latest late
 - **Full-fidelity aside defaults** (`--suite benchmark_full_fidelity`):
   - `--zed-bench-hook required`
   - `--zed-ready-mode styled_stable`
-  - `--kern-open-metric-source probe`
+  - `--kern-open-metric-source wow`
+- **Deterministic profile** (`--profile full-fidelity-stable`, full-fidelity suite only):
+  - `KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS=1000000`
+  - `KERN_STAGED_PROMOTION_CONTEXT_CHARS=1000`
+  - `KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS=2`
+  - `KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS=2`
+  - `KERN_STAGED_PROMOTION_TURBO_IDLE_MS=120`
 - **Zed CLI override**: `KERN_BENCH_ZED_CLI=/abs/path/to/zed-wrapper` lets you route benchmark launches to a forked Zed build without changing roster definitions
 - **WOW instrumentation toggle**: `--disable-wow-metrics` allows observer-effect comparison runs
 - **Kern open metric source**: `--kern-open-metric-source auto|wow|probe` controls whether Kern open-ready uses WOW-derived phase timings or external probe timing

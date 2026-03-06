@@ -35,12 +35,14 @@ final class NativeEditorTypographySpacingTests: XCTestCase {
             switch kind {
             case .paragraph:
                 paragraphSpacingChecks += 1
-                XCTAssertEqual(style.paragraphSpacingBefore, 2, accuracy: 0.01)
-                XCTAssertEqual(style.paragraphSpacing, 2, accuracy: 0.01)
+                XCTAssertEqual(style.paragraphSpacingBefore, 5, accuracy: 0.01)
+                XCTAssertEqual(style.paragraphSpacing, 5, accuracy: 0.01)
+                XCTAssertGreaterThan(style.lineHeightMultiple, 1.0)
             case .bullet, .task, .ordered:
                 listSpacingChecks += 1
-                XCTAssertEqual(style.paragraphSpacingBefore, 2, accuracy: 0.01)
-                XCTAssertEqual(style.paragraphSpacing, 2, accuracy: 0.01)
+                XCTAssertEqual(style.paragraphSpacingBefore, 5, accuracy: 0.01)
+                XCTAssertEqual(style.paragraphSpacing, 5, accuracy: 0.01)
+                XCTAssertGreaterThan(style.lineHeightMultiple, 1.0)
             default:
                 break
             }

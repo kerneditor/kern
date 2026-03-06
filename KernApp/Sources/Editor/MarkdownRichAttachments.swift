@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 
-@MainActor
 final class MarkdownImageAttachment: NSTextAttachment {
     enum LoadState {
         case loading
@@ -23,6 +22,7 @@ final class MarkdownImageAttachment: NSTextAttachment {
     private var displayWidthLimit: CGFloat = 520
     private weak var hostView: NSView?
     private var isLoading = false
+    private var needsLayoutRefreshWhenHostViewBinds = false
 
     nonisolated(unsafe) private static let cache: NSCache<NSURL, NSImage> = {
         let cache = NSCache<NSURL, NSImage>()
@@ -169,24 +169,67 @@ final class MarkdownImageAttachment: NSTextAttachment {
     }
 
     private func requestDisplayUpdate() {
-        guard let hostView else { return }
-        DispatchQueue.main.async {
-            hostView.needsDisplay = true
-            if let textView = hostView as? NSTextView {
-                guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
-                let visibleRectInContainer = textView.visibleRect.offsetBy(
-                    dx: -textView.textContainerOrigin.x,
-                    dy: -textView.textContainerOrigin.y
-                )
-                let visibleGlyphRange = lm.glyphRange(forBoundingRect: visibleRectInContainer, in: tc)
-                lm.invalidateDisplay(forGlyphRange: visibleGlyphRange)
-            }
+        guard hostView != nil else {
+            needsLayoutRefreshWhenHostViewBinds = true
+            return
         }
+
+        if Thread.isMainThread {
+            requestDisplayUpdateOnMainThread()
+        } else {
+            performSelector(onMainThread: #selector(requestDisplayUpdateOnMainThread), with: nil, waitUntilDone: false)
+        }
+    }
+
+    @objc
+    private func requestDisplayUpdateOnMainThread() {
+        guard let hostView else { return }
+        hostView.needsDisplay = true
+        guard let textView = hostView as? NSTextView,
+              let lm = textView.layoutManager,
+              let tc = textView.textContainer,
+              let storage = textView.textStorage else { return }
+
+        let fullRange = NSRange(location: 0, length: storage.length)
+        var attachmentRanges: [NSRange] = []
+        storage.enumerateAttribute(.attachment, in: fullRange, options: []) { value, range, _ in
+            guard let attachment = value as? MarkdownImageAttachment,
+                  attachment === self else { return }
+            attachmentRanges.append(range)
+        }
+
+        if attachmentRanges.isEmpty {
+            attachmentRanges = [fullRange]
+        }
+
+        for range in attachmentRanges {
+            lm.invalidateLayout(forCharacterRange: range, actualCharacterRange: nil)
+            let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            lm.invalidateDisplay(forGlyphRange: glyphRange)
+            storage.edited(.editedAttributes, range: range, changeInLength: 0)
+        }
+
+        lm.ensureLayout(for: tc)
+        textView.invalidateIntrinsicContentSize()
+        textView.layoutSubtreeIfNeeded()
+        textView.enclosingScrollView?.layoutSubtreeIfNeeded()
+        let visibleRectInContainer = textView.visibleRect.offsetBy(
+            dx: -textView.textContainerOrigin.x,
+            dy: -textView.textContainerOrigin.y
+        )
+        let visibleGlyphRange = lm.glyphRange(forBoundingRect: visibleRectInContainer, in: tc)
+        lm.invalidateDisplay(forGlyphRange: visibleGlyphRange)
     }
 
     fileprivate func didDraw(in view: NSView?) {
         if let view {
+            let didBindNewHostView = hostView == nil || hostView !== view
             hostView = view
+            if didBindNewHostView, needsLayoutRefreshWhenHostViewBinds {
+                needsLayoutRefreshWhenHostViewBinds = false
+                NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(requestDisplayUpdateOnMainThread), object: nil)
+                perform(#selector(requestDisplayUpdateOnMainThread), with: nil, afterDelay: 0)
+            }
         }
     }
 
@@ -361,7 +404,6 @@ private final class MarkdownImageAttachmentCell: NSTextAttachmentCell {
     }
 }
 
-@MainActor
 final class MarkdownMathBlockAttachment: NSTextAttachment {
     let sourceMarkdown: String
     let displayText: String
@@ -464,7 +506,6 @@ private final class MarkdownMathBlockAttachmentCell: NSTextAttachmentCell {
     }
 }
 
-@MainActor
 final class MarkdownMermaidAttachment: NSTextAttachment {
     struct Node {
         let id: String

@@ -51,8 +51,17 @@ let requiredRosterV1: [EditorDefinition] = [
           helperProcessPrefix: nil, requiredForOfficial: true),
 ]
 
+/// Optional editors available for exploratory comparisons only (not part of official roster claims).
+let optionalEditors: [EditorDefinition] = [
+    .init(displayName: "Typora", appName: "Typora",
+          bundleIdentifier: "abnerworks.Typora", processName: "Typora",
+          architecture: "Native (WebKit hybrid)", isElectron: false,
+          cliLaunchCommand: nil, cleanLaunchArgs: ["-ApplePersistenceIgnoreState", "YES"],
+          helperProcessPrefix: nil, requiredForOfficial: false),
+]
+
 /// Alias retained for call sites.
-let knownEditors: [EditorDefinition] = requiredRosterV1
+let knownEditors: [EditorDefinition] = requiredRosterV1 + optionalEditors
 
 func requiredRosterNames() -> [String] {
     requiredRosterV1.map(\.displayName)

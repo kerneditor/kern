@@ -73,6 +73,38 @@ final class NativeEditorSnapshotTests: XCTestCase {
     }
 
     @MainActor
+    func testThemeAndFontPresetSnapshots() throws {
+        try TestGates.skipUnlessSnapshots()
+
+        let fixture = try loadFixture(name: "basic.in.md")
+        let scenarios: [(theme: NativeEditorThemeMode, family: NativeEditorFontFamilyPreset, appearance: NSAppearance?)] = [
+            (.githubDark, .inter, .init(named: .darkAqua)),
+            (.solarizedLight, .sourceSerif, .init(named: .aqua)),
+        ]
+
+        try withSnapshotTesting(record: snapshotRecordMode) {
+            for scenario in scenarios {
+                try withNativeEditorDefaults(profile: .gfmDefault) {
+                    let defaults = UserDefaults.standard
+                    defaults.set(scenario.theme.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+                    defaults.set(scenario.family.rawValue, forKey: NativeEditorAppearance.fontFamilyKey)
+
+                    let view = makeSnapshotView(
+                        fixture: fixture,
+                        size: NSSize(width: 900, height: 650),
+                        appearance: scenario.appearance
+                    )
+                    assertSnapshot(
+                        of: view,
+                        as: Snapshotting<NSView, NSImage>.image(size: view.bounds.size),
+                        named: "theme-\(scenario.theme.rawValue)-font-\(scenario.family.rawValue)"
+                    )
+                }
+            }
+        }
+    }
+
+    @MainActor
     func testFullSpecVisualFixture_RenderPipelineKeepsAttachments() throws {
         let fixture = try loadFixture(name: "full-spec-visual.fixture.md")
         let vc = NativeEditorViewController()
@@ -179,11 +211,24 @@ final class NativeEditorSnapshotTests: XCTestCase {
         let defaults = UserDefaults.standard
         let keys = [
             "nativeEditor.exportDialect",
+            "nativeEditor.gfmExtensionExportStrategy",
             "nativeEditor.taskRendering",
             "nativeEditor.orderedTasksEnabled",
             "nativeEditor.headingCheckboxesEnabled",
             "nativeEditor.orderedListNumbering",
+            NativeEditorSyntaxVisibilityMode.userDefaultsKey,
             "nativeEditor.mermaidRenderMode",
+            "nativeEditor.checkboxHitTarget",
+            "nativeEditor.syntaxHighlightingEnabled",
+            "nativeEditor.paragraphBlockSeparationEnabled",
+            "nativeEditor.headingOutlineVisible",
+            NativeEditorAppearance.themeModeKey,
+            NativeEditorAppearance.customThemeJSONKey,
+            NativeEditorAppearance.fontFamilyKey,
+            NativeEditorAppearance.customFontFamilyKey,
+            NativeEditorAppearance.fontDesignKey,
+            NativeEditorAppearance.fontSizeKey,
+            NativeEditorAppearance.tableOverflowModeKey,
         ]
 
         let previous: [String: Any?] = keys.reduce(into: [:]) { acc, k in
@@ -202,18 +247,44 @@ final class NativeEditorSnapshotTests: XCTestCase {
         switch profile {
         case .gfmDefault:
             defaults.set("gfm", forKey: "nativeEditor.exportDialect")
+            defaults.set("preserve", forKey: "nativeEditor.gfmExtensionExportStrategy")
             defaults.set("gfm", forKey: "nativeEditor.taskRendering")
             defaults.set(false, forKey: "nativeEditor.orderedTasksEnabled")
             defaults.set(false, forKey: "nativeEditor.headingCheckboxesEnabled")
             defaults.set("gfmDefault", forKey: "nativeEditor.orderedListNumbering")
+            defaults.set(NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue, forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
             defaults.set("rich", forKey: "nativeEditor.mermaidRenderMode")
+            defaults.set("glyph", forKey: "nativeEditor.checkboxHitTarget")
+            defaults.set(true, forKey: "nativeEditor.syntaxHighlightingEnabled")
+            defaults.set(true, forKey: "nativeEditor.paragraphBlockSeparationEnabled")
+            defaults.set(false, forKey: "nativeEditor.headingOutlineVisible")
+            defaults.set(NativeEditorThemeMode.system.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+            defaults.removeObject(forKey: NativeEditorAppearance.customThemeJSONKey)
+            defaults.set(NativeEditorFontFamilyPreset.system.rawValue, forKey: NativeEditorAppearance.fontFamilyKey)
+            defaults.removeObject(forKey: NativeEditorAppearance.customFontFamilyKey)
+            defaults.set(NativeEditorFontDesign.system.rawValue, forKey: NativeEditorAppearance.fontDesignKey)
+            defaults.set(16, forKey: NativeEditorAppearance.fontSizeKey)
+            defaults.set(NativeEditorTableOverflowMode.wrap.rawValue, forKey: NativeEditorAppearance.tableOverflowModeKey)
         case .kernExtensions:
             defaults.set("kern", forKey: "nativeEditor.exportDialect")
+            defaults.set("preserve", forKey: "nativeEditor.gfmExtensionExportStrategy")
             defaults.set("kern", forKey: "nativeEditor.taskRendering")
             defaults.set(true, forKey: "nativeEditor.orderedTasksEnabled")
             defaults.set(true, forKey: "nativeEditor.headingCheckboxesEnabled")
             defaults.set("preserveTyped", forKey: "nativeEditor.orderedListNumbering")
+            defaults.set(NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue, forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
             defaults.set("rich", forKey: "nativeEditor.mermaidRenderMode")
+            defaults.set("glyph", forKey: "nativeEditor.checkboxHitTarget")
+            defaults.set(true, forKey: "nativeEditor.syntaxHighlightingEnabled")
+            defaults.set(true, forKey: "nativeEditor.paragraphBlockSeparationEnabled")
+            defaults.set(false, forKey: "nativeEditor.headingOutlineVisible")
+            defaults.set(NativeEditorThemeMode.system.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+            defaults.removeObject(forKey: NativeEditorAppearance.customThemeJSONKey)
+            defaults.set(NativeEditorFontFamilyPreset.system.rawValue, forKey: NativeEditorAppearance.fontFamilyKey)
+            defaults.removeObject(forKey: NativeEditorAppearance.customFontFamilyKey)
+            defaults.set(NativeEditorFontDesign.system.rawValue, forKey: NativeEditorAppearance.fontDesignKey)
+            defaults.set(16, forKey: NativeEditorAppearance.fontSizeKey)
+            defaults.set(NativeEditorTableOverflowMode.wrap.rawValue, forKey: NativeEditorAppearance.tableOverflowModeKey)
         }
 
         try f()
@@ -284,7 +355,8 @@ final class NativeEditorSnapshotTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
 
-        if let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: view) as? NSTextView {
+        let textView = findSubview(withAXIdentifier: "NativeEditor.TextView", in: view) as? NSTextView
+        if let textView {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
             textView.scrollRangeToVisible(NSRange(location: 0, length: 0))
         }
@@ -295,8 +367,115 @@ final class NativeEditorSnapshotTests: XCTestCase {
             scrollView.reflectScrolledClipView(clip)
         }
 
+        waitForSnapshotRenderStability(in: view, textView: textView)
+
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
+    }
+
+    @MainActor
+    private func waitForSnapshotRenderStability(in view: NSView, textView: NSTextView?) {
+        struct Signature: Equatable {
+            let attachmentCount: Int
+            let attachmentsWithCell: Int
+            let localImageCount: Int
+            let pendingLocalImageCount: Int
+            let documentHeight: CGFloat
+        }
+
+        func signature(for textView: NSTextView?) -> Signature {
+            guard let textView,
+                  let storage = textView.textStorage else {
+                return Signature(
+                    attachmentCount: 0,
+                    attachmentsWithCell: 0,
+                    localImageCount: 0,
+                    pendingLocalImageCount: 0,
+                    documentHeight: 0
+                )
+            }
+
+            var attachmentCount = 0
+            var attachmentsWithCell = 0
+            var localImageCount = 0
+            var pendingLocalImageCount = 0
+            storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length), options: []) { value, _, _ in
+                guard let attachment = value as? NSTextAttachment else { return }
+                attachmentCount += 1
+                if attachment.attachmentCell != nil {
+                    attachmentsWithCell += 1
+                }
+                if let imageAttachment = attachment as? MarkdownImageAttachment,
+                   imageAttachment.resolvedURL?.isFileURL == true {
+                    localImageCount += 1
+                    if !imageAttachment.debugHasRenderedImage,
+                       imageAttachment.loadState == .loading {
+                        pendingLocalImageCount += 1
+                    }
+                }
+            }
+
+            let documentHeight: CGFloat
+            if let scrollView = textView.enclosingScrollView {
+                documentHeight = scrollView.documentView?.bounds.height ?? 0
+            } else {
+                documentHeight = textView.bounds.height
+            }
+
+            return Signature(
+                attachmentCount: attachmentCount,
+                attachmentsWithCell: attachmentsWithCell,
+                localImageCount: localImageCount,
+                pendingLocalImageCount: pendingLocalImageCount,
+                documentHeight: documentHeight
+            )
+        }
+
+        let deadline = Date().addingTimeInterval(1.2)
+        var previous: Signature?
+        var stableTicks = 0
+        var localImagesReadyAt: Date?
+
+        while Date() < deadline {
+            view.layoutSubtreeIfNeeded()
+            view.displayIfNeeded()
+
+            let current = signature(for: textView)
+            if current.pendingLocalImageCount > 0 {
+                localImagesReadyAt = nil
+                previous = current
+                stableTicks = 0
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                continue
+            }
+            if current.localImageCount > 0, localImagesReadyAt == nil {
+                localImagesReadyAt = Date()
+            }
+            if current == previous {
+                stableTicks += 1
+            } else {
+                stableTicks = 0
+                previous = current
+            }
+
+            if let localImagesReadyAt,
+               Date().timeIntervalSince(localImagesReadyAt) < 0.18 {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+                continue
+            }
+
+            let requiredStableTicks = current.localImageCount > 0 ? 4 : 2
+            if stableTicks >= requiredStableTicks {
+                if current.attachmentCount > 0 {
+                    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+                    view.layoutSubtreeIfNeeded()
+                    view.displayIfNeeded()
+                }
+                return
+            }
+
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
     }
 
     @MainActor

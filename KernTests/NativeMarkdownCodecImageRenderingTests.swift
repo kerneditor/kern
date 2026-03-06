@@ -89,6 +89,83 @@ final class NativeMarkdownCodecImageRenderingTests: XCTestCase {
         XCTAssertTrue(sawRemote, "Expected remote image attachment with link target")
     }
 
+    @MainActor
+    func testAsyncLocalImageLoadInvalidatesLayoutAndExpandsRenderedBlock() throws {
+        let sourceImage = repoRoot()
+            .appendingPathComponent("test-fixtures", isDirectory: true)
+            .appendingPathComponent("screenshots", isDirectory: true)
+            .appendingPathComponent("01-default-sample.png", isDirectory: false)
+
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kern-image-layout-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let copiedImage = tempDir.appendingPathComponent("sample.png", isDirectory: false)
+        try FileManager.default.copyItem(at: sourceImage, to: copiedImage)
+
+        let markdownURL = tempDir.appendingPathComponent("fixture.md", isDirectory: false)
+        let markdown = "![Local sample](sample.png)\n\nTail\n"
+        try markdown.write(to: markdownURL, atomically: true, encoding: .utf8)
+
+        let vc = NativeEditorViewController()
+        _ = vc.view
+        vc.documentURL = markdownURL
+        vc.stringValue = markdown
+        let window = hostInWindow(vc: vc, size: NSSize(width: 960, height: 640), appearance: .init(named: .darkAqua))
+        window.displayIfNeeded()
+
+        let textView = vc.textViewForTesting()
+        guard let textStorage = textView.textStorage,
+              let textContainer = textView.textContainer,
+              let layoutManager = textView.layoutManager,
+              let attachment = collectImageAttachments(in: textStorage).first else {
+            XCTFail("Missing local image attachment in rendered editor")
+            return
+        }
+
+        layoutManager.ensureLayout(for: textContainer)
+        XCTAssertEqual(attachment.loadState, .loading, "Fresh local image should begin in loading state before async decode finishes")
+        let initialBounds = attachmentBounds(
+            for: attachment,
+            at: 0,
+            in: textView,
+            layoutManager: layoutManager,
+            textContainer: textContainer
+        )
+
+        let deadline = Date().addingTimeInterval(2.0)
+        while Date() < deadline, !attachment.debugHasRenderedImage {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            window.displayIfNeeded()
+            layoutManager.ensureLayout(for: textContainer)
+        }
+
+        XCTAssertTrue(attachment.debugHasRenderedImage, "Local image should eventually decode")
+        XCTAssertEqual(attachment.loadState, .ready)
+
+        let settleDeadline = Date().addingTimeInterval(0.4)
+        var finalBounds = initialBounds
+        while Date() < settleDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            window.displayIfNeeded()
+            layoutManager.ensureLayout(for: textContainer)
+            finalBounds = attachmentBounds(
+                for: attachment,
+                at: 0,
+                in: textView,
+                layoutManager: layoutManager,
+                textContainer: textContainer
+            )
+        }
+
+        XCTAssertGreaterThan(
+            finalBounds.height,
+            initialBounds.height + 80,
+            "Attachment bounds should expand after the async local image load invalidates placeholder bounds"
+        )
+    }
+
     // MARK: - Helpers
 
     private func collectImageAttachments(in attributed: NSAttributedString) -> [MarkdownImageAttachment] {
@@ -106,5 +183,38 @@ final class NativeMarkdownCodecImageRenderingTests: XCTestCase {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KernTests
             .deletingLastPathComponent() // repo root
+    }
+
+    @MainActor
+    private func hostInWindow(vc: NSViewController, size: NSSize, appearance: NSAppearance?) -> NSWindow {
+        let rect = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: rect, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = NSColor.windowBackgroundColor
+        window.appearance = appearance
+        window.contentViewController = vc
+        window.setFrame(rect, display: true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    @MainActor
+    private func attachmentBounds(
+        for attachment: MarkdownImageAttachment,
+        at location: Int,
+        in textView: NSTextView,
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer
+    ) -> NSRect {
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: NSRange(location: location, length: 1), actualCharacterRange: nil)
+        let lineFragment = glyphRange.length > 0
+            ? layoutManager.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: nil)
+            : NSRect(origin: .zero, size: textContainer.containerSize)
+        return attachment.attachmentBounds(
+            for: textContainer,
+            proposedLineFragment: lineFragment,
+            glyphPosition: .zero,
+            characterIndex: location
+        )
     }
 }

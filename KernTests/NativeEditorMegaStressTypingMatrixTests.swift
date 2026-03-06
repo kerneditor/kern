@@ -58,8 +58,13 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         "nativeEditor.orderedTasksEnabled",
         "nativeEditor.headingCheckboxesEnabled",
         "nativeEditor.orderedListNumbering",
+        NativeEditorSyntaxVisibilityMode.userDefaultsKey,
         "nativeEditor.mermaidRenderMode",
         "nativeEditor.checkboxHitTarget",
+        NativeEditorAppearance.themeModeKey,
+        NativeEditorAppearance.fontDesignKey,
+        NativeEditorAppearance.fontSizeKey,
+        NativeEditorAppearance.tableOverflowModeKey,
         MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey,
     ]
 
@@ -756,8 +761,10 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     "nativeEditor.orderedTasksEnabled": false,
                     "nativeEditor.headingCheckboxesEnabled": false,
                     "nativeEditor.orderedListNumbering": "gfmDefault",
+                    NativeEditorSyntaxVisibilityMode.userDefaultsKey: NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue,
                     "nativeEditor.mermaidRenderMode": "rich",
                     "nativeEditor.checkboxHitTarget": "glyph",
+                    NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
                     MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
                 ]
             ),
@@ -770,8 +777,26 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     "nativeEditor.orderedTasksEnabled": true,
                     "nativeEditor.headingCheckboxesEnabled": true,
                     "nativeEditor.orderedListNumbering": "preserveTyped",
+                    NativeEditorSyntaxVisibilityMode.userDefaultsKey: NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue,
                     "nativeEditor.mermaidRenderMode": "rich",
                     "nativeEditor.checkboxHitTarget": "marker",
+                    NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                    MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
+                ]
+            ),
+            .init(
+                name: "gfm-hybrid",
+                defaults: [
+                    "nativeEditor.exportDialect": "gfm",
+                    "nativeEditor.gfmExtensionExportStrategy": "preserve",
+                    "nativeEditor.taskRendering": "gfm",
+                    "nativeEditor.orderedTasksEnabled": false,
+                    "nativeEditor.headingCheckboxesEnabled": false,
+                    "nativeEditor.orderedListNumbering": "gfmDefault",
+                    NativeEditorSyntaxVisibilityMode.userDefaultsKey: NativeEditorSyntaxVisibilityMode.hybrid.rawValue,
+                    "nativeEditor.mermaidRenderMode": "rich",
+                    "nativeEditor.checkboxHitTarget": "glyph",
+                    NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
                     MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
                 ]
             ),
@@ -789,6 +814,10 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         let taskRenderingModes = ["gfm", "kern"]
         let bools = [false, true]
         let orderedNumberingModes = ["gfmDefault", "preserveTyped"]
+        let syntaxModes = [
+            NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue,
+            NativeEditorSyntaxVisibilityMode.hybrid.rawValue,
+        ]
         let mermaidModes = ["rich", "ascii", "auto"]
         let checkboxHitTargets = ["glyph", "marker"]
 
@@ -798,37 +827,42 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     for orderedTasks in bools {
                         for headingCheckboxes in bools {
                             for orderedNumbering in orderedNumberingModes {
-                                for mermaidMode in mermaidModes {
-                                    for checkboxHitTarget in checkboxHitTargets {
-                                        for remoteImages in bools {
-                                            let name = [
-                                                "dialect=\(dialect)",
-                                                "gfmExt=\(gfmStrategy)",
-                                                "task=\(taskRendering)",
-                                                "orderedTasks=\(orderedTasks ? "1" : "0")",
-                                                "headingTasks=\(headingCheckboxes ? "1" : "0")",
-                                                "numbering=\(orderedNumbering)",
-                                                "mermaid=\(mermaidMode)",
-                                                "hit=\(checkboxHitTarget)",
-                                                "remoteImages=\(remoteImages ? "1" : "0")",
-                                            ].joined(separator: ",")
+                                for syntaxMode in syntaxModes {
+                                    for mermaidMode in mermaidModes {
+                                        for checkboxHitTarget in checkboxHitTargets {
+                                            for remoteImages in bools {
+                                                let name = [
+                                                    "dialect=\(dialect)",
+                                                    "gfmExt=\(gfmStrategy)",
+                                                    "task=\(taskRendering)",
+                                                    "orderedTasks=\(orderedTasks ? "1" : "0")",
+                                                    "headingTasks=\(headingCheckboxes ? "1" : "0")",
+                                                    "numbering=\(orderedNumbering)",
+                                                    "syntax=\(syntaxMode)",
+                                                    "mermaid=\(mermaidMode)",
+                                                    "hit=\(checkboxHitTarget)",
+                                                    "remoteImages=\(remoteImages ? "1" : "0")",
+                                                ].joined(separator: ",")
 
-                                            out.append(
-                                                .init(
-                                                    name: name,
-                                                    defaults: [
-                                                        "nativeEditor.exportDialect": dialect,
-                                                        "nativeEditor.gfmExtensionExportStrategy": gfmStrategy,
-                                                        "nativeEditor.taskRendering": taskRendering,
-                                                        "nativeEditor.orderedTasksEnabled": orderedTasks,
-                                                        "nativeEditor.headingCheckboxesEnabled": headingCheckboxes,
-                                                        "nativeEditor.orderedListNumbering": orderedNumbering,
-                                                        "nativeEditor.mermaidRenderMode": mermaidMode,
-                                                        "nativeEditor.checkboxHitTarget": checkboxHitTarget,
-                                                        MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: remoteImages,
-                                                    ]
+                                                out.append(
+                                                    .init(
+                                                        name: name,
+                                                        defaults: [
+                                                            "nativeEditor.exportDialect": dialect,
+                                                            "nativeEditor.gfmExtensionExportStrategy": gfmStrategy,
+                                                            "nativeEditor.taskRendering": taskRendering,
+                                                            "nativeEditor.orderedTasksEnabled": orderedTasks,
+                                                            "nativeEditor.headingCheckboxesEnabled": headingCheckboxes,
+                                                            "nativeEditor.orderedListNumbering": orderedNumbering,
+                                                            NativeEditorSyntaxVisibilityMode.userDefaultsKey: syntaxMode,
+                                                            "nativeEditor.mermaidRenderMode": mermaidMode,
+                                                            "nativeEditor.checkboxHitTarget": checkboxHitTarget,
+                                                            NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                                                            MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: remoteImages,
+                                                        ]
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
                                 }

@@ -40,11 +40,28 @@ enum GFMHeadingSlugger {
 /// paragraph in the editor's attributed string.
 struct HeadingAnchorIndex {
     static func make(from attributed: NSAttributedString) -> [String: Int] {
+        HeadingOutlineIndex.make(from: attributed).reduce(into: [:]) { acc, entry in
+            if acc[entry.slug] == nil {
+                acc[entry.slug] = entry.paragraphLocation
+            }
+        }
+    }
+}
+
+struct HeadingOutlineEntry: Equatable {
+    let slug: String
+    let title: String
+    let level: Int
+    let paragraphLocation: Int
+}
+
+struct HeadingOutlineIndex {
+    static func make(from attributed: NSAttributedString) -> [HeadingOutlineEntry] {
         let ns = attributed.string as NSString
         var idx = 0
 
         var counts: [String: Int] = [:]
-        var out: [String: Int] = [:]
+        var out: [HeadingOutlineEntry] = []
 
         while idx < ns.length {
             let paraRange = ns.paragraphRange(for: NSRange(location: idx, length: 0))
@@ -64,9 +81,15 @@ struct HeadingAnchorIndex {
                         let n = counts[base] ?? 0
                         let slug = (n == 0) ? base : "\(base)-\(n)"
                         counts[base] = n + 1
-                        if out[slug] == nil {
-                            out[slug] = paraRange.location
-                        }
+                        let levelRaw = (attributed.attribute(.kernHeadingLevel, at: paraRange.location, effectiveRange: nil) as? Int) ?? 1
+                        out.append(
+                            HeadingOutlineEntry(
+                                slug: slug,
+                                title: body,
+                                level: max(1, min(6, levelRaw)),
+                                paragraphLocation: paraRange.location
+                            )
+                        )
                     }
                 }
             }
@@ -104,4 +127,3 @@ struct HeadingAnchorIndex {
         return attributed.attributedSubstring(from: bodyRange).string
     }
 }
-

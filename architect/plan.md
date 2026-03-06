@@ -1,308 +1,296 @@
-# Kern Implementation Plan
+# Research + Master Plan (Mode 2 Refined): Kern 500ms Open-Ready & Beat-Zed Program
+Date: 2026-02-22
+Mode: forging-plans / Mode 2 (finalized)
+Owner: kern-editor
 
-Build a native macOS WYSIWYG markdown editor: Swift + AppKit + WKWebView + Milkdown Crepe.
 
----
+## Execution Checklist
+- [x] Phase 0 — Baseline lock + statistical protocol
+- [x] Phase 1 — Zed fork + bench hook integration
+- [x] Phase 2 — Benchmark hardening + methodology finalization
+- [x] Phase 3 — Kern vs Zed benchmark matrix
+- [x] Phase 4 — Kern 500ms optimization track
+- [x] Phase 5 — Optimization backlog formalization
+- [x] Phase 6 — Regression-safe implementation loop
+- [x] Phase 7 — Bug/regression + new-gap discovery loop
+- [x] Phase 8 — Final master run + sign-off
 
-## Phase 1: CoreEditor (PoC Gate 1)
+## Executive Summary
+This is a two-track program:
+- **Track A (methodology credibility):** apples-to-apples Kern vs Zed via a deterministic Zed bench hook + hardened benchmark harness.
+- **Track B (product performance):** drive Kern `benchmark_open_ready` to **~500ms p50** on the target fixture regardless of Zed’s result.
 
-Build standalone Milkdown Crepe HTML file. Test in Safari.
+The critical insight is sequencing: benchmark correctness and anti-gaming guardrails must land before optimization claims. Then open-path optimization proceeds with instrumentation-first, viewport-first, and regression-safe rollout.
 
-### Files to create
-
-```
-CoreEditor/
-├── package.json
-├── tsconfig.json
-├── vite.config.mts
-├── index.html
-└── src/
-    ├── main.ts
-    ├── bridge.ts
-    ├── mermaid.ts
-    └── themes/
-        └── kern.css
-```
-
-### Steps
-
-1. Create `CoreEditor/package.json` — exact pins: `@milkdown/crepe@7.18.0`, `@milkdown/utils@7.18.0`, `mermaid@^11`. Dev: `vite@^6`, `vite-plugin-singlefile@^2`, `typescript@^5`. Type `"module"`, private.
-2. Create `tsconfig.json` — ES2022, ESNext, strict, bundler moduleResolution, `skipLibCheck: true`
-3. Create `vite.config.mts` — `viteSingleFile({ removeViteModuleLoader: true })`, target `safari17`
-4. Create `index.html` — `<div id="editor">`, module script tag (Vite dev), `overflow: hidden` on body, `overflow-y: auto` on `#editor`
-5. `npm install` → inspect `node_modules/@milkdown/crepe/lib/theme/` to determine actual CSS export paths. Try standard imports first: `@milkdown/crepe/theme/common/style.css` + `@milkdown/crepe/theme/crepe/style.css`. If imports fail, fall back to defining all theme variables in kern.css
-6. Create `src/main.ts` — Crepe init, bridge setup, mermaid setup, SAMPLE_MARKDOWN for dev mode, error reporting to Swift. **Wrap in `async function init()` (no top-level await)**
-7. Create `src/bridge.ts` — `window.kern.*` API. **Use 2-param `markdownUpdated` callback**: `(ctx, markdown)` (Crepe `on()` passes 2 args, not 3). Add manual dedup via closure variable
-8. Create `src/mermaid.ts` — dynamic `import('mermaid')` on first mermaid block detected (lazy load). DOM observer + `mermaid.render()`. Wrap in try/catch for invalid syntax (show error inline)
-9. Create `src/themes/kern.css` — macOS system fonts (SF Pro Text/Display/Mono), Notion-like spacing, light/dark color variables via `[data-theme]` selectors + `@media (prefers-color-scheme: dark)`, responsive at 640px
-10. `npm run build` → verify `dist/index.html` works in Safari
-11. **Verify actual scroll container**: inspect DOM to find which element scrolls (`.milkdown`, `.editor`, `#editor`, or `document.documentElement`). Update bridge scroll methods accordingly
-12. **Test `replaceAll(md)` vs `replaceAll(md, true)`** (flush param): determine which one cleanly resets editor state for tab switching
-
-### API corrections (from challenge review)
-
-- **`markdownUpdated` uses 2 params with Crepe `on()`**: `listener.markdownUpdated((ctx, markdown) => ...)`. The 3-param version `(ctx, markdown, prevMarkdown)` is for the low-level listener plugin only. Using 3 params with Crepe `on()` would leave `prevMarkdown` as `undefined`
-- **CSS imports**: Try the standard documented paths first. The claimed "7.18.0 CSS export bug" is unverified — it may be wrong. If standard imports work, use them. If not, define color variables manually in kern.css
-- **No top-level await**: The vite-plugin-singlefile inlined output loses module semantics. Wrap in `async function init() { ... }; init()`
-- **Mermaid via dynamic import**: Use `const mermaid = await import('mermaid')` to avoid bundling ~1MB eagerly. Note: vite-plugin-singlefile may inline it anyway — test this. If it does inline, accept the ~1MB cost (spec allows it)
-
-### Sample markdown
-
-Must exercise ALL features: H1-H6, bold/italic/strikethrough/inline code, bullet/ordered/task/mixed lists, code blocks (JS/Python/TypeScript), table, inline LaTeX `$E=mc^2$`, block LaTeX `$$`, image URL, blockquote, links, mermaid flowchart, Korean text paragraph
-
-### Korean IME test procedure
-
-1. Focus editor, type "한글 테스트" — verify all syllables compose correctly
-2. Move cursor to middle of a word, type more Korean
-3. After `setMarkdown()` call (via console), immediately type Korean
-4. Test composition at the very start of an empty document
-5. Test in both Safari (Phase 1) and WKWebView (Phase 2)
-
-### Gate 1 validation
-
-Open `dist/index.html` in Safari. Verify all 17 criteria from `architect/prompt.md` PoC 1 checklist. **Stop and fix any failure before Phase 2.**
+Confidence:
+- **High**: harness hardening path and near-term Kern wins.
+- **Medium**: deeper architectural work (piece-table/rope/TextKit2-first spike).
 
 ---
 
-## Phase 2: Minimal Swift Shell (PoC Gate 2)
-
-Build bare macOS app with WKWebView loading the HTML. Verify bidirectional bridge.
-
-### Prerequisites
-
-- Install XcodeGen: `brew install xcodegen`
-- Fallback if XcodeGen fails: create `.xcodeproj` manually or use `swift package init --type executable` as scaffold
-
-### Files to create
-
-```
-project.yml                          # XcodeGen config
-KernApp/
-├── Sources/
-│   ├── App/
-│   │   └── AppDelegate.swift        # @main, warmUp pool, temp test window
-│   ├── Editor/
-│   │   ├── EditorViewController.swift   # WKWebView host, NativeBridgeDelegate
-│   │   └── EditorReusePool.swift        # Simple pool of 3, shared WKProcessPool
-│   └── Bridge/
-│       ├── WebBridge.swift              # Swift→JS via callAsyncJavaScript
-│       └── NativeBridge.swift           # JS→Swift via WKScriptMessageHandler
-├── Resources/
-│   └── Assets.xcassets/                 # Placeholder app icon
-├── Info.plist
-└── Kern.entitlements
-```
-
-### Key implementation patterns
-
-- **`@MainActor`**: AppDelegate, EditorViewController, EditorReusePool, WebBridge — all `@MainActor`. **NOT EditorDocument** (see Phase 3)
-- **`callAsyncJavaScript` only**: No `evaluateJavaScript` (WebKit memory leak). Pass data via `arguments` dict, use `contentWorld: .page`
-- **`NativeBridge`**: `nonisolated` callback. Extract String values from `message.body` immediately (before isolation boundary), then hop to `@MainActor` via Task
-- **No private APIs**: `webView.isInspectable = true` (public on macOS 14+)
-- **HTML loading**: `Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "dist")`, load via `loadHTMLString(_:baseURL: URL(string: "http://localhost/")!)`
-- **Shared WKProcessPool**: `static let sharedProcessPool = WKProcessPool()`
-- **Programmatic menu bar**: Build `NSApp.mainMenu` in code (AppDelegate). **No Main.storyboard** — avoids fragile hand-written XML. Set `NSMainNibFile` to empty or omit `NSMainStoryboardFile` from Info.plist
-- **Ready-state guard**: All `WebBridge` calls guarded behind `EditorViewController.hasFinishedLoading`. Before ready, fall back to cached `stringValue`
-- **Temp test window**: AppDelegate creates a programmatic NSWindow for Phase 2 testing (removed in Phase 3)
-
-### project.yml key sections
-
-```yaml
-targets:
-  Kern:
-    type: application
-    platform: macOS
-    sources:
-      - path: KernApp/Sources
-    resources:
-      - path: CoreEditor/dist
-        type: folder           # folder reference, not group
-      - path: KernApp/Resources/Assets.xcassets
-    settings:
-      base:
-        MACOSX_DEPLOYMENT_TARGET: "14.0"
-        SWIFT_STRICT_CONCURRENCY: complete
-        INFOPLIST_FILE: KernApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: KernApp/Kern.entitlements
-        CODE_SIGN_IDENTITY: "-"
-```
-
-### Steps
-
-1. Create `project.yml` with complete config
-2. Create all Swift source files
-3. Create `Info.plist` (minimal — no `NSMainStoryboardFile`, no doc types yet)
-4. Create `Kern.entitlements` (sandbox + user-selected files)
-5. Create placeholder `Assets.xcassets`
-6. `xcodegen generate && xcodebuild -project Kern.xcodeproj -scheme Kern -configuration Debug build`
-7. Run app, verify editor appears, type text, check Xcode console for bridge messages
-
-### Gate 2 validation
-
-App launches with WYSIWYG editor. Type text. `getMarkdown()` returns string. Content changes trigger Swift callback. Korean input works. Dark/light follows system. 5000-line file works.
+## Sub-Questions Investigated
+1. Can Zed be made apples-to-apples measurable? → **Yes**, via fork hook emitting deterministic bench-ready events.
+2. What invalidates current comparisons? → Hidden readiness caps, helper-window bias, asymmetric launch hygiene, deadline-coupled timeout artifacts.
+3. Kern’s biggest open-path costs? → Full-document parse/import + early layout pressure + frequent export/chrome/layout work.
+4. Most applicable optimization patterns? → Viewport-first + deferred non-visible work + incremental parsing/export + main-thread budget discipline.
+5. How to avoid regression during aggressive optimization? → Phase-level attribution, strict statistical gates, and per-batch tests.
 
 ---
 
-## Phase 3: NSDocument Integration
+## Final Methodology Contract (locked)
 
-`open -a Kern file.md` starts working.
+## Primary KPI
+- `benchmark_open_ready` for Kern on target fixture.
 
-### Files to create/modify
+## Anti-gaming guardrails (required)
+- `time_to_stable_layout_ms` (ready -> visually/layout stable for target document)
+- `post_ready_export_quiescence_ms` (ready -> export/serialize quiet)
 
-- **Create** `EditorDocument.swift` — NSDocument subclass
-- **Create** `EditorWindowController.swift` — programmatic NSWindow, `tabbingMode = .preferred`, `minSize: 640x480`, `isReleasedWhenClosed = false`
-- **Modify** `EditorViewController.swift` — add `document` property, load content on `editorReady`, update `document.stringValue` on `contentChanged`
-- **Modify** `AppDelegate.swift` — remove temp test window, keep programmatic menu
-- **Modify** `Info.plist` — add `CFBundleDocumentTypes` + `UTImportedTypeDeclarations`
+A run cannot be called successful if open-ready improves while guardrails regress materially.
 
-### EditorDocument concurrency model (critical)
+## Statistical claim policy
+For any “target achieved” claim:
+- **Warmup:** fixed warmup count (documented per suite)
+- **Sample size:** >=30 official measured runs per condition (minimum)
+- **Report:** p50, p95, and 95% CI
+- **Comparison test:** Mann-Whitney + bootstrap CI vs frozen baseline
+- **Noise control:** baseline and candidate must be run in alternating A/B blocks within the same session
 
-**Do NOT use `@MainActor` at the class level.** NSDocument methods like `read(from:ofType:)` are called on background threads when `canConcurrentlyReadDocuments()` returns `true`. `presentedItemDidChange()` is called on the file presenter queue. Class-level `@MainActor` would break both.
+## Official vs Partial (non-negotiable)
+- Official requires: fixture hash match, required metrics present, roster/mode policy pass, no fatal stage failures.
+- Partial must carry machine-readable reasons and is non-claimable.
 
-Instead, use selective isolation:
-- `stringValue` property: access from any thread (protected by NSDocument's internal serialization)
-- `read(from:ofType:)` and `data(ofType:)`: no actor annotation (background-safe)
-- `makeWindowControllers()`: `@MainActor` (creates UI)
-- `autosave(withImplicitCancellability:)`: `@MainActor` (calls bridge)
-- Bridge interactions: always wrap in `Task { @MainActor in ... }`
+---
 
-### Async save with crash resilience
+## Execution Dependencies & Gates (new)
+1. **Gate G1:** Phase 2 (harness hardening) complete before Phase 3 matrix.
+2. **Gate G2:** Phase 4A instrumentation complete before optimization batches are judged.
+3. **Gate G3:** Phase 4C pipeline redesign uses sub-steps; each sub-step must pass tests before next sub-step.
+4. **Gate G4:** Phase 8 final run only after all prior gates are green.
 
-```swift
-override func autosave(withImplicitCancellability:) async throws {
-    if let vc = hostViewController, vc.hasFinishedLoading {
-        do {
-            stringValue = try await vc.bridge.getMarkdown()
-        } catch {
-            // Bridge failed (crash, not ready, etc.) — save with existing stringValue
-            // stringValue is kept up-to-date by contentChanged callback, so it's recent
-        }
-    }
-    try await super.autosave(withImplicitCancellability:)
+---
+
+## Detailed Findings
+
+### 1) Zed fork + hook feasibility
+Current Zed CLI `--wait` behavior is close/exit-oriented, not explicit open-ready. Fork hook is the most reliable parity path.
+
+**Hook contract:**
+- `--bench-target-file <abs-path>`
+- `--bench-ready-signal <json-path|fd|unix-socket>`
+- `--bench-ready-mode <first_editable|first_content|styled_stable>`
+
+Event example:
+```json
+{
+  "event": "bench_ready",
+  "target": "/abs/path/file.md",
+  "mode": "first_editable",
+  "timestamp_monotonic_ns": 123,
+  "pid": 999,
+  "window_id": 12345
 }
 ```
 
-### Info.plist additions for Phase 3
+### 2) Benchmark harness/code gaps to close first
+1. `documentLoadBudgetNs = min(timeout, 2.5s)` can force false `document_not_loaded` failures.
+2. Window-visible currently risks helper-window false-fast values.
+3. Launch cleanliness is asymmetric (VS Code has clean profile; Zed does not).
+4. Stage timeout shrinking from run/suite budget can create downstream false degradations.
 
-`CFBundleDocumentTypes`: net.daringfireball.markdown, extensions md/markdown/mdown/mkd, role Editor. **NOT public.plain-text.**
+### 3) Kern rendering pipeline gaps
+Open path still does broad parse/layout work before first-editable. Major opportunities are in splitting critical-path vs deferred work and reducing full-document churn in early render and post-edit loops.
 
-`UTImportedTypeDeclarations`: Declare `net.daringfireball.markdown` UTI conforming to `public.text`, with tag `md` in `public.filename-extension`. Required for File > Open panel filtering on macOS 14+.
-
----
-
-## Phase 4: File Watching + Auto-Reload
-
-External file changes auto-reload with scroll preservation.
-
-### Modify `EditorDocument.swift`
-
-- Override `presentedItemDidChange()` — called on presenter queue (NOT main thread)
-- Dispatch async to main queue, 300ms debounce via `DispatchWorkItem`
-- Compare `fileModificationDate` to skip self-triggered reloads
-- **After every successful save/autosave, set `fileModificationDate = .now`** to prevent the autosave→presentedItemDidChange→revert loop
-- Call `revert(toContentsOf:ofType:)` only when file is genuinely newer
-
-### Autosave ↔ file watching loop prevention
-
-The cycle: type → contentChanged → stringValue updated → autosave writes to disk → presentedItemDidChange fires → revert → setMarkdown → contentChanged → repeat.
-
-Break it with:
-1. Update `fileModificationDate = .now` immediately after successful save
-2. In `presentedItemDidChange`, skip if file mod date ≤ our tracked date
-3. Optional: compare content hash before reverting (skip if unchanged)
-
-### Modify `EditorViewController.swift`
-
-- `handleFileReloaded()` — save scroll position, setMarkdown with new content, restore scroll position
-- `showReloadToast()` — NSTextField overlay, fades out after 3 seconds
-- **Note**: `replaceAll()` resets cursor position and undo history. This is the accepted trade-off per prompt decision "always revert + toast"
+### 4) Optimization venue tiers
+- **Tier 1:** harness correctness + layout/chrome/export coalescing + launch/profile symmetry.
+- **Tier 2:** viewport-first open + deferred formatting + dirty-range parse/export.
+- **Tier 3:** deeper text storage and TextKit strategy experiments under flags.
 
 ---
 
-## Phase 5: Tab Virtualization
+## Hypothesis Assessment
 
-Upgrade pool from simple 3-instance to LRU-evicting 5-live + unlimited virtualized.
-
-### Modify `EditorReusePool.swift` (significant rewrite)
-
-- Track `TabState` per document: `.live(EditorViewController)` or `.virtualized(markdown, scrollPosition)`
-- Max 5 live WKWebViews at any time
-- **`dequeue()` stays synchronous**: virtualization uses `document.stringValue` + cached scroll position (not async `getMarkdown()` call). The `contentChanged` callback keeps `stringValue` fresh, so it's accurate enough
-- Rehydration: `setMarkdown(savedContent)` + `setScrollPosition(savedOffset)` on recycled WKWebView. Use `replaceAll(md, true)` (flush=true) for clean state transition between documents
-
-### Crash recovery
-
-- `webViewWebContentProcessDidTerminate` → set `hasFinishedLoading = false` → reload HTML via `loadHTMLString()` → on `editorReady`, set `hasFinishedLoading = true` → restore from `document.stringValue`
-- Guard against double `editorReady`: use a generation counter, ignore stale callbacks
+| Hypothesis | Confidence | Support | Contradiction |
+|---|---|---|---|
+| H1: Harness artifacts still distort Kern-vs-Zed comparisons | High | Known cap/bias/asymmetry in current code paths | Existing classification protections reduce but do not remove distortion |
+| H2: Kern can reach ~500ms without deep architecture rewrite | Medium-High | Existing path already has thresholding + instrumentation hooks | Large markdown feature surface may still require deeper incremental model |
+| H3: Zed fork hook is required for strong parity | High | `--wait` semantics are not open-ready semantics | External probing can approximate but lower confidence |
+| H4: Piece-table/rope is near-term mandatory | Medium-Low | Long-term scalability benefit | Near-term wins likely from pipeline/harness fixes first |
 
 ---
 
-## Phase 6: Themes + Menus + Polish
+## Refined Execution Plan (maps to requested 1–9)
 
-### Create `AppearanceManager.swift`
+## Phase 0 — Baseline lock + statistical protocol (Day 0-1)
+- Freeze fixture hashes + command templates + environment capture.
+- Record baseline manifests and run metadata.
+- Define claim thresholds:
+  - Primary: Kern `benchmark_open_ready` p50 <= 500ms.
+  - Secondary: p95 guardrail and no quality downgrade.
+- Lock statistical protocol:
+  - >=30 official runs/condition,
+  - 95% CI,
+  - Mann-Whitney + bootstrap CI vs baseline,
+  - A/B alternating blocks to limit drift.
 
-Observe `NSApp.effectiveAppearance`, call `bridge.setTheme()` on all live editors.
+## Phase 1 — Zed fork + bench hook (Requested #1)
+1. Fork Zed and add bench-ready interface.
+2. Emit deterministic event for target file/mode.
+3. Add fork tests:
+   - exact-once semantics,
+   - target-file correctness,
+   - mode correctness.
+4. Integrate `kern-bench` consumer path with fallback to external probe.
 
-### Update programmatic menu bar
+## Phase 2 — Benchmark hardening + methodology finalization (Requested #2)
+1. Remove hard 2.5s document-load cap.
+2. Replace first-window heuristic with target-document-aware readiness filter.
+3. Add Zed clean-launch profile/isolation.
+4. Separate `run_budget_exhausted` vs stage-timeout reasons.
+5. Add `automation_overhead_ms` + unattributed budget reporting.
+6. Add anti-gaming guardrails (`time_to_stable_layout_ms`, `post_ready_export_quiescence_ms`).
+7. Finalize official/partial policy in docs + checker.
 
-Add Format submenu (Bold ⌘B, Italic ⌘I, Code ⌘E), View submenu (Toggle Dark Mode). Wire Undo (⌘Z) and Redo (⇧⌘Z) to `bridge.execCommand("undo"/"redo")` — NOT NSDocument UndoManager. Override `undo:` and `redo:` in EditorViewController's responder chain.
+### Phase 2 Tests (required)
+- Unit: delayed document load succeeds within stage timeout (no premature `document_not_loaded`).
+- Unit: helper windows are rejected.
+- Integration: induced slow-open and failure scenarios produce correct reasons.
+- Regression-checker: quality downgrade, failure-rate deltas, guardrail regression alerts.
 
-### Implement `execCommand()` in bridge.ts
+## Phase 3 — Kern vs Zed benchmark matrix (Requested #3)
+Execute matrix only after Gate G1:
+- cold + warm,
+- small + target + huge fixtures,
+- 1-run smoke, 10-run stability, 50-run official.
 
-Map command names to Milkdown/ProseMirror commands:
-```
-undo → undoCommand.key (from @milkdown/kit/plugin/history or @milkdown/plugin-history)
-redo → redoCommand.key
-bold → toggleStrongCommand.key (from @milkdown/kit/preset/commonmark)
-italic → toggleEmphasisCommand.key
-code → toggleInlineCodeCommand.key
-```
-Use `crepe.editor.action(callCommand(key))`.
+Add mandatory rows:
+- alternating A/B baseline-vs-candidate blocks,
+- warmup-sensitivity row (early vs late run drift),
+- deferred-work watchdog row,
+- post-ready completion row,
+- controlled background-load stress row (documentation-only, not claim lane).
 
-### Other polish
+## Phase 4 — Kern 500ms performance track (Requested #4, primary)
 
-- Placeholder "K" app icon
-- Responsive CSS tweaks at 640px
-- Menu item validation (disable format/undo items when no editor active)
-- WKNavigationDelegate failure handlers for HTML load errors
+### 4A. Instrumentation-first (Gate G2)
+- Expand internal spans for decode/parse/apply/layout/first-editable.
+- Require >=95% attribution for open path.
+- Define per-phase budgets from baseline traces.
+
+### 4B. Quick wins
+- Reduce unnecessary full layout on first open for large docs.
+- Coalesce repetitive post-edit UI work (height/chrome/export triggers).
+- Cache hot option/style lookups.
+
+### 4C. Pipeline redesign (gated sub-steps)
+- 4C.1 viewport-first rendering stub behind flag.
+- 4C.2 deferred non-visible formatting.
+- 4C.3 dirty-range parse/export where safe.
+- 4C.4 guardrail validation (stable-layout + export-quiescence).
+
+Each sub-step requires tests + benchmark check before advancing.
+
+### 4D. Deep candidates (flagged)
+- piece-table/rope prototype,
+- TextKit2-first spike with rollback switch.
+
+## Phase 5 — Full optimization venue backlog (Requested #5, #6)
+- Convert all venues into tracked tickets (L1/L2/L3).
+- Every ticket must include:
+  - expected KPI impact,
+  - regression risk,
+  - required test gate,
+  - rollback condition.
+
+## Phase 6 — Regression-safe implementation loop (Requested #7)
+For each batch:
+1. Add/update targeted tests first.
+2. Implement smallest viable change.
+3. Rebuild/reinstall app.
+4. Run standard validation:
+   - native editor tests,
+   - `kern-bench` tests,
+   - smoke benchmark.
+5. Archive artifacts and compare statistically to baseline.
+
+Required new tests:
+- per-stage timeout fault injection,
+- observer-effect overhead benchmark,
+- open-ready correctness with delayed formatting,
+- save/quit stress while deferred tasks active,
+- phase-budget compliance checks.
+
+## Phase 7 — Bug/regression + new-gap discovery loop (Requested #8)
+Per regression event:
+- classify: measurement vs product vs infra,
+- isolate first bad batch (bisect workflow),
+- patch + targeted test,
+- reduced matrix rerun,
+- rejoin full run only when green.
+
+Weekly venue discovery from traces:
+- unattributed residuals,
+- phase budget drift,
+- guardrail regressions,
+- failure-rate anomalies.
+
+## Phase 8 — Final master run and sign-off (Requested #9)
+### Exit Criteria (Go/No-Go)
+- Kern p50 <= 500ms on target fixture.
+- p95 and guardrail metrics within agreed bounds.
+- Statistical significance vs baseline shown.
+- No increase in partial/failure rates.
+- All gating tests pass.
+
+### Deliverable Checklist (required)
+- finalized methodology doc,
+- Zed fork hook patchset,
+- Kern optimization PR stack with per-batch evidence,
+- final comparison report with raw artifacts,
+- reproducibility manifest (commands, environment, fixture hashes, versions).
 
 ---
 
-## Verification Plan
-
-After each phase, run the corresponding gate/test. After Phase 6, full checklist:
-
-1. `open -a Kern /path/to/file.md` → WYSIWYG mode
-2. Edit → close → reopen → changes preserved (autosave)
-3. No "save changes?" dialog on close
-4. External file modification → editor updates within ~500ms, toast
-5. Scroll position preserved after reload
-6. System dark mode toggle → theme switches
-7. Korean text input correct (full test procedure from Phase 1)
-8. 5+ files from terminal → all tabs in one window, last focused
-9. ⌘Z/⇧⌘Z undo/redo in editor
-10. ⌘B/I/E toggle bold/italic/code
-11. File > New → untitled with placeholder
-12. 640px width → no horizontal scrollbar
-13. LaTeX, code blocks, tables, checklists, mermaid all render
-14. Memory < 500MB with 5 live + 15 virtualized tabs
-15. Re-opening already-open file brings existing tab to front (NSDocumentController handles this)
+## Risk Register (expanded)
+1. **Hook drift risk (Zed upstream changes)**  
+   Mitigation: isolate hook, version guard, fallback probe mode.
+2. **False-fast helper-window measurement**  
+   Mitigation: target-document readiness checks before window-visible acceptance.
+3. **Deferred-work metric gaming risk**  
+   Mitigation: enforce stable-layout/export-quiescence guardrails.
+4. **Incremental parse/export correctness drift**  
+   Mitigation: dirty-range correctness tests + full-fallback path.
+5. **Accessibility/UX regressions from viewport-first**  
+   Mitigation: snapshot + interaction regression suite on representative fixtures.
+6. **Overfitting to single fixture/machine**  
+   Mitigation: secondary fixtures and multi-machine validation for sign-off.
 
 ---
 
-## Key Risk Mitigations
+## Source Index
 
-| Risk | Mitigation |
-|------|------------|
-| CSS import paths broken in 7.18.0 | Try standard imports first. If broken, define theme variables in kern.css |
-| Mermaid DOM selectors don't match CodeMirror structure | Inspect DOM at dev time. Fallback: parse markdown string for mermaid blocks |
-| Swift 6 strict concurrency errors | `@MainActor` on VC/Pool/Bridge. EditorDocument uses selective isolation (NOT class-level @MainActor) |
-| `callAsyncJavaScript` throws when editor not ready | Guard all bridge calls behind `hasFinishedLoading`, fall back to `stringValue` |
-| Autosave ↔ file watching infinite loop | Update `fileModificationDate = .now` after every save. Skip revert if date ≤ tracked |
-| WKWebView blank screen | Verify baseURL set, singlefile inlined everything, no module loader |
-| XcodeGen fails | Fallback: manually create .xcodeproj or use swift package scaffold |
-| `index.html` not found in bundle | XcodeGen `resources` with `type: folder` for `CoreEditor/dist` |
-| WebContent crash during save | Autosave catches bridge error, falls back to `stringValue` |
-| `replaceAll` leaves stale state on tab switch | Test with `flush: true` in Phase 1. Use flush for tab switches |
-| Mermaid ~1MB bundle size hurts load time | Dynamic import. If singlefile forces inline, accept cost (spec allows) |
-| Storyboard XML errors | Skip storyboard entirely. Build menu bar programmatically in AppDelegate |
+### External research sources
+1. Zed CLI docs (`--wait` semantics): https://zed.dev/docs/cli
+2. Zed source (`open_listener.rs` wait behavior): https://raw.githubusercontent.com/zed-industries/zed/main/crates/zed/src/zed/open_listener.rs
+3. Apple WWDC19 Optimizing App Launch: https://developer.apple.com/videos/play/wwdc2019/423/
+4. Apple WWDC21 Meet TextKit 2: https://developer.apple.com/videos/play/wwdc2021/10061/
+5. Tree-sitter Basic Parsing: https://tree-sitter.github.io/tree-sitter/using-parsers/2-basic-parsing.html
+6. VS Code v1.21 update: https://code.visualstudio.com/updates/v1_21
+7. VS Code text buffer reimplementation: https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation
+8. Google Benchmark user guide: https://raw.githubusercontent.com/google/benchmark/main/docs/user_guide.md
+9. Criterion docs: https://docs.rs/criterion/latest/criterion/struct.Criterion.html
+10. BenchmarkDotNet jobs docs: https://benchmarkdotnet.org/articles/configs/jobs.html
+11. SciPy bootstrap docs: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.bootstrap.html
+12. SciPy Mann-Whitney docs: https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.mannwhitneyu.html
+
+### Internal anchors
+- Kern editor path: `KernApp/Sources/Editor/EditorDocument.swift`, `NativeEditorViewController.swift`, `NativeMarkdownCodec.swift`, `WowInternalMetricsRecorder.swift`
+- Harness path: `scripts/kern-bench/Sources/KernBench/{SuiteDefinition.swift,ActionRunner.swift,KernBenchMain.swift,EditorRegistry.swift,WindowDetector.swift}`
+- Regression checker: `scripts/bench-regression-check.py`
+
+---
+
+## Limitations & Remaining Unknowns
+- Final Zed tap-point for “first editable” must be validated in fork implementation.
+- 500ms on one machine/fixture is not sufficient for broad product claim; cross-device verification remains required.
+- Piece-table/TextKit2 decisions require spike evidence before commitment.

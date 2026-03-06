@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/kern open <file>
+  scripts/kern reveal <file>
+  scripts/kern path <file>
+  scripts/kern search <query> [directory]
+  scripts/kern quick-open <query> [directory]
+
+Environment:
+  KERN_APP_PATH   Absolute app bundle path (default: ~/Applications/Kern.app)
+
+Examples:
+  scripts/kern open test-fixtures/native-editor-benchmark.md
+  scripts/kern path test-fixtures/native-editor-benchmark.md
+  scripts/kern search benchmark test-fixtures
+  scripts/kern quick-open native-editor-benchmark test-fixtures
+USAGE
+}
+
+resolve_abs_path() {
+  python3 - "$1" <<'PY'
+import pathlib
+import sys
+p = pathlib.Path(sys.argv[1]).expanduser()
+print(str(p.resolve()))
+PY
+}
+
+ensure_exists() {
+  local target="$1"
+  if [[ ! -e "$target" ]]; then
+    echo "error: path does not exist: $target" >&2
+    exit 1
+  fi
+}
+
+kern_app_path() {
+  if [[ -n "${KERN_APP_PATH:-}" ]]; then
+    printf '%s\n' "$(resolve_abs_path "$KERN_APP_PATH")"
+    return
+  fi
+
+  local user_app
+  user_app="$(resolve_abs_path "~/Applications/Kern.app")"
+  if [[ -d "$user_app" ]]; then
+    printf '%s\n' "$user_app"
+    return
+  fi
+
+  local system_app
+  system_app="/Applications/Kern.app"
+  if [[ -d "$system_app" ]]; then
+    printf '%s\n' "$system_app"
+    return
+  fi
+
+  # Fallback to bundle identifier open behavior.
+  printf '%s\n' ""
+}
+
+open_in_kern() {
+  local target="$1"
+  local app
+  app="$(kern_app_path)"
+  if [[ -n "$app" ]]; then
+    open -a "$app" "$target"
+  else
+    open -b com.kerntextkit.KernTextKit "$target"
+  fi
+}
+
+search_files() {
+  local query="$1"
+  local root="$2"
+
+  if ! command -v rg >/dev/null 2>&1; then
+    echo "error: ripgrep (rg) is required for search" >&2
+    exit 1
+  fi
+
+  rg --files "$root" | rg -i -- "$query"
+}
+
+main() {
+  if [[ $# -lt 1 ]]; then
+    usage
+    exit 1
+  fi
+
+  local cmd="$1"
+  shift || true
+
+  case "$cmd" in
+    open)
+      if [[ $# -ne 1 ]]; then
+        usage
+        exit 1
+      fi
+      local target
+      target="$(resolve_abs_path "$1")"
+      ensure_exists "$target"
+      open_in_kern "$target"
+      ;;
+    reveal)
+      if [[ $# -ne 1 ]]; then
+        usage
+        exit 1
+      fi
+      local target
+      target="$(resolve_abs_path "$1")"
+      ensure_exists "$target"
+      open -R "$target"
+      ;;
+    path)
+      if [[ $# -ne 1 ]]; then
+        usage
+        exit 1
+      fi
+      local target
+      target="$(resolve_abs_path "$1")"
+      ensure_exists "$target"
+      printf '%s\n' "$target"
+      ;;
+    search)
+      if [[ $# -lt 1 || $# -gt 2 ]]; then
+        usage
+        exit 1
+      fi
+      local query="$1"
+      local root="${2:-.}"
+      root="$(resolve_abs_path "$root")"
+      ensure_exists "$root"
+      search_files "$query" "$root"
+      ;;
+    quick-open)
+      if [[ $# -lt 1 || $# -gt 2 ]]; then
+        usage
+        exit 1
+      fi
+      local query="$1"
+      local root="${2:-.}"
+      root="$(resolve_abs_path "$root")"
+      ensure_exists "$root"
+      local first
+      first="$(search_files "$query" "$root" | head -n 1 || true)"
+      if [[ -z "$first" ]]; then
+        echo "error: no matching files for query '$query' in $root" >&2
+        exit 2
+      fi
+      open_in_kern "$first"
+      printf '%s\n' "$first"
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      echo "error: unknown command '$cmd'" >&2
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

@@ -1,7 +1,7 @@
 # Documentation manifest for KernTextKit
 # Tracks docs, ownership intent, and primary code references
 
-last_synced: "2026-02-21T18:48:04Z"
+last_synced: "2026-03-06T04:56:00Z"
 
 files:
   - path: README.md
@@ -11,7 +11,7 @@ files:
 
   - path: CLAUDE.md
     type: project-instructions
-    last_updated: "2026-02-21T18:48:04Z"
+    last_updated: "2026-03-06T04:56:00Z"
     description: Session instructions and high-signal engineering context
     references:
       - KernApp/Sources/App/main.swift
@@ -22,8 +22,22 @@ files:
       - KernApp/Sources/Editor/MarkdownRichAttachments.swift
       - scripts/run-kern-native.sh
       - scripts/test-native-editor.sh
+      - scripts/run-typing-behavior-gate.sh
       - scripts/test-markdown-spec-conformance.sh
       - scripts/package-kern-app.sh
+
+  - path: AGENTS.md
+    type: agent-instructions
+    last_updated: "2026-03-06T04:56:00Z"
+    description: Agent execution policy, command behavior, and repository-specific workflow rules
+    references:
+      - KernApp/Sources/Editor/NativeEditorViewController.swift
+      - KernApp/Sources/Editor/NativeMarkdownCodec.swift
+      - KernApp/Sources/Editor/MarkdownRichAttachments.swift
+      - scripts/run-kern-native.sh
+      - scripts/test-native-editor.sh
+      - scripts/run-typing-behavior-gate.sh
+      - scripts/test-markdown-spec-conformance.sh
 
   - path: HANDOFF.md
     type: session-handoff
@@ -57,7 +71,7 @@ files:
 
   - path: BENCHMARKS.md
     type: benchmark-guide
-    last_updated: "2026-02-21T18:48:04Z"
+    last_updated: "2026-03-04T00:00:00Z"
     description: Benchmark methodology and reproducibility notes for editor performance
 
   - path: KERN-MARKDOWN.md

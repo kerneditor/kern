@@ -179,6 +179,12 @@ Add tests that intentionally **fail today** under `KERN_ENABLE_EXHAUSTIVE_TESTS=
   - types `ultimate-stress-test.md` character-by-character (full preference permutations)
   - types `ultimate-stress-test.md` with **interleaved editing action programs** (selection/replace/cut-paste/undo-redo)
   - applies generated action permutations on feature seeds (full preference permutations)
+- Notion-style list behavior regression matrix: `NativeEditorNotionListBehaviorRegressionTests`
+  - nested bullet / ordered / task / ordered-task backspace recovery (outdent + keep typing alive)
+  - tab / shift-tab round-trip for nested list flavors without semantic degradation
+- Notion-style behavior-program matrix: `NativeEditorNotionTypingBehaviorProgramTests`
+  - deterministic action programs over list contexts (newline, indent/outdent, backspace, paste, selection-replace, undo/redo)
+  - invariant checks after each action to prevent malformed markers or semantic loss
 
 Key requirement: full-spec tests must include stress/mega fixtures and assert “obviously missing” features
 like blockquote/hr/images/mermaid/math cause a failure until implemented.
@@ -265,6 +271,13 @@ We can say the suite is “good enough to drive development” when:
 - Perf suite provides stable numbers for `stress-test.md` and `mega-stress-test.md`.
 
 ## Commanded Runs
+
+- Typing behavior gate (matrix + stateful + typing reliability):
+  - `./scripts/run-typing-behavior-gate.sh --lane pr`
+  - `./scripts/run-typing-behavior-gate.sh --lane nightly`
+  - PR lane scheme/profile: `KernTextKitExhaustive` (`KERN_TYPING_STATEFUL_SEEDS=24`, `KERN_TYPING_STATEFUL_STEPS=50`, `KERN_TYPING_STATEFUL_ENFORCE=1`)
+  - Nightly lane scheme/profile: `KernTextKitUltraExhaustive` (`KERN_TYPING_STATEFUL_SEEDS=120`, `KERN_TYPING_STATEFUL_STEPS=120`, `KERN_TYPING_STATEFUL_ENFORCE=1`)
+  - Artifacts emitted under `test-results/typing-behavior/<timestamp>-<lane>/`
 
 - Exhaustive native suite orchestrator:
   - `./scripts/run-exhaustive-native-suite.sh`

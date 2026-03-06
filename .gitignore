@@ -47,6 +47,12 @@ test-screenshots/
 test-results/
 bench-results/
 dist/
+benchmark-archive/
+scripts/kern-bench/benchmark-archive/
+tmp/
+.study/
+.derived-data-release/
+FORGE-STATUS.*.md
 
 # Profiling data
 *.profraw

@@ -86,6 +86,7 @@ final class CodeBlockLanguagePillView: NSView {
 final class CodeBlockChromeView: NSView {
     let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     let languagePill: CodeBlockLanguagePillView
+    var onPointerInsideChanged: ((Bool) -> Void)?
 
     var maxLanguageWidth: CGFloat? {
         didSet {
@@ -106,6 +107,7 @@ final class CodeBlockChromeView: NSView {
     }
 
     private let spacing: CGFloat = 8
+    private var hoverTrackingArea: NSTrackingArea?
 
     init(copyButtonAccessibilityIdentifier: String, languageLabelAccessibilityIdentifier: String) {
         languagePill = CodeBlockLanguagePillView(labelAccessibilityIdentifier: languageLabelAccessibilityIdentifier)
@@ -201,5 +203,35 @@ final class CodeBlockChromeView: NSView {
             width: pillW,
             height: desired.height
         )
+    }
+
+    override func updateTrackingAreas() {
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        super.updateTrackingAreas()
+
+        let options: NSTrackingArea.Options = [
+            .mouseEnteredAndExited,
+            .activeInKeyWindow,
+            .inVisibleRect,
+        ]
+        let trackingArea = NSTrackingArea(rect: .zero, options: options, owner: self, userInfo: nil)
+        addTrackingArea(trackingArea)
+        hoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onPointerInsideChanged?(true)
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onPointerInsideChanged?(false)
+        super.mouseExited(with: event)
+    }
+
+    func _debugSimulatePointerInside(_ inside: Bool) {
+        onPointerInsideChanged?(inside)
     }
 }

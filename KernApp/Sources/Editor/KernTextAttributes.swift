@@ -25,15 +25,19 @@ extension NSAttributedString.Key {
     static let kernLinkReferenceID = NSAttributedString.Key("kern.linkReferenceID") // String
     static let kernLinkReferenceURL = NSAttributedString.Key("kern.linkReferenceURL") // String
     static let kernEscapedLiteral = NSAttributedString.Key("kern.escapedLiteral") // Bool (char came from backslash escape)
+    static let kernHybridExpandedInlineLink = NSAttributedString.Key("kern.hybridExpandedInlineLink") // Bool
+    static let kernHybridExpandedInlineSyntax = NSAttributedString.Key("kern.hybridExpandedInlineSyntax") // Bool
 
     static let kernCheckbox = NSAttributedString.Key("kern.checkbox") // Bool
     static let kernCheckboxChecked = NSAttributedString.Key("kern.checkboxChecked") // Bool
 
     // Code blocks
     static let kernCodeLanguage = NSAttributedString.Key("kern.codeLanguage") // String (ex: "js")
+    static let kernCodeFenceInfoString = NSAttributedString.Key("kern.codeFenceInfoString") // String (full authored info string)
     static let kernCodeBlockID = NSAttributedString.Key("kern.codeBlockID") // Int (stable grouping for fenced blocks)
     static let kernCodeFenceMarker = NSAttributedString.Key("kern.codeFenceMarker") // String ("`" | "~")
     static let kernCodeFenceLength = NSAttributedString.Key("kern.codeFenceLength") // Int
+    static let kernSyntaxHighlighted = NSAttributedString.Key("kern.syntaxHighlighted") // Bool
 
     // Tables (GFM)
     static let kernTableID = NSAttributedString.Key("kern.tableID") // Int

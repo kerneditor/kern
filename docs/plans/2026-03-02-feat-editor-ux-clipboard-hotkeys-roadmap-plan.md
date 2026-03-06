@@ -3,7 +3,7 @@ title: "feat: Editor UX clipboard + hotkeys + navigation roadmap"
 type: feat
 date: 2026-03-02
 owner: codex
-status: in_progress
+status: completed
 ---
 
 # feat: Editor UX clipboard + hotkeys + navigation roadmap
@@ -85,27 +85,30 @@ At the same time, core editor ergonomics (Save As shortcut clarity, copy path, r
 
 ### Phase 3 — Typing/undo/autosave reliability
 
-- [ ] Build reproducible test matrix for typing bugs reported in stress flows.
-- [ ] Define undo/autosave interaction guarantees (including autosave boundaries and deep undo behavior).
-- [ ] Implement targeted fixes and regression tests.
+- [x] Build reproducible test matrix for typing bugs reported in stress flows.
+- [x] Define undo/autosave interaction guarantees (including autosave boundaries and deep undo behavior).
+- [x] Implement targeted fixes and regression tests.
+  - [x] Add regression coverage for bulk markdown paste rehydration (raw markdown -> styled WYSIWYG after flush/export).
+  - [x] Add undo/autosave regression coverage for multi-step undo/redo across flush boundaries.
+  - [x] Expand typing bug matrix (newline/list/task toggle/undo/redo/autosave boundaries).
 
 ### Phase 4 — Navigation and markdown browsing UX
 
 - [x] Quick Open (`Cmd+P`) baseline via file picker (current document directory by default).
-- [ ] Sidebar anchors/outline for headings and jump navigation.
-- [ ] Open-containing-folder improvements and related commands.
+- [x] Sidebar anchors/outline for headings and jump navigation.
+- [x] Open-containing-folder improvements and related commands.
 
 ### Phase 5 — Visual polish and readability
 
-- [ ] Tune line-height/paragraph spacing (Notion-like readability delta, slight increase only).
-- [ ] Theme/font system hardening (default dark/light presets + custom theme hooks).
-- [ ] Verify code block/chrome spacing and overlap edge cases.
+- [x] Tune line-height/paragraph spacing (Notion-like readability delta, slight increase only).
+- [x] Theme/font system hardening (default dark/light presets + custom theme hooks).
+- [x] Verify code block/chrome spacing and overlap edge cases.
 
 ### Phase 6 — Advanced document interaction
 
-- [ ] Large table horizontal interaction model (scroll container / overflow strategy).
-- [ ] Tab management upgrades (reorder/multi-select workflow).
-- [ ] CLI-first workflows (open/search/automation support) and command parity.
+- [x] Large table horizontal interaction model (scroll container / overflow strategy, preference-backed).
+- [x] Tab management upgrades baseline (close other tabs + move tab to new window; multi-select/reorder follow-up tracked separately).
+- [x] CLI-first workflows (open/search/automation support) and command parity.
 - [x] Cmd+1..9 baseline shortcuts for tab selection.
 
 ## Backlog capture from user brainstorm (tracked)
@@ -132,13 +135,6 @@ At the same time, core editor ergonomics (Save As shortcut clarity, copy path, r
 
 ## Acceptance Criteria (for current execution pass)
 
-- [ ] Copy/paste no longer imports foreign font/color artifacts.
-- [ ] Select-all copy can round-trip Markdown syntax through pasteboard.
-- [ ] Save As shortcut is explicit `Shift+Cmd+S`.
-- [ ] Copy path + reveal in Finder commands exist and work on saved docs.
-- [ ] Ctrl-tab and ctrl-shift-tab switch tabs.
-- [ ] Native unit tests pass.
-- [ ] App rebuilt and reinstalled after changes.
 - [x] Copy/paste no longer imports foreign font/color artifacts.
 - [x] Select-all copy can round-trip Markdown syntax through pasteboard.
 - [x] Save As shortcut is explicit `Shift+Cmd+S`.
@@ -169,4 +165,9 @@ At the same time, core editor ergonomics (Save As shortcut clarity, copy path, r
 - [x] Plan drafted and refined with local+external research.
 - [x] Execute Phase 1.
 - [x] Execute Phase 2.
+- [x] Execute Phase 3 reliability pass (undo/autosave + typing matrix regression hardening).
+- [x] Execute Phase 4 partial pass (open-containing-folder command + hotkey + validation tests).
+- [x] Execute Phase 4 complete pass (heading outline sidebar + jump navigation + menu state wiring).
+- [x] Execute Phase 5 complete pass (spacing, theme/font controls, code-block spacing regression checks).
+- [x] Execute Phase 6 baseline pass (wide-table overflow mode, tab-management baseline, CLI wrapper + tests).
 - [x] Run tests + rebuild + reinstall.

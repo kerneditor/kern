@@ -3,6 +3,25 @@ import XCTest
 @testable import KernTextKit
 
 final class NativeEditorBackspaceUnlistTests: XCTestCase {
+    private var savedSyntaxVisibilityMode: Any?
+
+    override func setUp() {
+        super.setUp()
+        let defaults = UserDefaults.standard
+        savedSyntaxVisibilityMode = defaults.object(forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
+        defaults.set(NativeEditorSyntaxVisibilityMode.wysiwyg.rawValue, forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
+    }
+
+    override func tearDown() {
+        let defaults = UserDefaults.standard
+        if let savedSyntaxVisibilityMode {
+            defaults.set(savedSyntaxVisibilityMode, forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: NativeEditorSyntaxVisibilityMode.userDefaultsKey)
+        }
+        super.tearDown()
+    }
+
     @MainActor
     func testBackspaceAtBulletContentStartUnlistsParagraph() {
         let (vc, textView) = makeController(markdown: "- alpha\n")

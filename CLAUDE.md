@@ -50,6 +50,18 @@ Strict markdown conformance:
 ./scripts/test-markdown-spec-conformance.sh
 ```
 
+Typing-behavior gate for editing UX changes:
+
+```bash
+./scripts/run-typing-behavior-gate.sh --lane pr
+```
+
+Release packaging / reinstall source:
+
+```bash
+./scripts/package-kern-app.sh
+```
+
 ## Key Code
 
 - KernApp/Sources/App/main.swift: entry point and test-env overrides
@@ -76,6 +88,9 @@ Strict markdown conformance:
 - XCUI test target (`KernUITests/`) was removed; all tests are unit tests now. `--unit-only` is a no-op compat flag.
 - Simulating Enter in unit tests: `textView.insertNewline(nil)` (not key events). Shift+Enter: `textView.insertLineBreak(nil)`.
 - `NativeMarkdownCodec.importMarkdown` passes `ImportContext` struct through ~13 functions instead of using statics. Add new import-time state to `ImportContext`, not static vars.
+- Attachment/image rendering changes must cover both timing orders: image decode may finish before or after the attachment first binds to a host text view, so layout invalidation sometimes has to be deferred until `didDraw(in:)`.
+- After attachment/layout rendering changes, rerun `./scripts/test-native-editor.sh --record-snapshots --snapshots-only` before the full suite so snapshot baselines reflect the stabilized render pipeline.
+- The local installed app bundles used for manual validation are `~/Applications/Kern.app` and `~/Applications/KernTextKit.app`.
 
 ## Key Environment Flags
 
@@ -118,15 +133,37 @@ Remaining codec/editor bugs:
 
 ## Current Work
 
-Feature: Dual cross-editor benchmark suites (Wow + Real-Use) with locked roster policy.
+Feature set in flight: native editor release hardening across typing behavior, hybrid syntax visibility, code-block chrome/layout polish, theme/font support, and benchmark/perf follow-through.
 
-- Locked roster v1: Kern, VS Code, Zed, Sublime Text, TextEdit
-- Official-vs-Partial publishing policy for benchmark claims
-- Required metrics in both suites: cold/warm start, load/save latency, typing performance, RAM usage
-- Real-Use workflow minimum: open, scroll, type/edit, find, save
-- Reliability requirement: fail-fast timeouts and no indefinite hangs
+Current status:
+- typing-behavior PR gate is green and now part of normal editing-UX validation
+- hybrid syntax mode, table editing, theme/font presets, and code-block chrome decoupling are implemented
+- full native suite and snapshot suite are green after async image-layout stabilization
 
-Implementation prompt: `architect/prompt.md`
-Forge transcript and rationale: `architect/transcript.md`
-Methodology refinement plan: `architect/dual-benchmark-methodology-plan.md`
-Independent fact-check synthesis: `architect/research-dual-benchmark-independent-2026-02-21.md`
+Primary execution docs:
+- `TODO.md`
+- `FORGE-STATUS.md`
+- `architect/plan.md`
+- `docs/plans/2026-03-02-feat-editor-ux-clipboard-hotkeys-roadmap-plan.md`
+- `docs/plans/2026-03-01-feat-full-fidelity-performance-optimization-plan.md`
+
+Next step:
+- continue manual QA / benchmark follow-through from the current app build, with special attention to remaining UX/perf polish rather than foundational editor correctness bugs
+
+## Compact Instructions
+When compacting, preserve:
+- The current forge pipeline stage and substep
+- All file paths from the last 10 tool calls
+- All test results and their pass/fail status
+- Any error messages being actively debugged
+- The exact milestone name and number from FORGE-STATUS.md
+
+
+## Forge Pipeline State
+After any context compaction, re-read these files immediately:
+1. FORGE-HANDOFF.md — what you were doing when compaction occurred
+2. FORGE-STATUS.md — current milestone and phase
+3. TODO.md — task checklist with completion status
+4. FORGE-MEMORY.md — cross-session learnings
+
+Then continue from the point described in FORGE-HANDOFF.md "What's In Progress".

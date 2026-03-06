@@ -30,12 +30,15 @@ ZED_READY_MODE=""
 SELECTED_EDITORS=()
 USES_ALL_EDITORS=false
 NEEDS_ZED=false
+NEEDS_KERN=false
 ZED_CLI_SOURCE=""
+KERN_APP_SOURCE=""
+BENCH_PROFILE=""
 
 cleanup_editors() {
-  local app_names=("Kern" "Visual Studio Code" "Zed" "Sublime Text" "TextEdit")
-  local process_names=("Kern" "Code" "zed" "cli" "sublime_text" "TextEdit")
-  local bundle_ids=("com.gradigit.kern" "com.microsoft.VSCode" "dev.zed.Zed" "com.sublimetext.4" "com.apple.TextEdit")
+  local app_names=("Kern" "Visual Studio Code" "Zed" "Sublime Text" "TextEdit" "Typora")
+  local process_names=("Kern" "Code" "zed" "cli" "sublime_text" "TextEdit" "Typora")
+  local bundle_ids=("com.gradigit.kern" "com.microsoft.VSCode" "dev.zed.Zed" "com.sublimetext.4" "com.apple.TextEdit" "abnerworks.Typora")
 
   for name in "${app_names[@]}"; do
     /usr/bin/killall -9 "$name" >/dev/null 2>&1 || true
@@ -70,6 +73,18 @@ editor_list_includes_zed() {
   return 1
 }
 
+editor_list_includes_kern() {
+  local editor_name
+  for editor_name in "$@"; do
+    local normalized
+    normalized="$(echo "$editor_name" | tr '[:upper:]' '[:lower:]' | xargs)"
+    if [[ "$normalized" == "kern" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 resolve_forked_zed_cli() {
   local candidates=(
     "${HOME}/Projects/zed-fork-bench/target/release/cli"
@@ -81,6 +96,23 @@ resolve_forked_zed_cli() {
   local candidate
   for candidate in "${candidates[@]}"; do
     if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_release_kern_app() {
+  local candidates=(
+    "$(pwd)/.derived-data-release/Build/Products/Release/KernTextKit.app"
+    "$(pwd)/.derived-data/native/Build/Products/Release/KernTextKit.app"
+    "${HOME}/Applications/Kern.app"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -d "$candidate" ]]; then
       printf '%s' "$candidate"
       return 0
     fi
@@ -112,6 +144,7 @@ while [[ $# -gt 0 ]]; do
     --kern-open-metric-source) KERN_OPEN_METRIC_SOURCE="$2"; shift 2 ;;
     --zed-bench-hook) ZED_BENCH_HOOK="$2"; shift 2 ;;
     --zed-ready-mode) ZED_READY_MODE="$2"; shift 2 ;;
+    --profile) BENCH_PROFILE="$2"; shift 2 ;;
     --verbose|-v) VERBOSE=true; shift ;;
     --file) FILE="$2"; shift 2 ;;
     --help|-h)
@@ -144,6 +177,7 @@ Options:
                         Kern open metric source: auto|wow|probe
   --zed-bench-hook MODE  Zed hook mode: auto|off|required
   --zed-ready-mode MODE  Zed bench-ready mode label
+  --profile NAME         Benchmark profile (default|full-fidelity-stable)
   --verbose, -v         Verbose output
   --file PATH           Benchmark fixture file
 
@@ -259,6 +293,18 @@ if [[ "$SUITE" == "benchmark_full_fidelity" ]]; then
   if [[ -z "$KERN_OPEN_METRIC_SOURCE" ]]; then KERN_OPEN_METRIC_SOURCE="wow"; fi
 fi
 
+case "$BENCH_PROFILE" in
+  ""|default)
+    ;;
+  full-fidelity-stable|full_fidelity_stable|ff-stable|ff_stable)
+    BENCH_PROFILE="full-fidelity-stable"
+    ;;
+  *)
+    echo "Error: unsupported --profile '$BENCH_PROFILE'. Supported: default, full-fidelity-stable" >&2
+    exit 1
+    ;;
+esac
+
 if [[ -n "$KERN_OPEN_METRIC_SOURCE" ]]; then CMD+=("--kern-open-metric-source" "$KERN_OPEN_METRIC_SOURCE"); fi
 if [[ -n "$ZED_BENCH_HOOK" ]]; then CMD+=("--zed-bench-hook" "$ZED_BENCH_HOOK"); fi
 if [[ -n "$ZED_READY_MODE" ]]; then CMD+=("--zed-ready-mode" "$ZED_READY_MODE"); fi
@@ -304,8 +350,52 @@ if [[ "$USES_ALL_EDITORS" == true ]]; then
   if [[ "$SUITE" != "wow_internal" ]]; then
     NEEDS_ZED=true
   fi
+  NEEDS_KERN=true
 elif editor_list_includes_zed "${SELECTED_EDITORS[@]}"; then
   NEEDS_ZED=true
+fi
+
+if [[ "$USES_ALL_EDITORS" != true ]] && editor_list_includes_kern "${SELECTED_EDITORS[@]}"; then
+  NEEDS_KERN=true
+fi
+
+if [[ "$NEEDS_KERN" == true ]]; then
+  if [[ -n "${KERN_BENCH_KERN_APP:-}" ]]; then
+    resolved_kern_override="$(expand_tilde_path "${KERN_BENCH_KERN_APP}")"
+    if [[ ! -d "$resolved_kern_override" ]]; then
+      echo "Error: KERN_BENCH_KERN_APP is set but app bundle not found: $resolved_kern_override" >&2
+      exit 1
+    fi
+    export KERN_BENCH_KERN_APP="$resolved_kern_override"
+    KERN_APP_SOURCE="env"
+  elif resolved_release_kern_app="$(resolve_release_kern_app)"; then
+    export KERN_BENCH_KERN_APP="$resolved_release_kern_app"
+    KERN_APP_SOURCE="auto-release"
+  fi
+fi
+
+if [[ "$BENCH_PROFILE" == "full-fidelity-stable" ]]; then
+  if [[ "$SUITE" != "benchmark_full_fidelity" ]]; then
+    echo "Error: --profile full-fidelity-stable requires --suite benchmark_full_fidelity" >&2
+    exit 1
+  fi
+  # Deterministic/stable profile knobs for large-document staged promotion behavior.
+  # Respect explicit caller env overrides.
+  if [[ -z "${KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS:-}" ]]; then
+    export KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS="1000000"
+  fi
+  if [[ -z "${KERN_STAGED_PROMOTION_CONTEXT_CHARS:-}" ]]; then
+    export KERN_STAGED_PROMOTION_CONTEXT_CHARS="1000"
+  fi
+  if [[ -z "${KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS:-}" ]]; then
+    export KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS="2"
+  fi
+  if [[ -z "${KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS:-}" ]]; then
+    export KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS="2"
+  fi
+  if [[ -z "${KERN_STAGED_PROMOTION_TURBO_IDLE_MS:-}" ]]; then
+    export KERN_STAGED_PROMOTION_TURBO_IDLE_MS="120"
+  fi
 fi
 
 if [[ "$NEEDS_ZED" == true ]]; then
@@ -345,8 +435,18 @@ fi
 if [[ "$NEEDS_ZED" == true ]]; then
   echo "Zed CLI: fork ($ZED_CLI_SOURCE)"
 fi
+if [[ -n "${KERN_BENCH_KERN_APP:-}" ]]; then
+  if [[ -n "$KERN_APP_SOURCE" ]]; then
+    echo "Kern app: $KERN_BENCH_KERN_APP ($KERN_APP_SOURCE)"
+  else
+    echo "Kern app: $KERN_BENCH_KERN_APP"
+  fi
+fi
 echo "Policy: suite-specific roster/classification policy enforced"
 echo "Claims: README/social headline claims require Official runs"
+if [[ -n "$BENCH_PROFILE" ]]; then
+  echo "Profile: $BENCH_PROFILE"
+fi
 echo ""
 
 set +e
@@ -354,7 +454,7 @@ set +e
 status=$?
 set -e
 
-if /usr/bin/pgrep -f "com.gradigit.kern|com.microsoft.VSCode|dev.zed.Zed|com.sublimetext.4|com.apple.TextEdit" >/dev/null 2>&1; then
+if /usr/bin/pgrep -f "com.gradigit.kern|com.microsoft.VSCode|dev.zed.Zed|com.sublimetext.4|com.apple.TextEdit|abnerworks.Typora" >/dev/null 2>&1; then
   cleanup_editors
 fi
 

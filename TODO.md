@@ -33,6 +33,43 @@ Persistent tracker for the native TextKit rewrite (no WebView).
   - Legacy Kern (WebKit) for comparison (re-scoped; deprecated path no longer part of locked roster)
   - External editors (VS Code/TextEdit/Sublime/Zed; Typora documented as "cannot render large fixture")
 
+## Forge Orchestrator — Code Block Chrome Decoupling Fix (2026-03-06)
+
+- [x] Milestone 1 — Plan + adversarial review
+  - Scope: fix code-block visual asymmetry caused by unconditional top chrome reservation; preserve code-block chrome usability without layout jumps.
+  - Files in scope: `KernApp/Sources/Editor/CodeBlockChromeGeometry.swift`, `KernApp/Sources/Editor/NativeEditorViewController.swift`, `KernApp/Sources/Editor/NativeMarkdownTextView.swift`, `KernApp/Sources/Editor/NativeMarkdownCodec.swift`, targeted regression tests.
+  - Gate:
+    - reviewed implementation plan exists
+    - no CRITICAL/HIGH plan-review findings remain
+
+- [x] Milestone 2 — Implement inactive/active chrome separation
+  - Scope: make the default code-block background symmetric when chrome is hidden; keep chrome overlay visible/usable when caret or hover activates it.
+  - Gate:
+    - inactive code blocks no longer reserve extra top background space
+    - active chrome does not overlap the first code token
+    - no block-overlap regression for consecutive code blocks
+
+- [x] Milestone 3 — Regression coverage + quality gate
+  - Scope: add/adjust geometry + placement regressions for inactive and active states, then pass focused and full suites.
+  - Required checks:
+    - focused chrome/layout suites
+    - `./scripts/test-native-editor.sh`
+    - `./scripts/run-typing-behavior-gate.sh --lane pr`
+  - Gate:
+    - targeted suites green
+    - full native suite green
+    - typing gate green
+
+- [x] Milestone 4 — Rebuild/reinstall + evidence sync
+  - Scope: rebuild the app bundle, reinstall locally, update forge state with evidence.
+  - Gate:
+    - local app bundle rebuilt/reinstalled
+    - forge review artifacts and completion evidence recorded
+
+### Completion notes
+- Async local-image rendering now invalidates layout even when the attachment finishes decoding before it first binds to a host text view, which removed the stale placeholder-sized layout seen in full-spec snapshot/manual renders.
+- Snapshot baselines were re-recorded after the render pipeline stabilized.
+
 
 ## Forge Orchestrator — Typing Behavior Exhaustive Test Program (2026-03-03)
 

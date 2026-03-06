@@ -78,6 +78,23 @@ final class NativeMarkdownCodecTests: XCTestCase {
     }
 
     @MainActor
+    func testFencedCodeInfoStringRoundTripsWithoutLosingMetadata() {
+        let md = """
+        ```typescript title=\"editor-config\" linenums=on
+        interface EditorConfig { theme: string }
+        ```
+        """
+
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+
+        XCTAssertTrue(
+            out.contains("```typescript title=\"editor-config\" linenums=on"),
+            "Fenced code export should preserve the full authored info string"
+        )
+    }
+
+    @MainActor
     func testReferenceDefinitionInsideBlockquote() {
         let md = """
         > [id]: https://example.com "Title"
@@ -104,5 +121,107 @@ final class NativeMarkdownCodecTests: XCTestCase {
         let out = NativeMarkdownCodec.exportMarkdown(attr)
 
         XCTAssertTrue(out.contains("https://nested.example.com"), "Reference definition inside nested blockquote should resolve")
+    }
+
+    @MainActor
+    func testInlineRelativeLinkResolvesAgainstBaseURLForNavigation() {
+        let md = "[Guide](docs/guide.md)\n"
+        let baseURL = URL(fileURLWithPath: "/tmp/kern/current.md")
+
+        let attr = NativeMarkdownCodec.importMarkdown(md, baseURL: baseURL)
+        let ns = attr.string as NSString
+        let range = ns.range(of: "Guide")
+        XCTAssertNotEqual(range.location, NSNotFound)
+        guard range.location != NSNotFound else { return }
+
+        guard let link = attr.attribute(.link, at: range.location, effectiveRange: nil) as? URL else {
+            return XCTFail("Expected URL .link attribute for relative markdown link")
+        }
+        XCTAssertTrue(link.isFileURL, "Relative markdown links should resolve to file URLs when baseURL is available")
+        XCTAssertEqual(link.standardizedFileURL.path, "/tmp/kern/docs/guide.md")
+    }
+
+    @MainActor
+    func testInlineAnchorLinkRemainsAnchorURLForInDocumentJumpHandling() {
+        let md = "[Jump](#section-1)\n"
+        let baseURL = URL(fileURLWithPath: "/tmp/kern/current.md")
+
+        let attr = NativeMarkdownCodec.importMarkdown(md, baseURL: baseURL)
+        let ns = attr.string as NSString
+        let range = ns.range(of: "Jump")
+        XCTAssertNotEqual(range.location, NSNotFound)
+        guard range.location != NSNotFound else { return }
+
+        guard let link = attr.attribute(.link, at: range.location, effectiveRange: nil) as? URL else {
+            return XCTFail("Expected URL .link attribute for anchor markdown link")
+        }
+        XCTAssertNil(link.scheme, "In-document anchors should remain fragment URLs so anchor navigation handles them")
+        XCTAssertEqual(link.fragment, "section-1")
+    }
+
+    @MainActor
+    func testInlineBareDomainLinkNormalizesToHTTPSForNavigation() {
+        let md = "[Link](example.com)\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let ns = attr.string as NSString
+        let range = ns.range(of: "Link")
+        XCTAssertNotEqual(range.location, NSNotFound)
+        guard range.location != NSNotFound else { return }
+
+        guard let link = attr.attribute(.link, at: range.location, effectiveRange: nil) as? URL else {
+            return XCTFail("Expected URL .link attribute for bare-domain markdown link")
+        }
+        XCTAssertEqual(link.scheme?.lowercased(), "https")
+        XCTAssertEqual(link.host?.lowercased(), "example.com")
+
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+        XCTAssertTrue(out.contains("[Link](example.com)"), "Export should preserve the user's original markdown destination")
+    }
+
+    @MainActor
+    func testImportNormalizesCRLFAndCRLineEndings() {
+        let crlf = "# Title\r\n\r\n- [ ] one\r\n- [ ] two\r\n"
+        let cr = "# Title\r\r- [ ] one\r- [ ] two\r"
+
+        let crlfAttr = NativeMarkdownCodec.importMarkdown(crlf)
+        let crAttr = NativeMarkdownCodec.importMarkdown(cr)
+
+        let crlfOut = NativeMarkdownCodec.exportMarkdown(crlfAttr)
+        let crOut = NativeMarkdownCodec.exportMarkdown(crAttr)
+
+        XCTAssertFalse(crlfOut.contains("\r"), "Export should normalize CRLF input to LF")
+        XCTAssertFalse(crOut.contains("\r"), "Export should normalize CR input to LF")
+        XCTAssertTrue(crlfOut.contains("Title"))
+        XCTAssertTrue(crlfOut.contains("- [ ] one"))
+        XCTAssertTrue(crOut.contains("- [ ] two"))
+    }
+
+    @MainActor
+    func testExportUsesBlankLineBetweenParagraphBlocksByDefault() {
+        let md = "First paragraph\nSecond paragraph\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+
+        XCTAssertEqual(out, "First paragraph\n\nSecond paragraph\n")
+    }
+
+    @MainActor
+    func testExportKeepsTightListItemsWithSingleNewlineByDefault() {
+        let md = "- one\n- two\n- three\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let out = NativeMarkdownCodec.exportMarkdown(attr)
+
+        XCTAssertEqual(out, "- one\n- two\n- three\n")
+    }
+
+    @MainActor
+    func testExportCanDisableParagraphBlockSeparation() {
+        let md = "First paragraph\nSecond paragraph\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        var options = NativeMarkdownCodec.Options()
+        options.paragraphBlockSeparationEnabled = false
+
+        let out = NativeMarkdownCodec.exportMarkdown(attr, options: options)
+        XCTAssertEqual(out, "First paragraph\nSecond paragraph\n")
     }
 }

@@ -10,11 +10,11 @@ Scope:
 
 ## Latest Run
 
-- Timestamp: `2026-02-17 02:04:51`
+- Timestamp: `2026-03-04 00:43:59`
 - Command:
   - `./scripts/test-markdown-spec-conformance.sh`
 - Result bundle:
-  - `test-results/native-editor/20260217-020451/spec-conformance/KernMarkdownSpecConformance.xcresult`
+  - `test-results/native-editor/20260304-004334/spec-conformance/KernMarkdownSpecConformance.xcresult`
 
 ## Current Score
 
@@ -46,3 +46,14 @@ Previous score:
    - fail counts by mode,
    - representative examples and artifact paths.
 3. Keep Kern-extension behavior tracked separately in option/profile tests (never counted as strict conformance).
+
+## Separate Typing Behavior Gate (Non-Spec)
+
+Typing behavior exhaustiveness is tracked separately from strict CommonMark/GFM conformance.
+
+- Gate script:
+  - `./scripts/run-typing-behavior-gate.sh --lane pr`
+  - `./scripts/run-typing-behavior-gate.sh --lane nightly`
+- Latest evidence (2026-03-04):
+  - `test-results/typing-behavior/20260304-003743-pr/summary.txt`
+  - `test-results/typing-behavior/20260304-003815-nightly/summary.txt`

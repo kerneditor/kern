@@ -98,6 +98,76 @@ final class NativeMarkdownCodecAttributeTests: XCTestCase {
         XCTAssertFalse(hasSingleStrike(attr, token: "CHILD_UNCHECKED"))
     }
 
+    @MainActor
+    func testHeadingInlineCodeUsesMonospacedFontAtHeadingSize() {
+        let md = "# Heading `Code` text\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let ns = attr.string as NSString
+
+        let headingRange = ns.range(of: "Heading")
+        let codeRange = ns.range(of: "Code")
+        XCTAssertNotEqual(headingRange.location, NSNotFound)
+        XCTAssertNotEqual(codeRange.location, NSNotFound)
+        guard headingRange.location != NSNotFound, codeRange.location != NSNotFound else { return }
+
+        let headingFont = attr.attribute(.font, at: headingRange.location, effectiveRange: nil) as? NSFont
+        let codeFont = attr.attribute(.font, at: codeRange.location, effectiveRange: nil) as? NSFont
+        XCTAssertNotNil(headingFont)
+        XCTAssertNotNil(codeFont)
+        guard let headingFont, let codeFont else { return }
+
+        XCTAssertEqual(codeFont.pointSize, headingFont.pointSize, accuracy: 0.01, "Inline code in headings should keep heading size")
+        XCTAssertTrue(codeFont.fontDescriptor.symbolicTraits.contains(.monoSpace), "Inline code should remain monospaced inside headings")
+    }
+
+    @MainActor
+    func testHeadingInlineEmphasisRetainsHeadingScale() {
+        let md = "## Plain **Bold** *Italic*\n"
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let ns = attr.string as NSString
+
+        let plainRange = ns.range(of: "Plain")
+        let boldRange = ns.range(of: "Bold")
+        let italicRange = ns.range(of: "Italic")
+        guard plainRange.location != NSNotFound, boldRange.location != NSNotFound, italicRange.location != NSNotFound else {
+            XCTFail("Expected heading text tokens to exist in attributed output")
+            return
+        }
+
+        let plainFont = attr.attribute(.font, at: plainRange.location, effectiveRange: nil) as? NSFont
+        let boldFont = attr.attribute(.font, at: boldRange.location, effectiveRange: nil) as? NSFont
+        let italicFont = attr.attribute(.font, at: italicRange.location, effectiveRange: nil) as? NSFont
+        XCTAssertNotNil(plainFont)
+        XCTAssertNotNil(boldFont)
+        XCTAssertNotNil(italicFont)
+        guard let plainFont, let boldFont, let italicFont else { return }
+
+        XCTAssertEqual(boldFont.pointSize, plainFont.pointSize, accuracy: 0.01)
+        XCTAssertEqual(italicFont.pointSize, plainFont.pointSize, accuracy: 0.01)
+        XCTAssertTrue(boldFont.fontDescriptor.symbolicTraits.contains(.bold))
+        XCTAssertTrue(italicFont.fontDescriptor.symbolicTraits.contains(.italic))
+    }
+
+    @MainActor
+    func testCodeFenceStoresFullInfoStringSeparatelyFromLanguageToken() {
+        let md = """
+        ```typescript title=\"editor-config\" linenums=on
+        interface EditorConfig { theme: string }
+        ```
+        """
+        let attr = NativeMarkdownCodec.importMarkdown(md)
+        let ns = attr.string as NSString
+        let tokenRange = ns.range(of: "interface")
+        XCTAssertNotEqual(tokenRange.location, NSNotFound)
+        guard tokenRange.location != NSNotFound else { return }
+
+        let language = attr.attribute(.kernCodeLanguage, at: tokenRange.location, effectiveRange: nil) as? String
+        let infoString = attr.attribute(.kernCodeFenceInfoString, at: tokenRange.location, effectiveRange: nil) as? String
+
+        XCTAssertEqual(language, "typescript")
+        XCTAssertEqual(infoString, "typescript title=\"editor-config\" linenums=on")
+    }
+
     private func hasSingleStrike(_ attr: NSAttributedString, token: String) -> Bool {
         let ns = attr.string as NSString
         let range = ns.range(of: token)

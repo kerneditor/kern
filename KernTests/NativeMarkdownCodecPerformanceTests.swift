@@ -3,6 +3,27 @@ import XCTest
 @testable import KernTextKit
 
 final class NativeMarkdownCodecPerformanceTests: XCTestCase {
+    private struct StagedSliceBenchmarkResult: Codable {
+        let targetUTF16: Int
+        let actualUTF16: Int
+        let runs: Int
+        let p50Ms: Double
+        let p95Ms: Double
+        let minMs: Double
+        let maxMs: Double
+        let meanMs: Double
+        let samplesMs: [Double]
+    }
+
+    private struct StagedSliceBenchmarkReport: Codable {
+        let generatedAt: String
+        let fixture: String
+        let fixtureBytes: Int
+        let runsPerSlice: Int
+        let syntaxHighlightingEnabled: Bool
+        let results: [StagedSliceBenchmarkResult]
+    }
+
     private struct MermaidModeResult: Codable {
         let mode: String
         let runs: Int
@@ -103,6 +124,57 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
         measure(metrics: [XCTClockMetric()], options: defaultPerformanceOptions()) {
             _ = NativeMarkdownCodec.parseInline(inlineText, baseFont: baseFont)
         }
+    }
+
+    @MainActor
+    func testStagedPromotionSliceParseBenchmark() throws {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
+            throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
+        }
+
+        let source = try loadPerfFixture(name: "native-editor-benchmark.md")
+        let runs = max(3, TestRuntimeConfig.int("KERN_STAGED_SLICE_BENCH_RUNS", default: 7) ?? 7)
+        let targets = [128_000, 256_000, 512_000, 1_000_000]
+        var options = NativeMarkdownCodec.Options.fromUserDefaults()
+        options.syntaxHighlightingEnabled = false
+
+        var results: [StagedSliceBenchmarkResult] = []
+        for target in targets {
+            let slice = alignedPrefix(source, utf16Count: target)
+            var samples: [Double] = []
+            samples.reserveCapacity(runs)
+            for _ in 0..<runs {
+                autoreleasepool {
+                    let start = DispatchTime.now().uptimeNanoseconds
+                    _ = NativeMarkdownCodec.importMarkdown(slice, options: options)
+                    let elapsedNs = DispatchTime.now().uptimeNanoseconds - start
+                    samples.append(Double(elapsedNs) / 1_000_000)
+                }
+            }
+
+            let result = StagedSliceBenchmarkResult(
+                targetUTF16: target,
+                actualUTF16: slice.utf16.count,
+                runs: runs,
+                p50Ms: percentile(samples, 0.50),
+                p95Ms: percentile(samples, 0.95),
+                minMs: samples.min() ?? .zero,
+                maxMs: samples.max() ?? .zero,
+                meanMs: samples.reduce(0, +) / Double(max(samples.count, 1)),
+                samplesMs: samples
+            )
+            results.append(result)
+        }
+
+        let report = StagedSliceBenchmarkReport(
+            generatedAt: ISO8601DateFormatter().string(from: Date()),
+            fixture: "native-editor-benchmark.md",
+            fixtureBytes: source.utf8.count,
+            runsPerSlice: runs,
+            syntaxHighlightingEnabled: options.syntaxHighlightingEnabled,
+            results: results
+        )
+        try writeStagedSliceBenchmarkReport(report)
     }
 
     @MainActor
@@ -232,6 +304,21 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
         return out.joined(separator: "\n")
     }
 
+    private func alignedPrefix(_ markdown: String, utf16Count: Int) -> String {
+        let ns = markdown as NSString
+        if ns.length <= utf16Count { return markdown }
+        var endLocation = max(0, min(utf16Count, ns.length))
+        if endLocation < ns.length {
+            let searchRange = NSRange(location: endLocation, length: min(ns.length - endLocation, 8_192))
+            let newlineRange = ns.range(of: "\n", options: [], range: searchRange)
+            if newlineRange.location != NSNotFound {
+                endLocation = newlineRange.location + newlineRange.length
+            }
+        }
+        let end = String.Index(utf16Offset: endLocation, in: markdown)
+        return String(markdown[..<end])
+    }
+
     private func heavySequenceBlock() -> String {
         var lines: [String] = ["sequenceDiagram"]
         for i in 0..<20 {
@@ -349,6 +436,52 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
         add(XCTAttachment(string: markdown))
         print("Mermaid mode benchmark report: \(mdURL.path)")
         print("Mermaid mode benchmark json: \(jsonURL.path)")
+    }
+
+    private func writeStagedSliceBenchmarkReport(_ payload: StagedSliceBenchmarkReport) throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KernTests/
+            .deletingLastPathComponent() // repo root
+        let archiveDir = root
+            .appendingPathComponent("benchmark-archive", isDirectory: true)
+            .appendingPathComponent("staged-slice-benchmark", isDirectory: true)
+        try FileManager.default.createDirectory(at: archiveDir, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: Date())
+
+        let jsonURL = archiveDir.appendingPathComponent("\(stamp)-staged-slice-benchmark.json")
+        let mdURL = archiveDir.appendingPathComponent("\(stamp)-staged-slice-benchmark.md")
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(payload)
+        try data.write(to: jsonURL)
+
+        var lines: [String] = []
+        lines.append("# Staged Promotion Slice Parse Benchmark")
+        lines.append("")
+        lines.append("- Generated: \(payload.generatedAt)")
+        lines.append("- Fixture: \(payload.fixture) (\(payload.fixtureBytes) bytes)")
+        lines.append("- Runs per slice: \(payload.runsPerSlice)")
+        lines.append("- Syntax highlighting: \(payload.syntaxHighlightingEnabled ? "enabled" : "disabled")")
+        lines.append("")
+        lines.append("| Target UTF16 | Actual UTF16 | p50 (ms) | p95 (ms) | min (ms) | max (ms) | mean (ms) |")
+        lines.append("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        for result in payload.results {
+            lines.append(
+                "| \(result.targetUTF16) | \(result.actualUTF16) | \(formatMs(result.p50Ms)) | " +
+                "\(formatMs(result.p95Ms)) | \(formatMs(result.minMs)) | " +
+                "\(formatMs(result.maxMs)) | \(formatMs(result.meanMs)) |"
+            )
+        }
+        lines.append("")
+        try lines.joined(separator: "\n").write(to: mdURL, atomically: true, encoding: .utf8)
+
+        print("Staged slice benchmark report: \(mdURL.path)")
+        print("Staged slice benchmark json: \(jsonURL.path)")
     }
 
     private func renderMermaidModeMarkdownReport(payload: MermaidReportPayload, jsonFilename: String) -> String {

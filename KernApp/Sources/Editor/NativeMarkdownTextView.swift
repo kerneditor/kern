@@ -12,6 +12,7 @@ final class NativeMarkdownTextView: NSTextView {
     weak var nativeDelegate: NativeMarkdownTextViewDelegate?
     var suppressNextAutoNewlineContinuation = false
     var onHoverCodeBlockRangeChanged: ((NSRange?) -> Void)?
+    var currentHoverCodeBlockRange: NSRange? { lastHoverCodeBlockRange }
 
     static let kernMarkdownPasteboardType = NSPasteboard.PasteboardType("com.gradigit.kern.markdown")
 
@@ -163,7 +164,14 @@ final class NativeMarkdownTextView: NSTextView {
         let normalized = normalizePastedText(text)
         guard !normalized.isEmpty else { return }
         suppressNextAutoNewlineContinuation = true
-        insertText(normalized, replacementRange: selectedRange())
+        let insertionAttributes = normalizedPasteInsertionAttributes()
+        let attributed = NSAttributedString(string: normalized, attributes: insertionAttributes)
+        let replacementRange = selectedRange()
+        guard shouldChangeText(in: replacementRange, replacementString: normalized) else { return }
+        textStorage?.replaceCharacters(in: replacementRange, with: attributed)
+        didChangeText()
+        setSelectedRange(NSRange(location: replacementRange.location + attributed.length, length: 0))
+        typingAttributes = insertionAttributes
     }
 
     private func normalizePastedText(_ text: String) -> String {
@@ -217,7 +225,56 @@ final class NativeMarkdownTextView: NSTextView {
            attributed.length > 0 {
             return attributed
         }
+        if let data = pasteboard.data(forType: .html),
+           let attributed = try? NSAttributedString(
+               data: data,
+               options: [
+                   .documentType: NSAttributedString.DocumentType.html,
+                   .characterEncoding: String.Encoding.utf8.rawValue,
+               ],
+               documentAttributes: nil
+           ),
+           attributed.length > 0 {
+            return attributed
+        }
         return nil
+    }
+
+    private func normalizedPasteInsertionAttributes() -> [NSAttributedString.Key: Any] {
+        var attrs = typingAttributes
+        attrs[.font] = insertionContextFont()
+        attrs[.foregroundColor] = NSColor.labelColor
+        attrs.removeValue(forKey: .backgroundColor)
+        attrs.removeValue(forKey: .underlineStyle)
+        attrs.removeValue(forKey: .underlineColor)
+        attrs.removeValue(forKey: .strikethroughStyle)
+        attrs.removeValue(forKey: .strikethroughColor)
+        attrs.removeValue(forKey: .link)
+        return attrs
+    }
+
+    private func insertionContextFont() -> NSFont {
+        if let storage = textStorage,
+           storage.length > 0 {
+            let selection = selectedRange()
+            if selection.location > 0 {
+                let previousIndex = min(storage.length - 1, selection.location - 1)
+                if let font = storage.attribute(.font, at: previousIndex, effectiveRange: nil) as? NSFont {
+                    return font
+                }
+            }
+
+            if selection.location < storage.length,
+               let font = storage.attribute(.font, at: selection.location, effectiveRange: nil) as? NSFont {
+                return font
+            }
+        }
+
+        if let font = self.font {
+            return font
+        }
+
+        return NSFont.systemFont(ofSize: NSFont.systemFontSize)
     }
 
     private func markdownFromAttributedForPaste(_ attributed: NSAttributedString) -> String {
@@ -332,6 +389,10 @@ final class NativeMarkdownTextView: NSTextView {
     /// Used by tests to simulate hover without relying on WindowServer mouse-move plumbing.
     func _debugSimulateHover(at pointInTextView: NSPoint) {
         updateHover(at: pointInTextView)
+    }
+
+    func _debugSimulateHoverExit() {
+        updateHoverRange(nil)
     }
 
     private func updateHover(at pointInTextView: NSPoint) {
@@ -451,8 +512,8 @@ final class NativeMarkdownTextView: NSTextView {
         guard let storage = textStorage, let lm = layoutManager, let tc = textContainer else { return }
         let ns = storage.string as NSString
 
-        let bg = NSColor(white: 0, alpha: 0.08)
-        let stroke = NSColor(white: 0, alpha: 0.10)
+        let bg = NativeEditorAppearance.codeBlockBackgroundColor(appearance: effectiveAppearance)
+        let stroke = NativeEditorAppearance.codeBlockStrokeColor(appearance: effectiveAppearance)
 
         // Only scan paragraphs that intersect the dirty rect (TextKit coordinates).
         let containerRect = dirtyRect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y)

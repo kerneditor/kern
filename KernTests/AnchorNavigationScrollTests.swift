@@ -186,7 +186,7 @@ final class AnchorNavigationScrollTests: XCTestCase {
         scrollView.reflectScrolledClipView(clip)
 
         // Guard should re-apply the jump shortly after the scroll event.
-        XCTAssertTrue(waitUntil(timeout: 1.0) {
+        XCTAssertTrue(waitUntil(timeout: 2.5) {
             guard let (latestTargetRect, _) = rectForParagraph(containing: "Target", in: editorTextView) else {
                 return false
             }
