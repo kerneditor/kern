@@ -51,14 +51,78 @@ let requiredRosterV1: [EditorDefinition] = [
           helperProcessPrefix: nil, requiredForOfficial: true),
 ]
 
+/// Optional editors available for exploratory comparisons only (not part of official roster claims).
+let optionalEditors: [EditorDefinition] = [
+    .init(displayName: "Typora", appName: "Typora",
+          bundleIdentifier: "abnerworks.Typora", processName: "Typora",
+          architecture: "Native (WebKit hybrid)", isElectron: false,
+          cliLaunchCommand: nil, cleanLaunchArgs: ["-ApplePersistenceIgnoreState", "YES"],
+          helperProcessPrefix: nil, requiredForOfficial: false),
+]
+
 /// Alias retained for call sites.
-let knownEditors: [EditorDefinition] = requiredRosterV1
+let knownEditors: [EditorDefinition] = requiredRosterV1 + optionalEditors
 
 func requiredRosterNames() -> [String] {
     requiredRosterV1.map(\.displayName)
 }
 
+func defaultKernAppCandidatePaths(
+    currentDirectoryPath: String = FileManager.default.currentDirectoryPath,
+    homeDirectoryPath: String = NSHomeDirectory()
+) -> [String] {
+    let cwd = URL(fileURLWithPath: currentDirectoryPath, isDirectory: true)
+    let candidates = [
+        cwd.appendingPathComponent("dist/Kern.app").standardizedFileURL.path,
+        cwd.appendingPathComponent("dist/KernTextKit.app").standardizedFileURL.path,
+        cwd.appendingPathComponent("../dist/Kern.app").standardizedFileURL.path,
+        cwd.appendingPathComponent("../dist/KernTextKit.app").standardizedFileURL.path,
+        cwd.appendingPathComponent("../../dist/Kern.app").standardizedFileURL.path,
+        cwd.appendingPathComponent("../../dist/KernTextKit.app").standardizedFileURL.path,
+        "\(homeDirectoryPath)/Applications/Kern.app",
+        "\(homeDirectoryPath)/Applications/KernTextKit.app",
+        "/Applications/Kern.app",
+        "/Applications/KernTextKit.app",
+    ]
+
+    var seen = Set<String>()
+    return candidates.filter { seen.insert($0).inserted }
+}
+
+func resolveKernAppURL(
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    currentDirectoryPath: String = FileManager.default.currentDirectoryPath,
+    homeDirectoryPath: String = NSHomeDirectory(),
+    workspaceURLResolver: (String) -> URL? = { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+) -> URL? {
+    if let override = environment["KERN_BENCH_KERN_APP"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+       !override.isEmpty {
+        let expanded = (override as NSString).expandingTildeInPath
+        if fileExists(expanded) {
+            return URL(fileURLWithPath: expanded, isDirectory: true)
+        }
+    }
+
+    if let resolved = workspaceURLResolver("com.gradigit.kern") {
+        return resolved
+    }
+
+    for candidate in defaultKernAppCandidatePaths(
+        currentDirectoryPath: currentDirectoryPath,
+        homeDirectoryPath: homeDirectoryPath
+    ) where fileExists(candidate) {
+        return URL(fileURLWithPath: candidate, isDirectory: true)
+    }
+
+    return nil
+}
+
 func isEditorInstalled(_ editor: EditorDefinition) -> Bool {
+    if editor.displayName == "Kern", resolveKernAppURL() != nil {
+        return true
+    }
     if NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier) != nil {
         return true
     }
@@ -80,9 +144,13 @@ func findEditor(named name: String) -> EditorDefinition? {
 
 /// Read the CFBundleShortVersionString from an editor's Info.plist.
 func editorVersion(_ editor: EditorDefinition) -> String? {
-    guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier) else {
-        return nil
+    let appURL: URL?
+    if editor.displayName == "Kern" {
+        appURL = resolveKernAppURL()
+    } else {
+        appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier)
     }
+    guard let appURL else { return nil }
     let plistURL = appURL.appendingPathComponent("Contents/Info.plist")
     guard let dict = NSDictionary(contentsOf: plistURL) else { return nil }
     return dict["CFBundleShortVersionString"] as? String

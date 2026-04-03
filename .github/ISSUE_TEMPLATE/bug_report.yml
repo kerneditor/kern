@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible bug in Kern
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Security issues should **not** be filed here. Use the repository security advisory form instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Concise description of the problem.
+      placeholder: What broke?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide deterministic reproduction steps.
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: macOS 15.4
+  - type: input
+    id: kern_version
+    attributes:
+      label: Kern revision
+      description: Commit SHA, branch, or packaged build version.
+      placeholder: main @ abc1234
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Fixture / sample markdown
+      description: Paste the smallest markdown sample that reproduces the bug, if relevant.
+      render: markdown
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation already run
+      description: If you tested a fix locally, list the commands and results.
+      placeholder: |
+        ./scripts/test-native-editor.sh --unit-only
+        cd scripts/kern-bench && swift test -c release

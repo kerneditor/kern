@@ -103,6 +103,188 @@ struct LaunchResult {
     let launchNs: UInt64
 }
 
+private let trackedOwnedBenchmarkPIDsLock = NSLock()
+private var trackedOwnedBenchmarkPIDsByEditor: [String: Set<pid_t>] = [:]
+
+private func trackedOwnedBenchmarkPIDKey(for editor: EditorDefinition) -> String {
+    "\(editor.bundleIdentifier)|\(editor.displayName)"
+}
+
+func trackOwnedBenchmarkPIDs(_ pids: [pid_t], for editor: EditorDefinition) {
+    let filtered = Set(pids.filter { $0 > 0 })
+    guard !filtered.isEmpty else { return }
+    let key = trackedOwnedBenchmarkPIDKey(for: editor)
+    trackedOwnedBenchmarkPIDsLock.lock()
+    defer { trackedOwnedBenchmarkPIDsLock.unlock() }
+    trackedOwnedBenchmarkPIDsByEditor[key, default: []].formUnion(filtered)
+}
+
+func trackedOwnedBenchmarkPIDs(for editor: EditorDefinition) -> [pid_t] {
+    let key = trackedOwnedBenchmarkPIDKey(for: editor)
+    trackedOwnedBenchmarkPIDsLock.lock()
+    defer { trackedOwnedBenchmarkPIDsLock.unlock() }
+    return Array(trackedOwnedBenchmarkPIDsByEditor[key] ?? []).sorted()
+}
+
+func clearTrackedOwnedBenchmarkPIDs(for editor: EditorDefinition) {
+    let key = trackedOwnedBenchmarkPIDKey(for: editor)
+    trackedOwnedBenchmarkPIDsLock.lock()
+    defer { trackedOwnedBenchmarkPIDsLock.unlock() }
+    trackedOwnedBenchmarkPIDsByEditor.removeValue(forKey: key)
+}
+
+func buildCleanupCLIFullPathPatterns(
+    effectiveCLILaunchCommand: [String]?,
+    defaultCLILaunchCommand: [String]?
+) -> [String] {
+    var patterns: [String] = []
+
+    func appendPattern(_ value: String?) {
+        guard let value else { return }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if trimmed.contains("/") {
+            patterns.append((trimmed as NSString).expandingTildeInPath)
+        }
+    }
+
+    appendPattern(effectiveCLILaunchCommand?.first)
+    appendPattern(defaultCLILaunchCommand?.first)
+
+    if let cli = effectiveCLILaunchCommand,
+       let zedIndex = cli.firstIndex(of: "--zed"),
+       zedIndex + 1 < cli.count {
+        appendPattern(cli[zedIndex + 1])
+    }
+    if let cli = defaultCLILaunchCommand,
+       let zedIndex = cli.firstIndex(of: "--zed"),
+       zedIndex + 1 < cli.count {
+        appendPattern(cli[zedIndex + 1])
+    }
+
+    var seen = Set<String>()
+    return patterns.filter { seen.insert($0).inserted }
+}
+
+private let benchmarkEnvironmentAllowlistKeys: Set<String> = [
+    "HOME",
+    "PATH",
+    "TMPDIR",
+    "SHELL",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "TERM",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "__CF_USER_TEXT_ENCODING",
+    "SYSTEM_VERSION_COMPAT"
+]
+
+private let benchmarkEnvironmentAllowlistPrefixes: [String] = [
+    "LC_"
+]
+
+private func validateExistingPrivateBenchmarkDirectory(
+    at url: URL,
+    ownerValidator: (NSNumber) -> Bool
+) -> Bool {
+    let path = url.path
+    if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+       values.isDirectory == true || values.isSymbolicLink == true
+    {
+        guard values.isDirectory == true, values.isSymbolicLink != true else { return false }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let ownerID = attributes[.ownerAccountID] as? NSNumber,
+              ownerValidator(ownerID) else {
+            return false
+        }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: path)
+        return true
+    }
+    return false
+}
+
+@discardableResult
+private func createPrivateBenchmarkDirectory(
+    at url: URL,
+    ownerValidator: (NSNumber) -> Bool
+) -> Bool {
+    if FileManager.default.fileExists(atPath: url.path) {
+        return validateExistingPrivateBenchmarkDirectory(at: url, ownerValidator: ownerValidator)
+    }
+    do {
+        try FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        return true
+    } catch {
+        return false
+    }
+}
+
+func sanitizedBenchmarkProcessEnvironment(
+    baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+    overrides: [String: String]
+) -> [String: String] {
+    var sanitized: [String: String] = [:]
+    for (key, value) in baseEnvironment {
+        if benchmarkEnvironmentAllowlistKeys.contains(key)
+            || benchmarkEnvironmentAllowlistPrefixes.contains(where: { key.hasPrefix($0) }) {
+            sanitized[key] = value
+        }
+    }
+    for (key, value) in overrides {
+        sanitized[key] = value
+    }
+    return sanitized
+}
+
+func benchmarkCleanLaunchArgs(
+    for editor: EditorDefinition,
+    temporaryRoot: String = NSTemporaryDirectory(),
+    fallbackTemporaryRoot: String = FileManager.default.temporaryDirectory.path,
+    uniqueSuffix: String = UUID().uuidString,
+    ownerValidator: ((NSNumber) -> Bool)? = nil
+) throws -> [String] {
+    let effectiveOwnerValidator = ownerValidator ?? { $0 == NSNumber(value: getuid()) }
+    func privateProfileDir(rootBase: URL) -> URL? {
+        let root = rootBase.appendingPathComponent("kern-bench-profiles", isDirectory: true)
+        let editorRoot = root
+            .appendingPathComponent(editor.processName.lowercased(), isDirectory: true)
+        let dir = editorRoot.appendingPathComponent(uniqueSuffix, isDirectory: true)
+        guard createPrivateBenchmarkDirectory(at: root, ownerValidator: effectiveOwnerValidator),
+              createPrivateBenchmarkDirectory(at: editorRoot, ownerValidator: effectiveOwnerValidator),
+              createPrivateBenchmarkDirectory(at: dir, ownerValidator: effectiveOwnerValidator) else {
+            return nil
+        }
+        return dir
+    }
+
+    let requestedRoot = URL(fileURLWithPath: temporaryRoot, isDirectory: true)
+    let fallbackRoot = URL(fileURLWithPath: fallbackTemporaryRoot, isDirectory: true)
+    var args: [String] = []
+    var index = 0
+    while index < editor.cleanLaunchArgs.count {
+        let arg = editor.cleanLaunchArgs[index]
+        if arg == "--user-data-dir", index + 1 < editor.cleanLaunchArgs.count {
+            guard let dir = privateProfileDir(rootBase: requestedRoot)
+                ?? privateProfileDir(rootBase: fallbackRoot) else {
+                throw LaunchError.privateProfileDirectoryUnavailable(editor.processName)
+            }
+            args.append(arg)
+            args.append(dir.path)
+            index += 2
+            continue
+        }
+        args.append(arg)
+        index += 1
+    }
+    return args
+}
+
 struct EditorLauncher {
     let editor: EditorDefinition
 
@@ -155,35 +337,17 @@ struct EditorLauncher {
     }
 
     private var cleanupCLIFullPathPatterns: [String] {
-        var patterns: [String] = []
-
-        func appendPattern(_ value: String?) {
-            guard let value else { return }
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            if trimmed.contains("/") {
-                patterns.append((trimmed as NSString).expandingTildeInPath)
-            }
-        }
-
-        appendPattern(effectiveCLILaunchCommand?.first)
-        appendPattern(editor.cliLaunchCommand?.first)
-
-        var seen = Set<String>()
-        return patterns.filter { seen.insert($0).inserted }
+        buildCleanupCLIFullPathPatterns(
+            effectiveCLILaunchCommand: effectiveCLILaunchCommand,
+            defaultCLILaunchCommand: editor.cliLaunchCommand
+        )
     }
 
     /// Optional app-bundle override for local benchmarking.
-    /// Usage: KERN_BENCH_KERN_APP=/abs/path/to/KernTextKit.app
+    /// Usage: KERN_BENCH_KERN_APP=/abs/path/to/Kern.app
     private var effectiveAppURL: URL? {
-        if editor.displayName == "Kern",
-           let override = ProcessInfo.processInfo.environment["KERN_BENCH_KERN_APP"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !override.isEmpty {
-            let expanded = (override as NSString).expandingTildeInPath
-            if FileManager.default.fileExists(atPath: expanded) {
-                return URL(fileURLWithPath: expanded, isDirectory: true)
-            }
+        if editor.displayName == "Kern" {
+            return resolveKernAppURL()
         }
         return NSWorkspace.shared.urlForApplication(withBundleIdentifier: editor.bundleIdentifier)
     }
@@ -195,12 +359,20 @@ struct EditorLauncher {
         env: [String: String] = [:],
         additionalArgs: [String] = []
     ) async throws -> LaunchResult {
+        let cleanLaunchArgs = try benchmarkCleanLaunchArgs(for: editor)
+        let sanitizedEnvironment = sanitizedBenchmarkProcessEnvironment(overrides: env)
+
         // NSWorkspace/open-based launches are convenient for normal cross-editor flows,
         // but environment propagation can be unreliable across LaunchServices boundaries.
         // For Kern internal microbenchmarks we require deterministic env injection.
-        if !env.isEmpty,
+        if !sanitizedEnvironment.isEmpty,
            editor.bundleIdentifier == "com.gradigit.kern",
-           let direct = try? await launchViaDirectBinary(file: file, env: env, additionalArgs: additionalArgs),
+           let direct = try? await launchViaDirectBinary(
+            file: file,
+            env: sanitizedEnvironment,
+            cleanLaunchArgs: cleanLaunchArgs,
+            additionalArgs: additionalArgs
+           ),
            direct.pid > 0 {
             return direct
         }
@@ -209,7 +381,8 @@ struct EditorLauncher {
             if let result = try? await launchViaCLI(
                 cli: cli,
                 file: file,
-                env: env,
+                env: sanitizedEnvironment,
+                cleanLaunchArgs: cleanLaunchArgs,
                 additionalArgs: additionalArgs
             ), result.pid > 0 {
                 return result
@@ -221,14 +394,16 @@ struct EditorLauncher {
             return try await launchViaOpen(
                 file: file,
                 useCleanArgs: true,
-                env: env,
+                env: sanitizedEnvironment,
+                cleanLaunchArgs: cleanLaunchArgs,
                 additionalArgs: additionalArgs
             )
         } else {
             return try await launchViaOpen(
                 file: file,
                 useCleanArgs: true,
-                env: env,
+                env: sanitizedEnvironment,
+                cleanLaunchArgs: cleanLaunchArgs,
                 additionalArgs: additionalArgs
             )
         }
@@ -238,6 +413,7 @@ struct EditorLauncher {
     private func launchViaDirectBinary(
         file: String,
         env: [String: String],
+        cleanLaunchArgs: [String],
         additionalArgs: [String]
     ) async throws -> LaunchResult {
         guard let appURL = effectiveAppURL else {
@@ -258,8 +434,8 @@ struct EditorLauncher {
 
         let proc = Process()
         proc.executableURL = binaryURL
-        proc.arguments = editor.cleanLaunchArgs + additionalArgs + [file]
-        proc.environment = ProcessInfo.processInfo.environment.merging(env) { _, new in new }
+        proc.arguments = cleanLaunchArgs + additionalArgs + [file]
+        proc.environment = env
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
 
@@ -269,9 +445,11 @@ struct EditorLauncher {
         // Direct binary launch gives us the real app PID immediately.
         let pid = proc.processIdentifier
         if pid > 0 {
+            trackOwnedBenchmarkPIDs([pid], for: editor)
             return LaunchResult(pid: pid, launchNs: launchNs)
         }
         let resolvedPID = try await waitForPID()
+        trackOwnedBenchmarkPIDs([resolvedPID], for: editor)
         return LaunchResult(pid: resolvedPID, launchNs: launchNs)
     }
 
@@ -280,6 +458,7 @@ struct EditorLauncher {
         cli: [String],
         file: String,
         env: [String: String],
+        cleanLaunchArgs: [String],
         additionalArgs: [String]
     ) async throws -> LaunchResult {
         guard let cliPath = resolveCommandPath(cli[0]) else {
@@ -287,9 +466,9 @@ struct EditorLauncher {
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: cliPath)
-        proc.arguments = Array(cli.dropFirst()) + editor.cleanLaunchArgs + additionalArgs + [file]
+        proc.arguments = Array(cli.dropFirst()) + cleanLaunchArgs + additionalArgs + [file]
         if !env.isEmpty {
-            proc.environment = ProcessInfo.processInfo.environment.merging(env) { _, new in new }
+            proc.environment = env
         }
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
@@ -300,6 +479,13 @@ struct EditorLauncher {
 
         // Poll for PID registration with retry (up to pidLookupTimeout).
         let pid = try await waitForPID()
+        var trackedPIDs = Set([proc.processIdentifier, pid].filter { $0 > 0 })
+        if editor.displayName == "Zed",
+           let zedIndex = cli.firstIndex(of: "--zed"),
+           zedIndex + 1 < cli.count {
+            trackedPIDs.formUnion(findPIDsByExactCommandPath(cli[zedIndex + 1]))
+        }
+        trackOwnedBenchmarkPIDs(Array(trackedPIDs), for: editor)
         return LaunchResult(pid: pid, launchNs: launchNs)
     }
 
@@ -309,6 +495,7 @@ struct EditorLauncher {
         file: String,
         useCleanArgs: Bool,
         env: [String: String],
+        cleanLaunchArgs: [String],
         additionalArgs: [String]
     ) async throws -> LaunchResult {
         guard let appURL = effectiveAppURL else {
@@ -317,6 +504,7 @@ struct EditorLauncher {
                 file: file,
                 useCleanArgs: useCleanArgs,
                 env: env,
+                cleanLaunchArgs: cleanLaunchArgs,
                 additionalArgs: additionalArgs
             )
         }
@@ -324,8 +512,8 @@ struct EditorLauncher {
         let fileURL = URL(fileURLWithPath: file)
         let config = NSWorkspace.OpenConfiguration()
         var launchArgs: [String] = []
-        if useCleanArgs && !editor.cleanLaunchArgs.isEmpty {
-            launchArgs += editor.cleanLaunchArgs
+        if useCleanArgs && !cleanLaunchArgs.isEmpty {
+            launchArgs += cleanLaunchArgs
         }
         launchArgs += additionalArgs
         if !launchArgs.isEmpty {
@@ -338,6 +526,7 @@ struct EditorLauncher {
         // Capture t0 immediately before launch.
         let launchNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let app = try await NSWorkspace.shared.open([fileURL], withApplicationAt: appURL, configuration: config)
+        trackOwnedBenchmarkPIDs([app.processIdentifier], for: editor)
         return LaunchResult(pid: app.processIdentifier, launchNs: launchNs)
     }
 
@@ -346,13 +535,14 @@ struct EditorLauncher {
         file: String,
         useCleanArgs: Bool,
         env: [String: String],
+        cleanLaunchArgs: [String],
         additionalArgs: [String]
     ) async throws -> LaunchResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         var args = ["-a", editor.appName]
-        if useCleanArgs && !editor.cleanLaunchArgs.isEmpty {
-            args += ["--args"] + editor.cleanLaunchArgs
+        if useCleanArgs && !cleanLaunchArgs.isEmpty {
+            args += ["--args"] + cleanLaunchArgs
             if !additionalArgs.isEmpty {
                 args += additionalArgs
             }
@@ -362,7 +552,7 @@ struct EditorLauncher {
         args += [file]
         proc.arguments = args
         if !env.isEmpty {
-            proc.environment = ProcessInfo.processInfo.environment.merging(env) { _, new in new }
+            proc.environment = env
         }
 
         let launchNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
@@ -370,6 +560,7 @@ struct EditorLauncher {
         proc.waitUntilExit()
 
         let pid = try await waitForPID()
+        trackOwnedBenchmarkPIDs([pid], for: editor)
         return LaunchResult(pid: pid, launchNs: launchNs)
     }
 
@@ -400,6 +591,9 @@ struct EditorLauncher {
 
     /// Stop editor processes with graceful-first policy, then escalate only if needed.
     func kill() async {
+        let explicitlyOwnedPIDs = Set(trackedOwnedBenchmarkPIDs(for: editor).filter { $0 > 0 })
+        defer { clearTrackedOwnedBenchmarkPIDs(for: editor) }
+
         func waitUntilStopped(maxWaitMs: Int) async -> Bool {
             let deadline = CFAbsoluteTimeGetCurrent() + (Double(maxWaitMs) / 1000.0)
             while CFAbsoluteTimeGetCurrent() < deadline {
@@ -411,10 +605,17 @@ struct EditorLauncher {
             return !isRunning()
         }
 
+        func terminateOwnedPIDs() {
+            for pid in explicitlyOwnedPIDs where pid > 0 {
+                Foundation.kill(pid, SIGTERM)
+            }
+        }
+
         let initialApps = NSRunningApplication.runningApplications(withBundleIdentifier: editor.bundleIdentifier)
             .filter { !$0.isTerminated }
 
         // 1) Ask politely first; this preserves editor/session cleanup paths.
+        terminateOwnedPIDs()
         for app in initialApps {
             _ = app.terminate()
         }
@@ -432,44 +633,34 @@ struct EditorLauncher {
             return
         }
 
-        // 3) Last resort: targeted SIGKILL + process-name/pattern cleanup.
+        // 3) Last resort: SIGKILL only benchmark-owned bundle processes, their descendants,
+        // and explicitly-scoped helper processes. Do not use broad process-name/pattern kills.
         let remainingPIDs = Array(Set(remainingApps.map(\.processIdentifier))).filter { $0 > 0 }
+        var escalatedPIDs = Set(remainingPIDs)
+        escalatedPIDs.formUnion(explicitlyOwnedPIDs)
         for pid in remainingPIDs {
+            escalatedPIDs.formUnion(findAllDescendantPIDs(of: pid))
+        }
+        for pid in explicitlyOwnedPIDs {
+            escalatedPIDs.formUnion(findAllDescendantPIDs(of: pid))
+        }
+        if let prefix = editor.helperProcessPrefix {
+            escalatedPIDs.formUnion(findHelperPIDs(prefix: prefix))
+        }
+        for pid in escalatedPIDs where pid > 0 {
             Foundation.kill(pid, SIGKILL)
         }
 
-        _ = runPkillF(pattern: editor.bundleIdentifier)
-        _ = runPkillX(name: editor.processName)
-        _ = runPkillX(name: editor.appName)
-        for cliName in cleanupCLIProcessNames {
-            _ = runPkillX(name: cliName)
-        }
-        for pattern in cleanupCLIFullPathPatterns {
-            _ = runPkillF(pattern: pattern)
-        }
-        if let prefix = editor.helperProcessPrefix {
-            _ = runPkillF(pattern: prefix)
-        }
-
-        _ = runKillall(name: editor.appName)
-        _ = runKillall(name: editor.processName)
-        for cliName in cleanupCLIProcessNames {
-            _ = runKillall(name: cliName)
-        }
-
-        // Short verification + one more cleanup pass for stubborn processes.
+        // Short verification for stubborn bundle-owned processes only.
         let verifyDeadline = CFAbsoluteTimeGetCurrent() + 0.7
         while CFAbsoluteTimeGetCurrent() < verifyDeadline {
             if !isRunning() { break }
-            _ = runPkillF(pattern: editor.bundleIdentifier)
-            _ = runPkillX(name: editor.processName)
-            for cliName in cleanupCLIProcessNames {
-                _ = runPkillX(name: cliName)
+            let stubbornApps = NSRunningApplication.runningApplications(withBundleIdentifier: editor.bundleIdentifier)
+                .filter { !$0.isTerminated }
+            let stubbornPIDs = Array(Set(stubbornApps.map(\.processIdentifier))).filter { $0 > 0 }
+            for pid in stubbornPIDs {
+                Foundation.kill(pid, SIGKILL)
             }
-            for pattern in cleanupCLIFullPathPatterns {
-                _ = runPkillF(pattern: pattern)
-            }
-            _ = runKillall(name: editor.processName)
             try? await Task.sleep(for: .milliseconds(30))
         }
     }
@@ -500,6 +691,7 @@ struct EditorLauncher {
 enum LaunchError: Error {
     case cliNotFound(String)
     case cliLaunchFailed(String)
+    case privateProfileDirectoryUnavailable(String)
 }
 
 func shouldUseProcessNameFallback(
@@ -576,6 +768,41 @@ func findPIDByProcessName(_ processName: String) -> pid_t? {
         .components(separatedBy: "\n")
         .compactMap { pid_t($0) }
         .first
+}
+
+func findPIDsByExactCommandPath(_ commandPath: String) -> [pid_t] {
+    let target = commandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !target.isEmpty else { return [] }
+
+    let proc = Process()
+    proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+    proc.arguments = ["-axo", "pid=,command="]
+    let pipe = Pipe()
+    proc.standardOutput = pipe
+    proc.standardError = FileHandle.nullDevice
+    do {
+        try proc.run()
+    } catch {
+        return []
+    }
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+
+    guard proc.terminationStatus == 0,
+          let output = String(data: data, encoding: .utf8) else {
+        return []
+    }
+
+    return output.split(separator: "\n").compactMap { line -> pid_t? in
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let parts = trimmed.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+        guard parts.count == 2, let pid = pid_t(parts[0]) else { return nil }
+        let command = String(parts[1])
+        guard command == target || command.hasPrefix(target + " ") else { return nil }
+        return pid
+    }
 }
 
 /// BFS traversal of process tree. Finds all descendant PIDs (children, grandchildren, etc.).
@@ -662,55 +889,4 @@ func findHelperPIDs(prefix: String) -> [pid_t] {
     return output.components(separatedBy: "\n")
         .compactMap { pid_t($0) }
         .filter { $0 != ownPID }
-}
-
-@discardableResult
-private func runKillall(name: String) -> Int32 {
-    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-    proc.arguments = ["-9", name]
-    proc.standardOutput = FileHandle.nullDevice
-    proc.standardError = FileHandle.nullDevice
-    do {
-        try proc.run()
-        proc.waitUntilExit()
-        return proc.terminationStatus
-    } catch {
-        return -1
-    }
-}
-
-@discardableResult
-private func runPkillF(pattern: String) -> Int32 {
-    guard !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-    proc.arguments = ["-9", "-f", pattern]
-    proc.standardOutput = FileHandle.nullDevice
-    proc.standardError = FileHandle.nullDevice
-    do {
-        try proc.run()
-        proc.waitUntilExit()
-        return proc.terminationStatus
-    } catch {
-        return -1
-    }
-}
-
-@discardableResult
-private func runPkillX(name: String) -> Int32 {
-    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return 0 }
-    let proc = Process()
-    proc.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-    proc.arguments = ["-9", "-x", name]
-    proc.standardOutput = FileHandle.nullDevice
-    proc.standardError = FileHandle.nullDevice
-    do {
-        try proc.run()
-        proc.waitUntilExit()
-        return proc.terminationStatus
-    } catch {
-        return -1
-    }
 }

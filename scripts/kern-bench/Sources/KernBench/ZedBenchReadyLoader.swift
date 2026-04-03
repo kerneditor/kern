@@ -59,13 +59,10 @@ func validateZedBenchReadyPayload(
         return "zed_bench_hook_timestamp_invalid"
     }
 
-    if let expectedPID, expectedPID > 0,
-       let payloadPID = payload.pid,
-       payloadPID > 0,
-       payloadPID != expectedPID {
-        return "zed_bench_hook_pid_mismatch"
-    }
-
+    // The forked Zed bench-ready signal is emitted from the process that handles the
+    // open-listener request, which can differ from the PID the harness observes for
+    // the visible window. The signal path and target file are already unique per run,
+    // so PID equality is not a reliable validity check here.
     return nil
 }
 

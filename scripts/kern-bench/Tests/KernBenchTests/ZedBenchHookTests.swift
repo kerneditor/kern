@@ -62,7 +62,7 @@ final class ZedBenchHookTests: XCTestCase {
         XCTAssertEqual(reason, "zed_bench_hook_target_mismatch")
     }
 
-    func testValidateRejectsPidMismatch() {
+    func testValidateAllowsPidMismatchWhenTargetAndModeMatch() {
         let payload = ZedBenchReadyPayload(
             event: "bench_ready",
             target: "/tmp/doc.md",
@@ -78,7 +78,7 @@ final class ZedBenchHookTests: XCTestCase {
             expectedMode: "first_editable",
             expectedPID: 42
         )
-        XCTAssertEqual(reason, "zed_bench_hook_pid_mismatch")
+        XCTAssertNil(reason)
     }
 
     func testWaitForZedBenchReadyReturnsValidationFailureAfterTimeout() async throws {

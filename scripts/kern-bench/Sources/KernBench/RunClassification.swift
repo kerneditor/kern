@@ -141,7 +141,12 @@ func classifyReport(
     suite: SuiteDefinition,
     preflight: PreflightStatus,
     editorResults: [EditorResult],
-    selectedEditors: [EditorDefinition]
+    selectedEditors: [EditorDefinition],
+    runs: Int = 1,
+    warmupRuns: Int = 0,
+    interEditorCooldownMs: Int = 0,
+    profile: String = "direct",
+    injectedOverrides: [String: String]? = nil
 ) -> ClassificationOutcome {
     var reasons: [String] = []
 
@@ -151,6 +156,35 @@ func classifyReport(
         let missing = requiredNames.subtracting(selectedNames).sorted()
         if !missing.isEmpty {
             reasons.append("missing_roster_editors:\(missing.joined(separator: ","))")
+        }
+    }
+
+    let claimSafeNames = Set(suite.claimSafeRoster)
+    if !claimSafeNames.isEmpty, selectedNames != claimSafeNames {
+        let expected = suite.claimSafeRoster.sorted().joined(separator: ",")
+        let selected = selectedNames.sorted().joined(separator: ",")
+        reasons.append("claim_safe_roster_mismatch:expected=\(expected):selected=\(selected)")
+    } else if !claimSafeNames.isEmpty {
+        if let minimumRuns = suite.claimSafeMinimumRuns, runs < minimumRuns {
+            reasons.append("claim_safe_min_runs_unmet:required=\(minimumRuns):actual=\(runs)")
+        }
+        if let minimumWarmupRuns = suite.claimSafeMinimumWarmupRuns, warmupRuns < minimumWarmupRuns {
+            reasons.append("claim_safe_min_warmups_unmet:required=\(minimumWarmupRuns):actual=\(warmupRuns)")
+        }
+        if selectedEditors.count > 1,
+           let minimumCooldown = suite.claimSafeMinimumInterEditorCooldownMs,
+           interEditorCooldownMs < minimumCooldown {
+            reasons.append("claim_safe_inter_editor_cooldown_unmet:required=\(minimumCooldown):actual=\(interEditorCooldownMs)")
+        }
+    }
+    if !claimSafeNames.isEmpty {
+        let normalizedProfile = profile.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedProfile != "default", normalizedProfile != "direct" {
+            reasons.append("claim_safe_profile_mismatch:expected=default|direct:selected=\(profile)")
+        }
+        if let injectedOverrides, !injectedOverrides.isEmpty {
+            let overrideKeys = injectedOverrides.keys.sorted().joined(separator: ",")
+            reasons.append("claim_safe_override_mismatch:keys=\(overrideKeys)")
         }
     }
 

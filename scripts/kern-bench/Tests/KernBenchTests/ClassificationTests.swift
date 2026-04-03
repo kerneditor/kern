@@ -396,14 +396,24 @@ final class ClassificationTests: XCTestCase {
                 suiteKind: suite.suiteKind,
                 suiteIntendedUsage: suite.intendedUsage,
                 rosterPolicy: "locked_roster_v1_official_claims_only",
+                claimPolicy: suite.claimPolicyDescription,
                 file: "/tmp/file.md",
                 fileBytes: 100,
                 fileHash: "abc",
                 mode: "warm",
                 runs: 1,
                 warmupRuns: 0,
-                editorOrder: "shuffled",
+                profile: "direct",
+                claimSafeMinimumRuns: suite.claimSafeMinimumRuns,
+                claimSafeMinimumWarmupRuns: suite.claimSafeMinimumWarmupRuns,
+                claimSafeMinimumInterEditorCooldownMs: suite.claimSafeMinimumInterEditorCooldownMs,
+                interEditorCooldownMs: 0,
+                postOpenDelayMs: 0,
+                editorOrder: "shuffled_per_round",
+                roundOrderTrace: [],
+                injectedOverrides: nil,
                 requiredRoster: suite.requiredRoster,
+                claimSafeRoster: suite.claimSafeRoster,
                 requiredMetrics: suite.requiredMetrics
             ),
             results: []
@@ -414,6 +424,308 @@ final class ClassificationTests: XCTestCase {
         XCTAssertEqual(decoded.runClassification, "partial")
         XCTAssertEqual(decoded.runQuality, "degraded")
         XCTAssertEqual(decoded.partialReasons.first, "missing_roster_editors:TextEdit")
+    }
+
+    func testFullFidelitySingleEditorReportIsPartialForClaimSafety() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let result = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { $0.displayName == "Kern" }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [result],
+            selectedEditors: selectedEditors,
+            profile: "direct"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(
+            outcome.partialReasons.contains("claim_safe_roster_mismatch:expected=Kern,Zed:selected=Kern")
+        )
+    }
+
+    func testFullFidelityExactKernZedRosterCanRemainOfficial() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 10,
+            warmupRuns: 1,
+            interEditorCooldownMs: 1500,
+            profile: "direct"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .official)
+        XCTAssertFalse(outcome.partialReasons.contains { $0.contains("claim_safe_roster_mismatch") })
+    }
+
+    func testFullFidelityStableProfileIsPartialEvenWithExactKernZedRoster() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 10,
+            warmupRuns: 1,
+            interEditorCooldownMs: 1500,
+            profile: "full-fidelity-stable"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(
+            outcome.partialReasons.contains(
+                "claim_safe_profile_mismatch:expected=default|direct:selected=full-fidelity-stable"
+            )
+        )
+    }
+
+    func testFullFidelityInjectedOverridesArePartialEvenWithExactKernZedRoster() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 10,
+            warmupRuns: 1,
+            interEditorCooldownMs: 1500,
+            profile: "default",
+            injectedOverrides: [
+                "KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS": "2000000",
+                "KERN_STAGED_PROMOTION_CONTEXT_CHARS": "1000",
+            ]
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(
+            outcome.partialReasons.contains(
+                "claim_safe_override_mismatch:keys=KERN_STAGED_PROMOTION_CONTEXT_CHARS,KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS"
+            )
+        )
+    }
+
+    func testOpenReadySingleEditorReportIsPartialForClaimSafety() {
+        let suite = SuiteDefinition.forID(.benchmarkOpenReady)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let result = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { $0.displayName == "Kern" }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [result],
+            selectedEditors: selectedEditors,
+            profile: "direct"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(
+            outcome.partialReasons.contains("claim_safe_roster_mismatch:expected=Kern,Zed:selected=Kern")
+        )
+    }
+
+    func testOpenReadyExactKernZedRosterCanRemainOfficial() {
+        let suite = SuiteDefinition.forID(.benchmarkOpenReady)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 10,
+            warmupRuns: 1,
+            interEditorCooldownMs: 1500,
+            profile: "default"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .official)
+        XCTAssertFalse(outcome.partialReasons.contains { $0.contains("claim_safe_roster_mismatch") })
     }
 
     func testThermalThroughoutFailureForcesPartialReport() {
@@ -446,11 +758,118 @@ final class ClassificationTests: XCTestCase {
             suite: suite,
             preflight: preflight,
             editorResults: [result],
-            selectedEditors: requiredRosterV1
+            selectedEditors: requiredRosterV1,
+            profile: "direct"
         )
         XCTAssertEqual(outcome.runClassification, .partial)
         XCTAssertEqual(outcome.runQuality, .degraded)
         XCTAssertTrue(outcome.partialReasons.contains("thermal_throttle"))
+    }
+
+    func testFullFidelityExactKernZedRosterIsPartialWhenClaimSafeRunCountTooLow() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 5,
+            warmupRuns: 1,
+            interEditorCooldownMs: 1500,
+            profile: "default"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(outcome.partialReasons.contains("claim_safe_min_runs_unmet:required=10:actual=5"))
+    }
+
+    func testFullFidelityExactKernZedRosterIsPartialWhenClaimSafeCooldownTooLow() {
+        let suite = SuiteDefinition.forID(.benchmarkFullFidelity)
+        let stats = makeStats(requiredMetrics: suite.requiredMetrics)
+        let kern = EditorResult(
+            editor: "Kern",
+            architecture: "Native",
+            version: "1.0",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+        let zed = EditorResult(
+            editor: "Zed",
+            architecture: "Rust",
+            version: "0.1",
+            runQuality: "complete",
+            runClassification: "official",
+            partialReasons: [],
+            runs: [],
+            stats: stats
+        )
+
+        let preflight = PreflightStatus(
+            thermalAtStartOK: true,
+            thermalThroughoutOK: true,
+            rosterComplete: true,
+            screenCapturePermissionOK: true,
+            accessibilityPermissionOK: true,
+            fixtureHashRecorded: true,
+            powerSource: "AC",
+            thermalPctStart: 100,
+            thermalPctEnd: 100
+        )
+
+        let selectedEditors = requiredRosterV1.filter { ["Kern", "Zed"].contains($0.displayName) }
+        let outcome = classifyReport(
+            suite: suite,
+            preflight: preflight,
+            editorResults: [kern, zed],
+            selectedEditors: selectedEditors,
+            runs: 10,
+            warmupRuns: 1,
+            interEditorCooldownMs: 0,
+            profile: "default"
+        )
+
+        XCTAssertEqual(outcome.runClassification, .partial)
+        XCTAssertTrue(
+            outcome.partialReasons.contains("claim_safe_inter_editor_cooldown_unmet:required=1500:actual=0")
+        )
     }
 
     private func makeStats(requiredMetrics: [String]) -> RunStats {
@@ -485,6 +904,7 @@ final class ClassificationTests: XCTestCase {
             wowViewportSemanticReadyLatency: requiredMetrics.contains("wow_viewport_semantic_ready_latency_ms") ? ok : nil,
             wowViewportFidelityReadyLatency: requiredMetrics.contains("wow_viewport_fidelity_ready_latency_ms") ? ok : nil,
             wowFullDocumentFidelityReadyLatency: requiredMetrics.contains("wow_full_document_fidelity_ready_latency_ms") ? ok : nil,
+            fullFidelityEndToEndLatency: requiredMetrics.contains("full_fidelity_end_to_end_latency_ms") ? ok : nil,
             automationOverhead: nil,
             unattributedOpenBudget: nil,
             timeToStableLayout: nil,

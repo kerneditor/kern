@@ -150,6 +150,39 @@ func parseArgs() -> BenchConfig {
     return config
 }
 
+func benchmarkProfileLabel(
+    environment: [String: String] = ProcessInfo.processInfo.environment
+) -> String {
+    guard let raw = environment["KERN_BENCH_PROFILE_LABEL"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+          !raw.isEmpty else {
+        return "direct"
+    }
+    return raw
+}
+
+func benchmarkInjectedOverrides(
+    environment: [String: String] = ProcessInfo.processInfo.environment
+) -> [String: String]? {
+    guard let raw = environment["KERN_BENCH_INJECTED_OVERRIDES"]?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+          !raw.isEmpty else {
+        return nil
+    }
+
+    var pairs: [String: String] = [:]
+    for chunk in raw.split(separator: ";", omittingEmptySubsequences: true) {
+        let parts = chunk.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { continue }
+        let key = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { continue }
+        let value = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        pairs[key] = value
+    }
+
+    return pairs.isEmpty ? nil : pairs
+}
+
 func printUsage() {
     let usage = """
     kern-bench — Cross-editor benchmark tool
@@ -208,6 +241,15 @@ func exitUsage(_ message: String) -> Never {
 @main
 struct KernBench {
     static func main() async {
+        // SwiftPM may invoke the executable target under the XCTest harness with
+        // test-runner-only arguments after the package tests complete. Treat that
+        // as a no-op so `swift test` validates the package instead of failing on
+        // benchmark CLI argument parsing.
+        if CommandLine.arguments.contains("--test-bundle-path")
+            || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return
+        }
+
         var config = parseArgs()
         let suite = SuiteDefinition.forID(config.suiteID)
 
@@ -514,6 +556,7 @@ struct KernBench {
         let suiteStartNs = monotonicNowNs()
         let suiteDeadlineNs = suiteStartNs + UInt64(config.suiteTimeout * 1_000_000_000)
         var suiteTimedOut = false
+        var measuredRoundOrders: [[String]] = []
 
         runLoop: for runIdx in 1...runs {
             if monotonicNowNs() >= suiteDeadlineNs {
@@ -526,6 +569,7 @@ struct KernBench {
             measuredThermals.append(roundThermal)
 
             let shuffledEditors = editors.shuffled()
+            measuredRoundOrders.append(shuffledEditors.map(\.displayName))
             print("Round \(runIdx)/\(runs): \(shuffledEditors.map(\.displayName).joined(separator: ", "))")
 
             for (editorIdx, editor) in shuffledEditors.enumerated() {
@@ -790,95 +834,28 @@ struct KernBench {
                     continue
                 }
 
-                var launchResult: LaunchResult?
-                var window: DetectedWindow?
-                var launchWindowFailureReason: String?
-                var launchWindowTimedOut = false
-                var launchedWithZedBenchHook = false
-
-                let zedHookArgs: [String] = {
-                    guard let zedBenchHookSignalPath else { return [] }
-                    return [
-                        "--bench-target-file", runFile,
-                        "--bench-ready-signal", zedBenchHookSignalPath,
-                        "--bench-ready-mode", config.zedBenchReadyMode,
-                    ]
+                let launchEnv: [String: String] = {
+                    guard let wowMetricsPath else { return [:] }
+                    return ["KERN_WOW_INTERNAL_METRICS_PATH": wowMetricsPath]
                 }()
-
-                func launchArgs(forAttempt attempt: Int) -> [String] {
-                    guard editor.displayName == "Zed", !zedHookArgs.isEmpty else { return [] }
-                    switch config.zedBenchHookMode {
-                    case .required:
-                        return zedHookArgs
-                    case .auto:
-                        // Retry without hook args for compatibility with non-hooked Zed builds.
-                        return attempt == 1 ? zedHookArgs : []
-                    case .off:
-                        return []
-                    }
-                }
-
-                attemptLoop: for attempt in 1...2 {
-                    let retryTag = attempt > 1 ? " (retry \(attempt)/2)" : ""
-                    print("  [\(editor.displayName)] run \(runIdx): launch\(retryTag)")
-                    let launchEnv: [String: String] = {
-                        guard let wowMetricsPath else { return [:] }
-                        return ["KERN_WOW_INTERNAL_METRICS_PATH": wowMetricsPath]
-                    }()
-                    let perAttemptLaunchArgs = launchArgs(forAttempt: attempt)
-                    launchedWithZedBenchHook = !perAttemptLaunchArgs.isEmpty
-                    guard let candidate = try? await launcher.launch(
-                        file: runFile,
-                        env: launchEnv,
-                        additionalArgs: perAttemptLaunchArgs
-                    ), candidate.pid > 0 else {
-                        if attempt < 2 {
-                            print("  [\(editor.displayName)] run \(runIdx): launch failed, retrying")
-                            await launcher.kill()
-                            continue attemptLoop
-                        }
-                        launchWindowFailureReason = "launch_failed"
-                        break attemptLoop
-                    }
-
-                    if monotonicNowNs() >= runDeadlineNs || monotonicNowNs() >= suiteDeadlineNs {
-                        launchWindowFailureReason = deadlineReason()
-                        launchWindowTimedOut = true
-                        break attemptLoop
-                    }
-
-                    print("  [\(editor.displayName)] run \(runIdx): wait window\(retryTag)")
-                    let attemptsRemaining = max(1, 2 - attempt + 1)
-                    let nowNs = monotonicNowNs()
-                    let runRemaining = nowNs < runDeadlineNs ? Double(runDeadlineNs - nowNs) / 1_000_000_000 : 0
-                    let suiteRemaining = nowNs < suiteDeadlineNs ? Double(suiteDeadlineNs - nowNs) / 1_000_000_000 : 0
-                    let remainingBudget = max(0.05, min(runRemaining, suiteRemaining))
-                    let perAttemptBudget = max(0.05, remainingBudget / Double(attemptsRemaining))
-                    let windowTimeout = min(stageBudget(stage: "open"), perAttemptBudget)
-                    if let detected = await waitForWindow(
-                        pid: candidate.pid,
-                        timeout: windowTimeout,
-                        expectedFileName: URL(fileURLWithPath: runFile).lastPathComponent
-                    ) {
-                        launchResult = candidate
-                        window = detected
-                        break attemptLoop
-                    }
-
-                    let reason = !processIsAlive(candidate.pid) ? "process_exited_before_window" :
-                        (monotonicNowNs() >= suiteDeadlineNs ? "suite_timeout" :
-                        (monotonicNowNs() >= runDeadlineNs ? "run_timeout" : "open_timeout")
-                        )
-                    if attempt < 2, reason != "suite_timeout" {
-                        print("  [\(editor.displayName)] run \(runIdx): \(reason) waiting for window, retrying")
-                        await launcher.kill()
-                        continue attemptLoop
-                    }
-
-                    launchWindowFailureReason = reason
-                    launchWindowTimedOut = reason.contains("timeout")
-                    break attemptLoop
-                }
+                let launchWindowOutcome = await performLaunchWindowAttempts(
+                    launcher: launcher,
+                    editor: editor,
+                    runIdx: runIdx,
+                    runFile: runFile,
+                    launchEnv: launchEnv,
+                    runDeadlineNs: runDeadlineNs,
+                    suiteDeadlineNs: suiteDeadlineNs,
+                    openStageBudget: { stageBudget(stage: "open") },
+                    deadlineReason: deadlineReason,
+                    config: config,
+                    zedBenchHookSignalPath: zedBenchHookSignalPath
+                )
+                let launchResult = launchWindowOutcome.launchResult
+                let window = launchWindowOutcome.window
+                let launchWindowFailureReason = launchWindowOutcome.failureReason
+                let launchWindowTimedOut = launchWindowOutcome.failureTimedOut
+                let launchedWithZedBenchHook = launchWindowOutcome.launchedWithZedBenchHook
 
                 guard let launchResult, let window else {
                     let reason = launchWindowFailureReason ?? "launch_or_window_failed"
@@ -1469,11 +1446,27 @@ struct KernBench {
             orderedResults.append(result)
         }
 
+        let rosterPolicyValue: String = {
+            if !suite.requiredRoster.isEmpty {
+                return "locked_roster_v1_official_claims_only"
+            }
+            if !suite.claimSafeRoster.isEmpty {
+                return "selected_roster_diagnostic_unless_claim_safe_roster_matches"
+            }
+            return "suite_specific_policy"
+        }()
+        let archivedProfileLabel = benchmarkProfileLabel()
+        let archivedInjectedOverrides = benchmarkInjectedOverrides()
         let reportOutcome = classifyReport(
             suite: suite,
             preflight: preflight,
             editorResults: orderedResults,
-            selectedEditors: editors
+            selectedEditors: editors,
+            runs: runs,
+            warmupRuns: warmupRuns,
+            interEditorCooldownMs: config.interEditorCooldownMs,
+            profile: archivedProfileLabel,
+            injectedOverrides: archivedInjectedOverrides
         )
 
         var report = BenchmarkReport(
@@ -1491,15 +1484,25 @@ struct KernBench {
                 suite: suite.id.rawValue,
                 suiteKind: suite.suiteKind,
                 suiteIntendedUsage: suite.intendedUsage,
-                rosterPolicy: "locked_roster_v1_official_claims_only",
+                rosterPolicy: rosterPolicyValue,
+                claimPolicy: suite.claimPolicyDescription,
                 file: config.file,
                 fileBytes: fileSize,
                 fileHash: fileHash,
                 mode: config.cold ? "cold" : "warm",
                 runs: runs,
                 warmupRuns: warmupRuns,
-                editorOrder: "shuffled",
+                profile: archivedProfileLabel,
+                claimSafeMinimumRuns: suite.claimSafeMinimumRuns,
+                claimSafeMinimumWarmupRuns: suite.claimSafeMinimumWarmupRuns,
+                claimSafeMinimumInterEditorCooldownMs: suite.claimSafeMinimumInterEditorCooldownMs,
+                interEditorCooldownMs: config.interEditorCooldownMs,
+                postOpenDelayMs: config.postOpenDelayMs,
+                editorOrder: "shuffled_per_round",
+                roundOrderTrace: measuredRoundOrders,
+                injectedOverrides: archivedInjectedOverrides,
                 requiredRoster: suite.requiredRoster,
+                claimSafeRoster: suite.claimSafeRoster,
                 requiredMetrics: suite.requiredMetrics
             ),
             results: orderedResults
@@ -1578,11 +1581,11 @@ struct KernBench {
 
 // MARK: - Helpers
 
-private func monotonicNowNs() -> UInt64 {
+func monotonicNowNs() -> UInt64 {
     clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
 }
 
-private func processIsAlive(_ pid: pid_t) -> Bool {
+func processIsAlive(_ pid: pid_t) -> Bool {
     if pid <= 0 { return false }
     return Darwin.kill(pid, 0) == 0 || errno == EPERM
 }
@@ -1941,7 +1944,7 @@ private func makeArchiveEnvironmentMetadata(
     )
 }
 
-private func markdownSummary(report: BenchmarkReport) -> String {
+func markdownSummary(report: BenchmarkReport) -> String {
     var out = report.suiteKind == "internal_microbenchmark"
         ? "# Kern Internal Microbenchmark Results\n\n"
         : "# Cross-Editor Benchmark Results\n\n"
@@ -1952,6 +1955,14 @@ private func markdownSummary(report: BenchmarkReport) -> String {
     out += "Run quality: \(report.runQuality)\n"
     if !report.partialReasons.isEmpty {
         out += "Partial reasons: \(report.partialReasons.joined(separator: "; "))\n"
+    }
+    out += "Claim policy: \(report.config.claimPolicy)\n"
+    if !report.config.claimSafeRoster.isEmpty {
+        out += "Claim-safe roster: \(report.config.claimSafeRoster.joined(separator: ", "))\n"
+        let minimumRuns = report.config.claimSafeMinimumRuns.map(String.init) ?? "—"
+        let minimumWarmups = report.config.claimSafeMinimumWarmupRuns.map(String.init) ?? "—"
+        let minimumCooldown = report.config.claimSafeMinimumInterEditorCooldownMs.map { "\($0)ms" } ?? "—"
+        out += "Claim-safe minimums: runs >= \(minimumRuns), warmups >= \(minimumWarmups), cooldown >= \(minimumCooldown)\n"
     }
     out += "\n"
     if report.suiteKind == "internal_microbenchmark" {
@@ -1993,6 +2004,25 @@ private func markdownSummary(report: BenchmarkReport) -> String {
         }
     }
     out += "\n"
-    out += "Policy: README/social headline claims require OFFICIAL runs only.\n"
+    out += "Policy: \(report.config.rosterPolicy)\n"
+    out += "Profile: \(report.config.profile)\n"
+    out += "Inter-editor cooldown: \(report.config.interEditorCooldownMs)ms\n"
+    out += "Post-open delay: \(report.config.postOpenDelayMs)ms\n"
+    out += "Order mode: \(report.config.editorOrder)\n"
+    if !report.config.roundOrderTrace.isEmpty {
+        let trace = report.config.roundOrderTrace.enumerated().map { index, editors in
+            "R\(index + 1)=\(editors.joined(separator: ","))"
+        }.joined(separator: "; ")
+        out += "Round order trace: \(trace)\n"
+    }
+    if let injectedOverrides = report.config.injectedOverrides, !injectedOverrides.isEmpty {
+        let formatted = injectedOverrides.keys.sorted().map { key in
+            "\(key)=\(injectedOverrides[key] ?? "")"
+        }.joined(separator: ", ")
+        out += "Injected overrides: \(formatted)\n"
+    } else {
+        out += "Injected overrides: none\n"
+    }
+    out += "README/social headline claims require OFFICIAL runs only.\n"
     return out
 }

@@ -54,14 +54,24 @@ struct BenchmarkConfig: Codable {
     let suiteKind: String
     let suiteIntendedUsage: String
     let rosterPolicy: String
+    let claimPolicy: String
     let file: String
     let fileBytes: Int
     let fileHash: String
     let mode: String
     let runs: Int
     let warmupRuns: Int
+    let profile: String
+    let claimSafeMinimumRuns: Int?
+    let claimSafeMinimumWarmupRuns: Int?
+    let claimSafeMinimumInterEditorCooldownMs: Int?
+    let interEditorCooldownMs: Int
+    let postOpenDelayMs: Int
     let editorOrder: String
+    let roundOrderTrace: [[String]]
+    let injectedOverrides: [String: String]?
     let requiredRoster: [String]
+    let claimSafeRoster: [String]
     let requiredMetrics: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -69,11 +79,21 @@ struct BenchmarkConfig: Codable {
         case suiteKind = "suite_kind"
         case suiteIntendedUsage = "suite_intended_usage"
         case rosterPolicy = "roster_policy"
+        case claimPolicy = "claim_policy"
         case fileBytes = "file_bytes"
         case fileHash = "file_hash"
         case warmupRuns = "warmup_runs"
+        case profile
+        case claimSafeMinimumRuns = "claim_safe_minimum_runs"
+        case claimSafeMinimumWarmupRuns = "claim_safe_minimum_warmup_runs"
+        case claimSafeMinimumInterEditorCooldownMs = "claim_safe_minimum_inter_editor_cooldown_ms"
+        case interEditorCooldownMs = "inter_editor_cooldown_ms"
+        case postOpenDelayMs = "post_open_delay_ms"
+        case roundOrderTrace = "round_order_trace"
+        case injectedOverrides = "injected_overrides"
         case editorOrder = "editor_order"
         case requiredRoster = "required_roster"
+        case claimSafeRoster = "claim_safe_roster"
         case requiredMetrics = "required_metrics"
     }
 }
@@ -463,6 +483,7 @@ func printMarkdownTable(_ report: BenchmarkReport) {
     if !report.partialReasons.isEmpty {
         print("Partial reasons: \(report.partialReasons.joined(separator: "; "))")
     }
+    print("Claim policy: \(report.config.claimPolicy)")
     print("")
 
     if report.suiteKind == "internal_microbenchmark" {
@@ -513,6 +534,10 @@ func printMarkdownTable(_ report: BenchmarkReport) {
 
 func printDetailedStats(_ report: BenchmarkReport) {
     print("Policy: \(report.config.rosterPolicy)")
+    if !report.config.claimSafeRoster.isEmpty {
+        print("Claim-safe roster: \(report.config.claimSafeRoster.joined(separator: ", "))")
+    }
+    print("Claim policy: \(report.config.claimPolicy)")
     print("README/social headline claims require OFFICIAL runs only.")
     print("")
 

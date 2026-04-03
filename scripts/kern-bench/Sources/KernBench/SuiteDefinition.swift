@@ -30,7 +30,12 @@ struct SuiteDefinition {
     let intendedUsage: String
     let defaultRuns: Int
     let defaultWarmupRuns: Int
+    let claimSafeMinimumRuns: Int?
+    let claimSafeMinimumWarmupRuns: Int?
+    let claimSafeMinimumInterEditorCooldownMs: Int?
     let requiredRoster: [String]
+    let claimSafeRoster: [String]
+    let claimPolicyDescription: String
     let requiredMetrics: [String]
     let optionalMetrics: [String]
     let stageTimeouts: [String: TimeInterval]
@@ -45,7 +50,12 @@ struct SuiteDefinition {
                 intendedUsage: "single benchmark comparison",
                 defaultRuns: 30,
                 defaultWarmupRuns: 3,
+                claimSafeMinimumRuns: nil,
+                claimSafeMinimumWarmupRuns: nil,
+                claimSafeMinimumInterEditorCooldownMs: nil,
                 requiredRoster: requiredRosterNames(),
+                claimSafeRoster: requiredRosterNames(),
+                claimPolicyDescription: "publishable claims require the locked roster v1",
                 requiredMetrics: [
                     "open_latency_ms",
                     "save_ui_ack_latency_ms",
@@ -89,9 +99,14 @@ struct SuiteDefinition {
                 id: .benchmarkOpenReady,
                 displayName: "Open-Ready Aside",
                 intendedUsage: "optional huge-fixture open-readiness comparison (e.g., Kern vs Zed)",
-                defaultRuns: 5,
-                defaultWarmupRuns: 0,
+                defaultRuns: 10,
+                defaultWarmupRuns: 1,
+                claimSafeMinimumRuns: 10,
+                claimSafeMinimumWarmupRuns: 1,
+                claimSafeMinimumInterEditorCooldownMs: 1500,
                 requiredRoster: [],
+                claimSafeRoster: ["Kern", "Zed"],
+                claimPolicyDescription: "publishable head-to-head claims require the exact Kern,Zed roster, >=10 measured runs, >=1 warmup run, and >=1500ms inter-editor cooldown",
                 requiredMetrics: [
                     "open_latency_ms",
                 ],
@@ -128,9 +143,14 @@ struct SuiteDefinition {
                 id: .benchmarkFullFidelity,
                 displayName: "Full-Fidelity Aside",
                 intendedUsage: "optional huge-fixture full-document-fidelity completion comparison (e.g., Kern vs Zed)",
-                defaultRuns: 5,
-                defaultWarmupRuns: 0,
+                defaultRuns: 10,
+                defaultWarmupRuns: 1,
+                claimSafeMinimumRuns: 10,
+                claimSafeMinimumWarmupRuns: 1,
+                claimSafeMinimumInterEditorCooldownMs: 1500,
                 requiredRoster: [],
+                claimSafeRoster: ["Kern", "Zed"],
+                claimPolicyDescription: "publishable head-to-head claims require the exact Kern,Zed roster, >=10 measured runs, >=1 warmup run, and >=1500ms inter-editor cooldown",
                 requiredMetrics: [
                     "full_fidelity_end_to_end_latency_ms",
                 ],
@@ -171,7 +191,12 @@ struct SuiteDefinition {
                 intendedUsage: "kern-only minimum-latency internal microbenchmark",
                 defaultRuns: 10,
                 defaultWarmupRuns: 0,
+                claimSafeMinimumRuns: nil,
+                claimSafeMinimumWarmupRuns: nil,
+                claimSafeMinimumInterEditorCooldownMs: nil,
                 requiredRoster: ["Kern"],
+                claimSafeRoster: ["Kern"],
+                claimPolicyDescription: "internal diagnostic lane; not a cross-editor public claim surface",
                 requiredMetrics: [
                     "wow_parse_latency_ms",
                     "wow_layout_latency_ms",

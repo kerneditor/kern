@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a new feature or behavior change for Kern
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What workflow problem are you trying to solve?
+      placeholder: The current behavior makes it hard to ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-facing behavior you want.
+      placeholder: Kern should ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds or competing approaches you already evaluated.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Impacted areas
+      description: Mention markdown semantics, editing UX, rendering, benchmarks, or docs if relevant.
