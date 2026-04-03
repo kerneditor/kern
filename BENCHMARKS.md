@@ -20,6 +20,59 @@ Guideline:
 
 ## Baselines
 
+### Latest official cross-editor full-fidelity run
+
+- **Date**: 2026-03-13
+- **Suite**: `benchmark_full_fidelity`
+- **Fixture**: `test-fixtures/native-editor-benchmark.md`
+- **Mode**: warm, 10 runs, 1 warmup, 1500ms inter-editor cooldown
+- **Archive**: `benchmark-archive/runs/20260313-023857-benchmark-full-fidelity/`
+
+| Editor | Open p50 | Full-fidelity p50 | Full-fidelity p95 |
+| --- | ---: | ---: | ---: |
+| Kern | 295.06ms | 3113.35ms | 3629.27ms |
+| Zed | 1202.36ms | 1202.36ms | 1219.23ms |
+
+Delta vs prior official cross-editor full-fidelity run (`20260308-231844-benchmark-full-fidelity`):
+- Kern open p50: **-44.86ms**
+- Kern full-fidelity p50: **-116.14ms**
+- Kern full-fidelity p95: **-514.46ms**
+- Zed full-fidelity p50: **-137.00ms**
+
+Interpretation:
+- the latest claim-safe rerun is fully official and exact-roster
+- Kern remains materially faster than Zed on open latency
+- Kern still does **not** beat Zed on full-fidelity completion latency
+- the post-Milestone-4 trust fixes held: the rerun classified **official** and completed without the earlier Zed hook / retry-cleanup failure mode
+- the remaining gap is still the structural parser tail (`inlineParse` + paragraph/body handoff), not the benchmark harness
+
+### 2026-03-08 diagnostic stability check (not claim-safe)
+
+The latest structural-optimization batch produced three useful diagnostics, but they should **not** be collapsed into a new public head-to-head claim yet:
+
+- **Interleaved official cross-editor diagnostic (5 runs, selected editors Kern+Zed)**
+  Archive: `benchmark-archive/runs/20260307-180059-benchmark-full-fidelity/`
+  - Kern: partial / degraded (`full_document_fidelity_missing` on 3/5 runs), p50 `5719.73ms`, p95 `8247.65ms`
+  - Zed: official, p50 `3046.26ms`, p95 `3464.16ms`
+- **Single-editor official Kern-only diagnostic (5 runs)**
+  Archive: `benchmark-archive/runs/20260307-180630-benchmark-full-fidelity/`
+  - Kern: official, p50 `2988.26ms`, p95 `3979.20ms`
+- **Single-editor official Zed-only diagnostic (5 runs)**
+  Archive: `benchmark-archive/runs/20260307-180914-benchmark-full-fidelity/`
+  - Zed: official, p50 `3488.92ms`, p95 `3893.20ms`
+
+Interpretation:
+- the **single-editor** runs are useful diagnostics for each editor in isolation
+- the **interleaved cross-editor** run is closer to the intended publishable comparison shape, but the Kern side was unstable/partial
+- because those two views diverge materially, **March 8, 2026 is not a claim-safe “Kern beat Zed” checkpoint**
+
+Use the March 13, 2026 official archive above as the current publishable baseline; keep the March 7–9 diagnostics below as historical comparison data only when analyzing noise/regression risk.
+
+Classification note:
+- for `benchmark_open_ready` / `benchmark_full_fidelity`, a run is only claim-safe for README/social head-to-head use when the selected roster is the exact **Kern + Zed** pair and the run is otherwise complete
+- claim-safe defaults for those suites are now: **10 measured runs**, **1 warmup run**, **1500ms inter-editor cooldown**, and the **default/direct** profile with no injected overrides
+- single-editor runs remain useful diagnostics, but should be treated as diagnostic-only evidence
+
 ### Environment
 
 - **Date**: 2026-02-18
@@ -77,6 +130,16 @@ KERN_ENABLE_PERF_TESTS=1 xcodebuild test \
   -destination 'platform=macOS' \
   -only-testing:KernTextKitTests/NativeEditorRenderPerformanceTests
 
+# Staged promotion slice parse scaling benchmark
+defaults write com.gradigit.kern.tests KERN_ENABLE_PERF_TESTS -bool YES
+defaults write com.gradigit.kern.tests KERN_STAGED_SLICE_BENCH_RUNS -int 7
+xcodebuild test \
+  -project KernTextKit.xcodeproj -scheme KernTextKit \
+  -destination 'platform=macOS' \
+  -only-testing:KernTextKitTests/NativeMarkdownCodecPerformanceTests/testStagedPromotionSliceParseBenchmark
+defaults delete com.gradigit.kern.tests KERN_ENABLE_PERF_TESTS
+defaults delete com.gradigit.kern.tests KERN_STAGED_SLICE_BENCH_RUNS
+
 # Mermaid render-mode benchmark (rich vs ascii vs auto)
 defaults write com.gradigit.kern.tests KERN_ENABLE_MERMAID_MODE_BENCHMARKS -bool YES
 defaults write com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS -int 7
@@ -92,6 +155,7 @@ defaults delete com.gradigit.kern.tests KERN_MERMAID_BENCH_RUNS
 
 Benchmark artifacts are written to:
 - `benchmark-archive/mermaid-render-modes/`
+- `benchmark-archive/staged-slice-benchmark/`
 
 ### Cross-Editor Comparison
 
@@ -107,13 +171,34 @@ Benchmark artifacts are written to:
 # Internal microbenchmark (Kern-only)
 ./scripts/cross-editor-benchmark.sh --suite wow_internal --runs 30
 
-# Optional large-fixture open-ready aside (defaults to Kern+Zed)
+# Optional large-fixture open-ready aside (defaults to Kern+Zed, 10 measured runs, 1 warmup, 1500ms cooldown)
 ./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --runs 10
 
-# Optional large-fixture full-fidelity aside (defaults to Kern+Zed)
+# Optional large-fixture full-fidelity aside (defaults to Kern+Zed, 10 measured runs, 1 warmup, 1500ms cooldown)
 # - Real-usage behavior (no forced full import)
 # - Defaults: Zed hook required + styled_stable mode
 ./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --runs 10
+
+# Optional deterministic profile for full-fidelity stability studies
+./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --profile full-fidelity-stable --runs 10
+
+# Variance gate (example: ensure Kern full-fidelity stability, then compare against Zed)
+python3 scripts/benchmark-variance-gate.py \
+  --results benchmark-archive/full-fidelity-latest.json \
+  --editor Kern \
+  --metric full_fidelity_end_to_end_latency \
+  --max-p95-over-p50 1.10 \
+  --max-cv-pct 10 \
+  --max-failure-rate-pct 0 \
+  --max-timeouts 0 \
+  --max-failures 0
+
+python3 scripts/benchmark-variance-gate.py \
+  --results benchmark-archive/full-fidelity-latest.json \
+  --editor Kern \
+  --metric full_fidelity_end_to_end_latency \
+  --compare-editor Zed \
+  --max-p50-gap-ms 0
 
 # Fewer runs for quick comparison
 ./scripts/cross-editor-benchmark.sh --runs 5 --verbose
@@ -134,6 +219,21 @@ Benchmark artifacts are written to:
 ./scripts/observer-effect-benchmark.sh 10 test-fixtures/cross-editor-benchmark.md
 # (script forces --kern-open-metric-source probe for both variants)
 ```
+
+### Exploratory competitor compatibility notes (non-official roster)
+
+- **Date**: 2026-03-04
+- **Editor**: Typora 1.12.6 (macOS)
+- **Fixture**: `test-fixtures/native-editor-benchmark.md` (~3.6MB)
+- **Observed result**: Typora UI rejected the file with message: `The file is too large to render in Typora.`
+
+Implication:
+- Typora cannot currently participate in our large-fixture open-ready or full-fidelity apples-to-apples runs on this dataset.
+- For benchmark reporting, this is tracked as a **compatibility ceiling** (cannot render fixture), not as a latency number.
+
+Policy:
+- Keep Typora out of official roster latency claims (locked roster v1 unchanged).
+- If we include Typora in external comparisons, report as: **“cannot render benchmark fixture”** with the fixture size and date.
 
 #### Phase 2: Swift CLI core runner
 
@@ -197,7 +297,17 @@ python3 scripts/bench-regression-check.py --baseline baseline.json --latest late
 - **Full-fidelity aside defaults** (`--suite benchmark_full_fidelity`):
   - `--zed-bench-hook required`
   - `--zed-ready-mode styled_stable`
-  - `--kern-open-metric-source probe`
+  - `--kern-open-metric-source wow`
+- **Deterministic profile** (`--profile full-fidelity-stable`, full-fidelity suite only):
+  - `KERN_STAGED_PROMOTION_VIEWPORT_MICRO_STEP_CHARS=2000000`
+  - `KERN_STAGED_PROMOTION_CONTEXT_CHARS=1000`
+  - `KERN_STAGED_PROMOTION_FOLLOWUP_DELAY_MS=2`
+  - `KERN_STAGED_PROMOTION_TURBO_FOLLOWUP_DELAY_MS=2`
+  - `KERN_STAGED_PROMOTION_TURBO_IDLE_MS=120`
+  - 2026-03-07 Kern-only warm 5-run sweep on `native-editor-benchmark.md` favored `2000000` over `1500000` and `1000000`:
+    - `2000000`: p50 `2793ms`, p95 `2834ms`
+    - `1500000`: p50 `2811ms`, p95 `3666ms`
+    - `1000000`: p50 `2818ms`, p95 `2859ms`
 - **Zed CLI override**: `KERN_BENCH_ZED_CLI=/abs/path/to/zed-wrapper` lets you route benchmark launches to a forked Zed build without changing roster definitions
 - **WOW instrumentation toggle**: `--disable-wow-metrics` allows observer-effect comparison runs
 - **Kern open metric source**: `--kern-open-metric-source auto|wow|probe` controls whether Kern open-ready uses WOW-derived phase timings or external probe timing
@@ -328,14 +438,14 @@ Before any benchmark run:
 - **Cross-editor suite** (`--suite benchmark`): official external comparison
 - **Open-ready aside** (`--suite benchmark_open_ready`): optional open-readiness comparison (defaults to Kern+Zed, large frozen fixture, no save/quit steps)
 - **Full-fidelity aside** (`--suite benchmark_full_fidelity`): optional large-fixture full-fidelity completion comparison (defaults to Kern+Zed)
-- **Internal suite** (`--suite wow_internal`): Kern-only stage microbenchmark (`suite_kind=internal_microbenchmark`)
+- **Microbenchmark suite** (`--suite wow_internal`): non-official Kern-only stage microbenchmark (`suite_kind=internal_microbenchmark`)
 - `wow_internal` defaults to the small frozen fixture (`cross-editor-benchmark.md`) for minimum-latency numbers.
 - `wow_internal` defaults: 10 measured runs, 0 warmups.
 - Legacy aliases (`wow`, `real_use`) map to `benchmark` only
 - Lean cross-editor core path: startup/open, save UI ack, quit (typing off by default)
 - `wow_internal` reports only in-app stage timings (parse/layout/paint-ready/edit-apply/save-serialize);
   external automation timings (open/save-ui/quit/typing) are excluded from internal-suite metrics.
-- Internal summary tables use **min (best)** per metric for quick "fastest achievable" signal;
+- Microbenchmark summary tables use **min (best)** per metric for quick "fastest achievable" signal;
   full p50/p95/p99 stats remain in detailed output/JSON.
 - Durable file-commit save probe is optional (`--save-durable`)
 - Locked roster v1 (Official eligibility): **Kern, VS Code, Zed, Sublime Text, TextEdit**

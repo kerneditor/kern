@@ -1,11 +1,11 @@
 #!/bin/bash
-# test-kern-app.sh — Build and smoke-test KernTextKit.app with mega-stress-test.md
+# test-kern-app.sh — Build and smoke-test Kern.app with mega-stress-test.md
 #
 # Usage: ./scripts/test-kern-app.sh [--skip-build] [--screenshots]
 #
 # Tests:
 #   1. XcodeGen + xcodebuild succeeds
-#   2. KernTextKit launches and opens a markdown file without crashing
+#   2. Kern launches and opens a markdown file without crashing
 #   4. Optional: capture scrolling screenshots for visual review
 #
 # Exit codes:
@@ -47,7 +47,7 @@ if [ "$SKIP_BUILD" = false ]; then
   echo "▸ Step 1: Generate Xcode project..."
   xcodegen 2>&1 | tail -1
 
-  echo "▸ Step 1: Build KernTextKit.app..."
+  echo "▸ Step 1: Build Kern.app..."
   BUILD_OUTPUT=$(xcodebuild -project KernTextKit.xcodeproj -scheme KernTextKit build 2>&1)
   if echo "$BUILD_OUTPUT" | grep -q "BUILD SUCCEEDED"; then
     echo "  ✓ Build succeeded"
@@ -60,14 +60,21 @@ else
   echo "▸ Step 1: Skipped (--skip-build)"
 fi
 
-# Find the built app
-KERN_APP=$(find ~/Library/Developer/Xcode/DerivedData/KernTextKit-*/Build/Products/Debug/KernTextKit.app -maxdepth 0 2>/dev/null | head -1)
+# Find the built app, preferring the renamed public bundle first.
+KERN_APP=$(find ~/Library/Developer/Xcode/DerivedData/KernTextKit-*/Build/Products/Debug -maxdepth 0 -name 'Kern.app' 2>/dev/null | head -1)
 if [ -z "$KERN_APP" ]; then
-  echo "  ✗ Cannot find KernTextKit.app in DerivedData"
+  KERN_APP=$(find ~/Library/Developer/Xcode/DerivedData/KernTextKit-*/Build/Products/Debug -maxdepth 0 -name 'KernTextKit.app' 2>/dev/null | head -1)
+fi
+if [ -z "$KERN_APP" ]; then
+  echo "  ✗ Cannot find Kern.app in DerivedData"
   exit 1
 fi
-KERN_BIN="$KERN_APP/Contents/MacOS/KernTextKit"
-echo "  App: $KERN_APP"
+KERN_BIN="$KERN_APP/Contents/MacOS/Kern"
+if [ ! -f "$KERN_BIN" ]; then
+  KERN_BIN="$KERN_APP/Contents/MacOS/KernTextKit"
+fi
+KERN_PROCESS_NAME="$(basename "$KERN_APP" .app)"
+echo "  App bundle selected"
 echo ""
 
 # ── Step 2: Launch with test file ──────────────────────────────────────────
@@ -77,26 +84,26 @@ if [ ! -f "$TEST_FILE" ]; then
   TEST_FILE="test-fixtures/stress-test.md"
 fi
 
-echo "▸ Step 2: Launch KernTextKit with $TEST_FILE..."
+echo "▸ Step 2: Launch Kern with $TEST_FILE..."
 "$KERN_BIN" "$(pwd)/$TEST_FILE" &
 KERN_PID=$!
 sleep 3
 
 # Check if still running
 if ! kill -0 "$KERN_PID" 2>/dev/null; then
-  echo "  ✗ KernTextKit crashed on launch"
+  echo "  ✗ Kern crashed on launch"
   exit 2
 fi
-echo "  ✓ KernTextKit launched (PID $KERN_PID)"
+echo "  ✓ Kern launched (PID $KERN_PID)"
 
 # Resize window to left half of screen
-osascript <<'APPLESCRIPT'
+osascript <<APPLESCRIPT
 tell application "Finder"
     set _bounds to bounds of window of desktop
     set screenW to item 3 of _bounds
     set screenH to item 4 of _bounds
 end tell
-tell application "System Events" to tell process "KernTextKit"
+tell application "System Events" to tell process "$KERN_PROCESS_NAME"
     set frontmost to true
     tell window 1
         set position to {0, 25}
@@ -115,7 +122,7 @@ echo "▸ Step 3: Waiting for app to stabilize (${TIMEOUT}s timeout)..."
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
   if ! kill -0 "$KERN_PID" 2>/dev/null; then
-    echo "  ✗ KernTextKit crashed while loading"
+    echo "  ✗ Kern crashed while loading"
     exit 2
   fi
   sleep 1
@@ -123,7 +130,7 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 # If we get here, Kern has been running for $TIMEOUT seconds without crashing
-echo "  ✓ KernTextKit running stable for ${TIMEOUT}s"
+echo "  ✓ Kern running stable for ${TIMEOUT}s"
 echo ""
 
 # ── Step 4: Optional screenshots ──────────────────────────────────────────
@@ -154,7 +161,7 @@ if [ "$SCREENSHOTS" = true ]; then
   fi
 
   # Activate Kern
-  osascript -e 'tell application "KernTextKit" to activate'
+  osascript -e "tell application \"$KERN_PROCESS_NAME\" to activate"
   sleep 1
 
   if [ ! -x "$SCROLL_HELPER" ]; then
@@ -230,7 +237,7 @@ echo "=== All Tests Passed ==="
 echo ""
 echo "Results:"
 echo "  ✓ Xcode build succeeded"
-echo "  ✓ KernTextKit launches without crashing"
+echo "  ✓ Kern launches without crashing"
 echo "  ✓ Stable for ${TIMEOUT}s with large document"
 if [ "$SCREENSHOTS" = true ]; then
   echo "  ✓ Screenshots: $SCREENSHOT_DIR/"

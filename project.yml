@@ -51,6 +51,10 @@ schemes:
         - KernTextKitTests
       environmentVariables:
         KERN_ENABLE_EXHAUSTIVE_TESTS: "1"
+        KERN_TYPING_COVERAGE_LANE: "pr"
+        KERN_TYPING_STATEFUL_ENFORCE: "1"
+        KERN_TYPING_STATEFUL_SEEDS: "24"
+        KERN_TYPING_STATEFUL_STEPS: "50"
         KERN_EXHAUSTIVE_ACTION_SCENARIO_BUDGET: "1000"
         KERN_EXHAUSTIVE_ACTION_LOG_LIMIT: "1200"
         KERN_EXHAUSTIVE_ACTION_PROGRESS_EVERY: "2000"
@@ -72,6 +76,10 @@ schemes:
         - KernTextKitTests
       environmentVariables:
         KERN_ENABLE_EXHAUSTIVE_TESTS: "1"
+        KERN_TYPING_COVERAGE_LANE: "nightly"
+        KERN_TYPING_STATEFUL_ENFORCE: "1"
+        KERN_TYPING_STATEFUL_SEEDS: "120"
+        KERN_TYPING_STATEFUL_STEPS: "120"
         KERN_ENABLE_MEGA_ALL_PROFILE_MATRIX: "1"
         KERN_EXHAUSTIVE_MEGA_ALL_PROFILE_LIMIT: "4"
         KERN_EXHAUSTIVE_MEGA_ALL_PROFILE_PROGRAM_LIMIT: "4"
@@ -96,6 +104,10 @@ schemes:
         - KernTextKitTests
       environmentVariables:
         KERN_ENABLE_EXHAUSTIVE_TESTS: "1"
+        KERN_TYPING_COVERAGE_LANE: "nightly"
+        KERN_TYPING_STATEFUL_ENFORCE: "1"
+        KERN_TYPING_STATEFUL_SEEDS: "500"
+        KERN_TYPING_STATEFUL_STEPS: "200"
         KERN_ENABLE_MEGA_ALL_PROFILE_MATRIX: "1"
         KERN_EXHAUSTIVE_MEGA_ALL_PROFILE_LIMIT: "9999"
         KERN_EXHAUSTIVE_MEGA_ALL_PROFILE_PROGRAM_LIMIT: "9999"
@@ -166,7 +178,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: KernApp/Kern.entitlements
         CODE_SIGN_IDENTITY: "-"
         PRODUCT_BUNDLE_IDENTIFIER: com.gradigit.kern
-        PRODUCT_NAME: KernTextKit
+        PRODUCT_NAME: Kern
+        PRODUCT_MODULE_NAME: KernTextKit
         GENERATE_INFOPLIST_FILE: false
 
   KernTextKitTests:
@@ -183,3 +196,5 @@ targets:
         SWIFT_STRICT_CONCURRENCY: complete
         GENERATE_INFOPLIST_FILE: true
         CODE_SIGN_IDENTITY: "-"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kern.app/Contents/MacOS/Kern"
+        BUNDLE_LOADER: "$(TEST_HOST)"

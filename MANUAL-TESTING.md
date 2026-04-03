@@ -4,7 +4,7 @@ Items that benefit from a human pass in the running app (visual alignment, UX fe
 
 ## Smoke
 
-- [ ] `open -a KernTextKit some.md` opens the file (no crash)
+- [ ] `open -a Kern some.md` opens the file (no crash)
 - [ ] Editing feels responsive (typing, selection, scroll)
 - [ ] Cmd+S saves (file changes on disk)
 - [ ] External change reload shows a toast (“File reloaded from disk”)

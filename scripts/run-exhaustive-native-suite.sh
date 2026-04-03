@@ -5,7 +5,6 @@
 #   ./scripts/run-exhaustive-native-suite.sh
 #
 # Optional env:
-#   KERN_RUN_UI_EXHAUSTIVE=1   Include exhaustive UI tests (requires Accessibility trust + unlocked screen)
 #   KERN_RUN_ULTRA=1           Include bounded ultra non-UI mega all-profile matrix
 #   KERN_RUN_ULTRA_FULL=1      Include full ultra non-UI mega all-profile matrix (very slow)
 #   KERN_RUN_SPEC_CONFORMANCE=0 Skip strict CommonMark/GFM conformance lane (default: run)
@@ -33,9 +32,6 @@ FAILURES=()
 : "${KERN_ENABLE_PERF_TESTS:=1}"
 : "${KERN_PERF_ENABLE_ULTIMATE_RENDER:=1}"
 : "${KERN_PERF_RENDER_FULL:=1}"
-: "${KERN_UI_SCREENSHOTS:=always}"
-: "${KERN_EXPORT_UI_ATTACHMENTS:=1}"
-
 export KERN_FAIL_ON_SKIPPED
 export KERN_ENABLE_MEGA_CHAR_BY_CHAR
 export KERN_ENABLE_MEGA_ALL_PROFILE_MATRIX
@@ -48,8 +44,6 @@ export KERN_EXHAUSTIVE_ULTIMATE_INTERLEAVED_FULL
 export KERN_ENABLE_PERF_TESTS
 export KERN_PERF_ENABLE_ULTIMATE_RENDER
 export KERN_PERF_RENDER_FULL
-export KERN_UI_SCREENSHOTS
-export KERN_EXPORT_UI_ATTACHMENTS
 
 log() {
   echo "$*" | tee -a "$SUMMARY"
@@ -92,7 +86,7 @@ run_step() {
   fi
 }
 
-log "KernTextKit exhaustive native suite"
+log "Kern exhaustive native suite"
 log "output: $OUT_DIR"
 
 run_step generate_ultimate_fixture python3 scripts/gen_ultimate_stress_test.py
@@ -113,10 +107,6 @@ fi
 
 if [ "${KERN_RUN_ULTRA_FULL:-0}" = "1" ]; then
   run_step unit_ultra_full ./scripts/test-native-editor.sh --unit-only --ultra-full --skip-xcodegen
-fi
-
-if [ "${KERN_RUN_UI_EXHAUSTIVE:-0}" = "1" ]; then
-  run_step ui_exhaustive ./scripts/test-native-editor.sh --ui-only --exhaustive --export-ui-attachments --skip-xcodegen
 fi
 
 log ""

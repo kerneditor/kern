@@ -47,6 +47,17 @@ test-screenshots/
 test-results/
 bench-results/
 dist/
+benchmark-archive/
+scripts/kern-bench/benchmark-archive/
+tmp/
+.cache/
+.swift-module-cache/
+.tmp-clang-module-cache/
+.tmp-home/
+.tool-home/
+.study/
+.derived-data-release/
+FORGE-STATUS.*.md
 
 # Profiling data
 *.profraw
@@ -63,8 +74,12 @@ CONTEXT-RESTORE.md
 # Handoff/session artifacts (local only)
 .handoff-fresh/
 HANDOFF.auto.md
+HUMAN-INPUT.md
+MISSION-CONTROL.md
+SUGGESTIONS.md
+docs/internal/
 
-# Research/internal development scratch artifacts (local only)
+# Untracked research/internal development scratch artifacts (local only)
 architect/
 benchmark-history/
 research-*.md

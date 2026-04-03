@@ -2,7 +2,9 @@
 
 Kern is a native macOS WYSIWYG Markdown editor. You open a local `.md` file and edit rendered content directly, without living in raw markdown syntax.
 
-This repository is the native TextKit implementation (`Kern-textkit`), now the primary Kern codebase.
+This repository is the Kern codebase. The editor is built with AppKit + TextKit and does not use a WebView.
+
+The product and app name are **Kern**.
 
 ## Why Kern Exists
 
@@ -14,12 +16,6 @@ Most local markdown workflows break down in one of these ways:
 
 Kern is built for a simpler workflow: open any local markdown file, edit in true WYSIWYG, save back to deterministic markdown.
 
-## Why This Rewrite Happened
-
-The first Kern implementation (`Kern-webkit`) used WKWebView + Milkdown and proved the workflow. It also inherited web-runtime complexity: a Swift<->JavaScript bridge, split debugging surface, and integration overhead.
-
-This repo rewrites the editor in AppKit + TextKit (no WebView) to keep the editing path native, reduce moving parts, and make behavior easier to test at unit/snapshot depth.
-
 ## What Kern Does Today
 
 - True WYSIWYG as the default editing mode.
@@ -30,7 +26,9 @@ This repo rewrites the editor in AppKit + TextKit (no WebView) to keep the editi
 - Native rendering paths for images, Mermaid, and math.
 - File watching, autosave, and standard macOS window/tab behavior.
 
-## Quick Start (Installed App)
+## Quick Start (Open a Markdown File)
+
+If you have built or installed the app bundle, open a markdown file with:
 
 Open a markdown file in Kern:
 
@@ -73,7 +71,7 @@ Fast unit tests:
 ./scripts/test-native-editor.sh --unit-only
 ```
 
-Full default suite (unit + UI):
+Full default suite:
 
 ```bash
 ./scripts/test-native-editor.sh
@@ -84,7 +82,6 @@ Exhaustive lanes:
 ```bash
 ./scripts/test-native-editor.sh --unit-only --exhaustive
 ./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive
-./scripts/test-native-editor.sh --ui-only --exhaustive
 ```
 
 Strict markdown spec conformance (CommonMark/GFM lane):
@@ -101,16 +98,27 @@ Orchestrated exhaustive gate:
 
 Notes:
 
-- UI tests require an unlocked screen and Automation/Accessibility permissions.
 - Exhaustive lanes are intentionally strict and slower.
+
+## Packaging From Source
+
+Build the local development artifacts:
+
+```bash
+./scripts/package-kern-app.sh
+```
+
+This currently produces an unsigned app bundle and zip archive for local development and evaluation.
+
+Official signed/notarized macOS distribution is not published from this repository yet.
 
 ## Documentation Map
 
-- docs/plans/native-editor-test-suite.md
-- docs/plans/markdown-spec-failure-tracker.md
-- docs/plans/native-editor-missing-features-implementation-plan.md
-- NATIVE-EDITOR-TEST-MATRIX.md
-- KERN-MARKDOWN.md
+- [docs/plans/native-editor-test-suite.md](docs/plans/native-editor-test-suite.md)
+- [docs/plans/markdown-spec-failure-tracker.md](docs/plans/markdown-spec-failure-tracker.md)
+- [docs/plans/native-editor-missing-features-implementation-plan.md](docs/plans/native-editor-missing-features-implementation-plan.md)
+- [NATIVE-EDITOR-TEST-MATRIX.md](NATIVE-EDITOR-TEST-MATRIX.md)
+- [KERN-MARKDOWN.md](KERN-MARKDOWN.md)
 
 ## Current Focus Areas
 
@@ -126,6 +134,12 @@ Notes:
 
 ## Contributing
 
+See:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
 If you want to contribute:
 
 1. Open an issue first for larger behavior or architecture changes.
@@ -136,6 +150,7 @@ For review requests, include failing/passing test evidence and any snapshot or U
 
 ## Status
 
-- As of 2026-02-17, this TextKit repo is the primary Kern app.
-- The older WKWebView implementation is preserved separately as a legacy archive.
-- This repository is currently private and does not yet declare an open-source license.
+- Kern is the current native macOS app codebase.
+- This repository is a source release. Signed/notarized macOS distribution is not published from this repository yet.
+- This repository is licensed under **Apache-2.0**.
+- Open-source release hardening is active. Performance work and product hardening are still in progress.
