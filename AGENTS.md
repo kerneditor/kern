@@ -1,6 +1,6 @@
-# AGENTS.md (KernTextKit)
+# AGENTS.md (Kern)
 
-This repository is **KernTextKit**: a fully native macOS WYSIWYG Markdown editor (Swift + AppKit + TextKit, **no WebView**).
+This repository is **Kern**: a fully native macOS WYSIWYG Markdown editor (Swift + AppKit + TextKit, **no WebView**).
 
 ## Canonical Test Suite Plan
 
@@ -14,9 +14,9 @@ This plan is the source of truth for what “exhaustive” means. If tests are g
 
 ## Where To Work
 
-- Work only in this repo: `/Users/aaaaa/Projects/Kern-textkit`
-- Do not modify the legacy repo at `/Users/aaaaa/Projects/Kern-webkit` unless explicitly requested.
-  - Compatibility symlink currently exists at `/Users/aaaaa/Projects/Kern -> /Users/aaaaa/Projects/Kern-textkit`.
+- Work only in this repository checkout.
+- Do not modify the legacy WebKit repo unless explicitly requested.
+- If a compatibility symlink exists in your local environment, treat this repository as the source of truth.
 
 ## Core Commands
 

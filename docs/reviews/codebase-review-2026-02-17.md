@@ -109,7 +109,7 @@ hard-fail with a misleading error (`unimpErr` / "function not implemented").
 
 - EditorDocument.swift lines 29-38
 
-### 13. Hardcoded `/Users/aaaaa/` paths in 2 scripts
+### 13. Hardcoded user-specific absolute paths in 2 scripts
 
 `comprehensive-benchmark.sh` and `test-autosave-debounce.sh` are completely
 broken for any other user.
@@ -255,7 +255,7 @@ Standard macOS shortcut for Find and Replace is Cmd+Option+F.
 
 | # | Script | Issue | Severity |
 |---|--------|-------|----------|
-| 1 | comprehensive-benchmark.sh, test-autosave-debounce.sh | Hardcoded `/Users/aaaaa/` path | HIGH |
+| 1 | comprehensive-benchmark.sh, test-autosave-debounce.sh | Hardcoded user-specific absolute path | HIGH |
 | 2 | test-markdown-spec-conformance.sh | Venv + pip always re-run | HIGH |
 | 3 | comprehensive-benchmark.sh, test-autosave-debounce.sh | Missing `set -e` | HIGH |
 | 4 | run-exhaustive-native-suite.sh | Undeclared `rg` dependency | HIGH |

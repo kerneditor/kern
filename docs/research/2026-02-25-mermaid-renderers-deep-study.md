@@ -243,8 +243,8 @@ Risk: Low.
 
 ### Local clone paths
 
-- `/Users/aaaaa/Projects/Kern-textkit/.study/2026-02-25-mermaid-repos/ascii-mermaid`
-- `/Users/aaaaa/Projects/Kern-textkit/.study/2026-02-25-mermaid-repos/beautiful-mermaid`
+- `.study/2026-02-25-mermaid-repos/ascii-mermaid`
+- `.study/2026-02-25-mermaid-repos/beautiful-mermaid`
 
 ### Commands executed (high level)
 

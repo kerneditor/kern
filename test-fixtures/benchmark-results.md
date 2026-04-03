@@ -4,7 +4,7 @@
 **Machine:** Apple M4
 **macOS:** 26.1
 **RAM:** 24 GB
-**Kern App:** /Users/aaaaa/Library/Developer/Xcode/DerivedData/Kern-fmshysujrcibpcdmfoxzgubdswre/Build/Products/Debug/Kern.app
+**Kern App:** Debug app bundle from local DerivedData
 
 ---
 

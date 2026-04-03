@@ -539,7 +539,7 @@ The biggest single win is pre-loading the editor HTML into a warm-up WKWebView. 
 
 * [DoorDash: 60% Launch Reduction](https://doordash.engineering/2023/01/31/how-we-reduced-our-ios-app-launch-time-by-60/)
 
-* [MarkEdit Source](file:///Users/aaaaa/marktext-claude/MarkEdit/) — `_drawsBackground`, pool patterns
+* MarkEdit source checkout — `_drawsBackground`, pool patterns
 
 * [Milkdown CrepeBuilder](https://github.com/milkdown/milkdown) — Selective feature loading
 
@@ -681,13 +681,13 @@ Swizzles `_isUpdatedExcludingContentTypes:` on `NSMenu` to prevent "Populating a
 
 **Key file paths** (for reference):
 
-* /Users/aaaaa/marktext-claude/MarkEdit/MarkEditMac/Sources/Main/Application/Application.swift
+* `MarkEditMac/Sources/Main/Application/Application.swift`
 
-* /Users/aaaaa/marktext-claude/MarkEdit/MarkEditMac/Sources/Main/AppHacks.swift
+* `MarkEditMac/Sources/Main/AppHacks.swift`
 
-* /Users/aaaaa/marktext-claude/MarkEdit/MarkEditMac/Sources/Editor/EditorChunkLoader.swift
+* `MarkEditMac/Sources/Editor/EditorChunkLoader.swift`
 
-* /Users/aaaaa/marktext-claude/MarkEdit/MarkEditKit/Sources/Extensions/WKWebViewConfiguration+Extension.swift
+* `MarkEditKit/Sources/Extensions/WKWebViewConfiguration+Extension.swift`
 
 ### Milkdown CrepeBuilder — Deep Analysis
 
