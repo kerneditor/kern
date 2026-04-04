@@ -18,6 +18,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode 26.x
+        run: |
+          ls -1 /Applications | grep '^Xcode' || true
+
+          selected=""
+          for candidate in \
+            /Applications/Xcode_26.3.app \
+            /Applications/Xcode_26.2.app \
+            /Applications/Xcode_26.2.0.app
+          do
+            if [ -d "$candidate" ]; then
+              selected="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$selected" ]; then
+            echo "Expected Xcode 26.2+ on the runner, but no supported install was found." >&2
+            exit 1
+          fi
+
+          sudo xcode-select -s "$selected/Contents/Developer"
+          xcodebuild -version
+
       - name: Ensure XcodeGen
         run: |
           if ! command -v xcodegen >/dev/null 2>&1; then

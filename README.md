@@ -47,8 +47,10 @@ kern() { open -a Kern "$@"; }
 Requirements:
 
 - macOS 14+
-- Xcode 16+
+- Xcode 26.2+
 - XcodeGen (`brew install xcodegen`)
+
+CI is pinned to Xcode 26.x because the GitHub Actions default Xcode can lag behind the toolchain this repo currently requires.
 
 Build:
 

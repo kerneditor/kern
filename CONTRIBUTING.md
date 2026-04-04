@@ -5,8 +5,9 @@ Kern is a native macOS Markdown editor built with AppKit + TextKit.
 ## Before you start
 
 - Use macOS 14+.
-- Use Xcode 16+.
+- Use Xcode 26.2+.
 - Install XcodeGen.
+- CI is pinned to Xcode 26.x because the GitHub Actions default Xcode can lag behind the toolchain this repo currently requires.
 
 ## Setup
 
