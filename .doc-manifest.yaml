@@ -1,7 +1,7 @@
 # Documentation manifest for KernTextKit
 # Tracks docs, ownership intent, and primary code references
 
-last_synced: "2026-03-06T04:56:00Z"
+last_synced: "2026-05-17T15:00:00Z"
 
 files:
   - path: README.md
@@ -12,7 +12,7 @@ files:
   - path: CLAUDE.md
     type: project-instructions
     last_updated: "2026-03-06T04:56:00Z"
-    description: Session instructions and high-signal engineering context
+    description: Public-safe stub; maintainer-local operations docs live outside the tracked root
     references:
       - KernApp/Sources/App/main.swift
       - KernApp/Sources/App/AppDelegate.swift
@@ -39,15 +39,10 @@ files:
       - scripts/run-typing-behavior-gate.sh
       - scripts/test-markdown-spec-conformance.sh
 
-  - path: HANDOFF.md
-    type: session-handoff
-    last_updated: "2026-02-21T18:48:04Z"
-    description: Fresh-agent continuation snapshot with current repo state and next actions
-
   - path: TODO.md
     type: task-tracker
     last_updated: "2026-02-18T13:00:00Z"
-    description: Persistent work tracker (watched; not owned by syncing-docs)
+    description: Public-safe stub; maintainer-local task tracking moved out of the tracked repository root
 
   - path: NATIVE-EDITOR-TEST-MATRIX.md
     type: test-plan
@@ -83,3 +78,24 @@ files:
     type: review
     last_updated: "2026-02-17T13:55:00Z"
     description: Comprehensive codebase review covering editor core, codec, tests, scripts, and architecture
+  - path: docs/dependencies.md
+    type: dependency-policy
+    last_updated: "2026-05-17T15:00:00Z"
+    description: Public dependency inventory, update policy, and generated-artifact guidance
+    references:
+      - project.yml
+      - spec-requirements.txt
+      - scripts/test-native-editor.sh
+      - scripts/test-markdown-spec-conformance.sh
+      - scripts/kern-bench/Package.swift
+      - .github/dependabot.yml
+
+  - path: docs/release/v0.1.2-validation-evidence.md
+    type: release-evidence
+    last_updated: "2026-05-17T15:00:00Z"
+    description: Public release evidence record for the v0.1.2 unsigned DMG release
+
+  - path: docs/plans/README.md
+    type: plan-index
+    last_updated: "2026-05-17T15:00:00Z"
+    description: Index separating canonical active plans from deferred and historical planning docs

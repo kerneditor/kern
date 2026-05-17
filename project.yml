@@ -1,5 +1,6 @@
 name: KernTextKit
 options:
+  minimumXcodeGenVersion: 2.45.0
   bundleIdPrefix: com.gradigit.kern
   deploymentTarget:
     macOS: "14.0"
@@ -13,7 +14,7 @@ settings:
 packages:
   SnapshotTesting:
     url: https://github.com/pointfreeco/swift-snapshot-testing
-    from: 1.18.9
+    exactVersion: 1.18.9
 
 schemes:
   KernTextKit:

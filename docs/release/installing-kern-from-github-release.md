@@ -1,6 +1,6 @@
 # Installing Kern from a GitHub release
 
-This guide applies when a tagged GitHub release includes binary assets for Kern.
+This guide applies when a tagged GitHub release includes binary assets for Kern. The latest published release evidence currently tracked in this repository is [`v0.1.2`](v0.1.2-validation-evidence.md).
 
 ## Expected assets
 

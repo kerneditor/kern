@@ -19,6 +19,7 @@ SNAPSHOTS_ONLY=false
 ENABLE_ULTRA=false
 ENABLE_ULTRA_FULL=false
 SPEC_VENV_PATH="${KERN_SPEC_VENV_PATH:-$(pwd)/.venv-spec}"
+SPEC_REQUIREMENTS_FILE="${KERN_SPEC_REQUIREMENTS_FILE:-$(pwd)/spec-requirements.txt}"
 DEFAULTS_DOMAIN="com.gradigit.kern.tests"
 declare -a DEFAULT_KEYS=()
 
@@ -43,10 +44,33 @@ prepare_spec_oracle_env() {
     echo "▸ Creating markdown spec oracle venv..."
     python3 -m venv "$SPEC_VENV_PATH"
   fi
-  if ! "$py" -c "import cmarkgfm" >/dev/null 2>&1; then
-    echo "▸ Installing markdown spec oracle dependency (cmarkgfm)..."
+  if [ ! -f "$SPEC_REQUIREMENTS_FILE" ]; then
+    echo "Missing markdown spec oracle requirements file: $SPEC_REQUIREMENTS_FILE" >&2
+    exit 2
+  fi
+  if ! "$py" - "$SPEC_REQUIREMENTS_FILE" <<'PY' >/dev/null 2>&1
+import importlib.metadata
+import pathlib
+import re
+import sys
+
+requirements = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+pins = re.findall(r"^([A-Za-z0-9_.-]+)==([^\s#]+)", requirements, re.MULTILINE)
+if not pins:
+    raise SystemExit(1)
+for package, expected in pins:
+    try:
+        actual = importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        raise SystemExit(1)
+    if actual != expected:
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+  then
+    echo "▸ Installing markdown spec oracle dependencies..."
     "$py" -m pip install --upgrade pip >/dev/null
-    "$py" -m pip install --quiet cmarkgfm
+    "$py" -m pip install --quiet -r "$SPEC_REQUIREMENTS_FILE"
   fi
   # Pass spec oracle configuration through environment so XCTest always sees it,
   # even when UserDefaults suite propagation is delayed or unavailable.

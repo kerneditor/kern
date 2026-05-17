@@ -10,11 +10,13 @@ Scope:
 
 ## Latest Run
 
-- Timestamp: `2026-03-04 00:43:59`
+- Timestamp: `2026-05-17 23:19 KST`
 - Command:
   - `./scripts/test-markdown-spec-conformance.sh`
 - Result bundle:
-  - `test-results/native-editor/20260304-004334/spec-conformance/KernMarkdownSpecConformance.xcresult`
+  - `test-results/native-editor/20260517-231911/spec-conformance/KernMarkdownSpecConformance.xcresult`
+- Release evidence:
+  - `docs/release/v0.1.2-validation-evidence.md`
 
 ## Current Score
 
@@ -54,6 +56,7 @@ Typing behavior exhaustiveness is tracked separately from strict CommonMark/GFM 
 - Gate script:
   - `./scripts/run-typing-behavior-gate.sh --lane pr`
   - `./scripts/run-typing-behavior-gate.sh --lane nightly`
-- Latest evidence (2026-03-04):
-  - `test-results/typing-behavior/20260304-003743-pr/summary.txt`
+- Latest release-gate evidence (2026-05-17):
+  - `test-results/typing-behavior/20260517-231923-pr/summary.txt`
+- Latest historical nightly evidence (2026-03-04):
   - `test-results/typing-behavior/20260304-003815-nightly/summary.txt`

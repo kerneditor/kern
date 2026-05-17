@@ -8,7 +8,8 @@ If you want end-user install instructions instead of contributor setup, use [Ins
 
 - Use macOS 14+.
 - Use Xcode 26.2+.
-- Install XcodeGen.
+- Install XcodeGen 2.45+.
+- Use Python 3 with `venv`/`pip` for strict Markdown spec validation.
 - CI is pinned to Xcode 26.x because the GitHub Actions default Xcode can lag behind the toolchain this repo currently requires.
 
 ## Setup
@@ -41,7 +42,7 @@ Use [Kern release validation gate](docs/release/release-validation-gate.md) as t
 CI runs these baseline checks on pushes and pull requests:
 
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh --no-snapshots
 ./scripts/test-markdown-spec-conformance.sh
 ./scripts/run-typing-behavior-gate.sh --lane pr
 cd scripts/kern-bench && swift test -c release
@@ -57,8 +58,16 @@ In addition to CI, make sure you ran the change-specific validation lanes below 
 
 ### General code changes
 
+Fast non-snapshot lane:
+
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh --no-snapshots
+```
+
+Default unit + snapshot lane when rendering or snapshots may be affected:
+
+```bash
+./scripts/test-native-editor.sh
 ```
 
 ### Editing behavior changes
@@ -73,6 +82,8 @@ In addition to CI, make sure you ran the change-specific validation lanes below 
 ./scripts/test-markdown-spec-conformance.sh
 ```
 
+This lane installs the pinned Python oracle stack from `spec-requirements.txt` into `.venv-spec/`.
+
 ### Rendering/layout changes
 
 - run the relevant snapshot or focused visual validation before review
@@ -82,6 +93,8 @@ In addition to CI, make sure you ran the change-specific validation lanes below 
 ```bash
 cd scripts/kern-bench && swift test -c release
 ```
+
+Dependency update policy is documented in [Dependency policy](docs/dependencies.md).
 
 ## Pull requests
 

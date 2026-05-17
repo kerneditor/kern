@@ -23,7 +23,7 @@ This gate does **not** require:
 The contributor baseline is the PR/main gate. CI currently enforces these commands:
 
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh --no-snapshots
 ./scripts/test-markdown-spec-conformance.sh
 ./scripts/run-typing-behavior-gate.sh --lane pr
 cd scripts/kern-bench && swift test -c release
@@ -118,6 +118,7 @@ For the current unsigned DMG path, a GitHub release is ready only if **all** of 
 6. after upload, the published DMG and the published `.sha256` sidecar both match the reviewed local digest
 7. the unsigned `spctl` posture was recorded
 8. the packaged-app manual checklist was completed and archived with the tested macOS version
+9. release evidence was recorded in a versioned file under `docs/release/`
 
 ## Related docs
 
@@ -125,3 +126,4 @@ For the current unsigned DMG path, a GitHub release is ready only if **all** of 
 - [Building Kern from source](building-kern-from-source.md)
 - [GitHub release checklist](github-release-checklist.md)
 - [Unsigned DMG security posture](unsigned-dmg-security-posture.md)
+- [v0.1.2 validation evidence](v0.1.2-validation-evidence.md)

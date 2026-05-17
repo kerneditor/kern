@@ -13,6 +13,7 @@ SECTION_REGEX="${KERN_SPEC_SECTION_REGEX:-}"
 SKIP_FIXTURE_UPDATE=false
 SKIP_XCODEGEN=false
 VENV_PATH="${KERN_SPEC_VENV_PATH:-$(pwd)/.venv-spec}"
+SPEC_REQUIREMENTS_FILE="${KERN_SPEC_REQUIREMENTS_FILE:-$(pwd)/spec-requirements.txt}"
 SCHEME="${KERN_SPEC_SCHEME:-KernTextKitExhaustive}"
 
 while [[ $# -gt 0 ]]; do
@@ -84,10 +85,35 @@ if [[ "$SKIP_FIXTURE_UPDATE" = false ]]; then
 fi
 
 echo "▸ Preparing python oracle environment..."
+if [[ ! -f "$SPEC_REQUIREMENTS_FILE" ]]; then
+  echo "Missing markdown spec oracle requirements file: $SPEC_REQUIREMENTS_FILE" >&2
+  exit 2
+fi
 if [[ ! -f "$VENV_PATH/bin/python3" ]]; then
   python3 -m venv "$VENV_PATH"
+fi
+if ! "$VENV_PATH/bin/python3" - "$SPEC_REQUIREMENTS_FILE" <<'PY' >/dev/null 2>&1
+import importlib.metadata
+import pathlib
+import re
+import sys
+
+requirements = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+pins = re.findall(r"^([A-Za-z0-9_.-]+)==([^\s#]+)", requirements, re.MULTILINE)
+if not pins:
+    raise SystemExit(1)
+for package, expected in pins:
+    try:
+        actual = importlib.metadata.version(package)
+    except importlib.metadata.PackageNotFoundError:
+        raise SystemExit(1)
+    if actual != expected:
+        raise SystemExit(1)
+raise SystemExit(0)
+PY
+then
   "$VENV_PATH/bin/python3" -m pip install --upgrade pip >/dev/null
-  "$VENV_PATH/bin/python3" -m pip install --quiet cmarkgfm
+  "$VENV_PATH/bin/python3" -m pip install --quiet -r "$SPEC_REQUIREMENTS_FILE"
 fi
 
 ONLY_TESTING_ARGS=()

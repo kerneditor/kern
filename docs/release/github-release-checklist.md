@@ -2,7 +2,7 @@
 
 This checklist is for maintainers preparing a GitHub release that includes the current unsigned Kern DMG.
 
-For the canonical contributor-vs-release validation split, see [Kern release validation gate](release-validation-gate.md).
+For the canonical contributor-vs-release validation split, see [Kern release validation gate](release-validation-gate.md). Record completed release evidence in a versioned evidence file such as [v0.1.2 validation evidence](v0.1.2-validation-evidence.md).
 
 ## Preconditions
 

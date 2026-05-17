@@ -51,8 +51,8 @@ jobs:
       - name: Generate project
         run: xcodegen
 
-      - name: Native unit-only suite
-        run: ./scripts/test-native-editor.sh --unit-only
+      - name: Native non-snapshot suite
+        run: ./scripts/test-native-editor.sh --no-snapshots
 
       - name: Strict markdown spec conformance
         run: ./scripts/test-markdown-spec-conformance.sh

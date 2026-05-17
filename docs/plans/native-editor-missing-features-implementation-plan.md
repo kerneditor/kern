@@ -30,7 +30,7 @@ Scope: Close all currently known full-spec gaps in KernTextKit (native AppKit/Te
 ## 1) Current Gap Inventory (from latest exhaustive run)
 
 Source run:
-- `./scripts/test-native-editor.sh --unit-only --exhaustive`
+- `./scripts/test-native-editor.sh --exhaustive`
 - Result bundle: `test-results/native-editor/20260215-070135/KernTextKitTests.xcresult`
 
 Primary failing areas:
@@ -239,8 +239,8 @@ Phase 3 gate:
 - new `NativeMarkdownCodecSyntaxHighlightingMatrixTests` over mega-stress language list
 
 Final gate:
-- `./scripts/test-native-editor.sh --unit-only --exhaustive`
-- `./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive`
+- `./scripts/test-native-editor.sh --exhaustive`
+- `./scripts/test-native-editor.sh --snapshots --exhaustive`
 - `./scripts/bench-native-editor.sh`
 - `./scripts/run-exhaustive-native-suite.sh` (recommended orchestrated gate)
 

@@ -1,0 +1,5 @@
+# Python oracle dependencies for strict CommonMark/GFM conformance tests.
+# Keep exact pins so local and CI spec fixtures are generated from the same parser stack.
+cmarkgfm==2024.11.20
+cffi==2.0.0
+pycparser==3.0

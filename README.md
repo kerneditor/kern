@@ -44,6 +44,8 @@ kern() { open -a Kern "$@"; }
 
 ## Install From a GitHub Release
 
+Latest release: [`v0.1.2`](https://github.com/kerneditor/kern/releases/tag/v0.1.2).
+
 When a tagged release includes binary assets, download:
 
 - `Kern-macOS-Release.dmg`
@@ -74,7 +76,8 @@ Requirements:
 
 - macOS 14+
 - Xcode 26.2+
-- XcodeGen (`brew install xcodegen`)
+- XcodeGen 2.45+ (`brew install xcodegen`)
+- Python 3 with `venv`/`pip` for strict Markdown spec validation
 
 CI is pinned to Xcode 26.x because the GitHub Actions default Xcode can lag behind the toolchain this repo currently requires.
 
@@ -102,23 +105,25 @@ Dedicated source-build instructions live in [the source-build guide](docs/releas
 
 ## Test Commands
 
-Fast unit tests:
+Fast non-snapshot unit lane:
 
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh --no-snapshots
 ```
 
-Full default suite:
+Default unit + snapshot suite:
 
 ```bash
 ./scripts/test-native-editor.sh
 ```
 
+`--unit-only` is kept only for backward compatibility; unit tests are the only native test mode now.
+
 Exhaustive lanes:
 
 ```bash
-./scripts/test-native-editor.sh --unit-only --exhaustive
-./scripts/test-native-editor.sh --unit-only --snapshots --exhaustive
+./scripts/test-native-editor.sh --exhaustive
+./scripts/test-native-editor.sh --snapshots --exhaustive
 ```
 
 Strict markdown spec conformance (CommonMark/GFM lane):
@@ -163,6 +168,9 @@ Signed/notarized macOS distribution is not published from this repository.
 - [docs/release/github-release-checklist.md](docs/release/github-release-checklist.md)
 - [docs/release/release-validation-gate.md](docs/release/release-validation-gate.md)
 - [docs/release/public-repo-health.md](docs/release/public-repo-health.md)
+- [docs/release/v0.1.2-validation-evidence.md](docs/release/v0.1.2-validation-evidence.md)
+- [docs/dependencies.md](docs/dependencies.md)
+- [docs/plans/README.md](docs/plans/README.md)
 - [NATIVE-EDITOR-TEST-MATRIX.md](NATIVE-EDITOR-TEST-MATRIX.md)
 - [KERN-MARKDOWN.md](KERN-MARKDOWN.md)
 
@@ -191,7 +199,7 @@ If you want to contribute:
 
 1. Open an issue first for larger behavior or architecture changes.
 2. Keep changes aligned with the native test-suite plan documents.
-3. Run at least `./scripts/test-native-editor.sh --unit-only` before opening a PR.
+3. Run at least `./scripts/test-native-editor.sh --no-snapshots` before opening a PR. Run the default `./scripts/test-native-editor.sh` locally when rendering or snapshots may be affected; CI keeps snapshots out of the baseline because runner rendering can drift.
 
 For review requests, include failing/passing test evidence and any snapshot or UI artifacts that explain behavior changes.
 
@@ -200,4 +208,5 @@ For review requests, include failing/passing test evidence and any snapshot or U
 - Kern is the current native macOS app codebase.
 - This repository is a public source project. Tagged releases may include an unsigned DMG plus checksum, but signed/notarized macOS distribution is not published from this repository.
 - This repository is licensed under **Apache-2.0**.
-- Open-source release hardening is active. Performance work and product hardening are still in progress.
+- Latest public release: `v0.1.2`.
+- Open-source release hardening is active. Full-fidelity benchmark work remains deferred; product hardening is still in progress.

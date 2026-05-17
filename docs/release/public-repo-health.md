@@ -40,6 +40,7 @@ External-only GitHub settings that are not asserted by tracked files here:
 - secret scanning
 - push protection
 - code scanning / CodeQL settings
+- private vulnerability reporting
 
 Those controls may be enabled at the GitHub repo/org settings level, but this repository does not claim their status unless maintainers verify them directly in GitHub.
 
@@ -48,3 +49,9 @@ Those controls may be enabled at the GitHub repo/org settings level, but this re
 The GitHub community profile API may still report `issue_template: null` even though issue forms are present under `.github/ISSUE_TEMPLATE/`.
 
 For this repository, treat the tracked issue forms as the source of truth. The `null` result is recorded as an observed GitHub API/profile limitation or cache discrepancy, not as evidence that issue forms are absent.
+
+## Tracked generated-artifact policy
+
+Generated local artifacts are ignored by project policy. This includes Xcode generated projects, DerivedData, xcresult bundles, Python virtualenvs, release DMGs, checksums, dSYMs, benchmark outputs, and maintainer-local Forge/session files.
+
+The root handoff file, legacy `architect/` notes, and root `research-*.md` history were reviewed during open-source cleanup and are intentionally removed from the tracked public repo surface. Maintainer-local replacements should stay in ignored local paths.

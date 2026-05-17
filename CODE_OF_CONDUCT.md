@@ -38,10 +38,10 @@ They may also temporarily or permanently restrict participation when necessary t
 
 ## Reporting
 
-For serious conduct issues in this repository's GitHub spaces:
+For serious conduct issues in this repository's GitHub spaces that require GitHub-platform intervention:
 
 - use GitHub's private abuse/support reporting path: `https://support.github.com/contact`
 - include links to the relevant issue, pull request, discussion, commit, or comment
 - avoid posting sensitive details publicly
 
-At the moment, GitHub Support is the only private reporting path published by this repository.
+At the moment, this repository does not publish a separate maintainer-controlled private conduct inbox. Use the GitHub-platform path for abuse or harassment in GitHub-hosted project spaces.

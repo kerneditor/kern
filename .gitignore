@@ -19,6 +19,9 @@ Thumbs.db
 build/
 DerivedData/
 .derived-data/
+*.xcresult/
+*.dSYM/
+*.xcarchive/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 xcuserdata/
@@ -48,17 +51,26 @@ test-screenshots/
 test-results/
 bench-results/
 dist/
+*.dmg
+*.dmg.sha256
 benchmark-archive/
 scripts/kern-bench/benchmark-archive/
 tmp/
+.tmp/
 .cache/
 .swift-module-cache/
 .tmp-clang-module-cache/
 .tmp-home/
 .tool-home/
 .study/
+.venv-spec/
+.pytest_cache/
 .derived-data-release/
+FORGE-STATUS.md
 FORGE-STATUS.*.md
+FORGE-HANDOFF.md
+FORGE-MEMORY.md
+DEFERRED-CHANGES.md
 
 # Profiling data
 *.profraw
@@ -73,6 +85,7 @@ CONTEXT-RESTORE.md
 .worktrees
 
 # Handoff/session artifacts (local only)
+HANDOFF.md
 .handoff-fresh/
 HANDOFF.auto.md
 HUMAN-INPUT.md

@@ -4,9 +4,9 @@ Use this document to choose the right public support path for Kern.
 
 ## Helpful docs before filing
 
-- Install a published binary: `docs/release/installing-kern-from-github-release.md`
-- Build from source: `docs/release/building-kern-from-source.md`
-- Current public release gate: `docs/release/release-validation-gate.md`
+- Install a published binary: [Installing Kern from a GitHub release](docs/release/installing-kern-from-github-release.md)
+- Build from source: [Building Kern from source](docs/release/building-kern-from-source.md)
+- Current public release gate: [Release validation gate](docs/release/release-validation-gate.md)
 
 ## Bug reports
 

@@ -8,7 +8,8 @@ If you just want to install a tagged binary release, use [Installing Kern from a
 
 - macOS 14+
 - Xcode 26.2+
-- XcodeGen
+- XcodeGen 2.45+
+- Python 3 with `venv` and `pip` for strict Markdown spec validation
 
 Install XcodeGen if needed:
 
@@ -49,10 +50,16 @@ These artifacts are still unsigned and not notarized.
 
 ## Baseline validation
 
-At minimum, run:
+For a fast local smoke pass, run:
 
 ```bash
-./scripts/test-native-editor.sh --unit-only
+./scripts/test-native-editor.sh --no-snapshots
+```
+
+Before a PR that can affect rendering or snapshots, run the default unit + snapshot suite:
+
+```bash
+./scripts/test-native-editor.sh
 ```
 
 When markdown semantics changed, also run:
@@ -72,3 +79,5 @@ For the benchmark harness package:
 ```bash
 cd scripts/kern-bench && swift test -c release
 ```
+
+Strict Markdown spec validation uses the pinned Python oracle stack in `spec-requirements.txt` and installs it into the local `.venv-spec/` directory. See [Dependency policy](../dependencies.md) for dependency update rules.

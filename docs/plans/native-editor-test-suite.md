@@ -29,10 +29,10 @@ Build a test suite that:
 
 ## Test Tiers (Fast -> Slow)
 
-We will maintain three tiers and run them differently:
+We maintain three tiers and run them differently:
 
-1. **Smoke (fast, always-green)**: validates the currently supported subset.
-2. **Full Spec (exhaustive, expected-to-fail until implemented)**: validates the intended end-state.
+1. **Smoke / fast local**: validates the supported subset quickly, usually with snapshots disabled.
+2. **Full Spec / exhaustive**: validates the intended end-state and should be green for currently implemented release behavior. If future work introduces an intentional feature gap, the failing test must stay tied to an implementation plan and should not be treated as release-green.
 3. **Perf/Bench (measured, non-flaky)**: tracks regressions and compares vs other editors.
 
 Implementation detail:
@@ -243,14 +243,15 @@ Avoid render verification here; use snapshots and layout-metric tests instead.
 
 ## Done When
 
-We can say the suite is “good enough to drive development” when:
+The suite is “good enough to drive development” when:
 
-- Full-spec exhaustive run produces **many meaningful failures** for currently missing features.
-- Each missing feature has at least:
+- Full-spec exhaustive runs fail only for known, deliberately tracked future gaps.
+- Each future missing feature has at least:
   - 1 codec spec test
   - 1 snapshot (or layout metric test)
   - 1 interaction test if user interaction is required
 - Perf suite provides stable numbers for `stress-test.md` and `mega-stress-test.md`.
+- Release-facing correctness gates have current evidence in `docs/release/` or `docs/plans/markdown-spec-failure-tracker.md`.
 
 ## Commanded Runs
 
