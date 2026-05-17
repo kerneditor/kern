@@ -91,6 +91,7 @@ EXPECTED_LINE="$(head -n 1 "$SHA_FILE" | tr -d '\r')"
 EXPECTED_HASH="$(printf '%s\n' "$EXPECTED_LINE" | awk '{print $1}')"
 EXPECTED_NAME="$(printf '%s\n' "$EXPECTED_LINE" | awk '{print $2}')"
 EXPECTED_NAME="${EXPECTED_NAME#\*}"
+SHA_ASSET_NAME="$(basename "$SHA_FILE")"
 
 if ! printf '%s\n' "$EXPECTED_HASH" | grep -Eq '^[0-9a-fA-F]{64}$'; then
   echo "ERROR: invalid SHA-256 line in: $SHA_FILE" >&2
@@ -110,10 +111,25 @@ cleanup() {
 trap cleanup EXIT
 
 "$GH_BIN" release download "$TAG" --repo "$REPO" --pattern "$ASSET_NAME" --dir "$DOWNLOAD_DIR"
+"$GH_BIN" release download "$TAG" --repo "$REPO" --pattern "$SHA_ASSET_NAME" --dir "$DOWNLOAD_DIR"
 
 DOWNLOADED_ASSET="$DOWNLOAD_DIR/$ASSET_NAME"
 if [ ! -f "$DOWNLOADED_ASSET" ]; then
   echo "ERROR: downloaded asset not found after gh release download: $DOWNLOADED_ASSET" >&2
+  exit 1
+fi
+
+DOWNLOADED_SHA_FILE="$DOWNLOAD_DIR/$SHA_ASSET_NAME"
+if [ ! -f "$DOWNLOADED_SHA_FILE" ]; then
+  echo "ERROR: downloaded SHA sidecar not found after gh release download: $DOWNLOADED_SHA_FILE" >&2
+  exit 1
+fi
+
+DOWNLOADED_SHA_LINE="$(head -n 1 "$DOWNLOADED_SHA_FILE" | tr -d '\r')"
+if [ "$DOWNLOADED_SHA_LINE" != "$EXPECTED_LINE" ]; then
+  echo "ERROR: published SHA sidecar does not match the reviewed local sidecar." >&2
+  echo "  local:     $EXPECTED_LINE" >&2
+  echo "  published: $DOWNLOADED_SHA_LINE" >&2
   exit 1
 fi
 
@@ -129,4 +145,5 @@ printf 'Verified GitHub release asset digest.\n'
 printf '  repo:  %s\n' "$REPO"
 printf '  tag:   %s\n' "$TAG"
 printf '  asset: %s\n' "$ASSET_NAME"
+printf '  sidecar: %s\n' "$SHA_ASSET_NAME"
 printf '  sha:   %s\n' "$ACTUAL_HASH"

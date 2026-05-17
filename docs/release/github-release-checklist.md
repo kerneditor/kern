@@ -10,12 +10,16 @@ For the canonical contributor-vs-release validation split, see [Kern release val
 - confirm the [Kern release validation gate](release-validation-gate.md) has passed
 - make sure the release notes do not claim signing or notarization
 - make sure `gh` is available for the maintainer upload/download verification steps
+- be ready to complete the human-only packaged-app checklist in `MANUAL-TESTING.md`
+- be ready to record the macOS version used for the manual first-launch / Gatekeeper pass
 
 ## Build the release artifacts
 
 ```bash
 ./scripts/package-kern-app.sh
 ```
+
+This step also regenerates `KernTextKit.xcodeproj` via XcodeGen before the Release build.
 
 Expected outputs:
 
@@ -24,12 +28,6 @@ Expected outputs:
 - `dist/Kern-macOS-Release.dmg.sha256`
 
 ## Verify the local artifact
-
-Packaged app smoke test:
-
-```bash
-./scripts/test-kern-app.sh --packaged --skip-build
-```
 
 Checksum:
 
@@ -53,20 +51,13 @@ Expected mount contents:
 - `Kern.app`
 - `Applications` symlink
 
-Signing/trust inspection:
+Gatekeeper posture:
 
 ```bash
-codesign -dvvv --entitlements :- dist/Kern.app
-spctl --assess --type execute -vv dist/Kern.app || true
-plutil -p dist/Kern.app/Contents/Info.plist
+spctl -a -vv dist/Kern.app
 ```
 
-Expected current posture:
-
-- ad-hoc signed
-- no Apple team identity
-- not notarized
-- not a trusted notarized distribution artifact
+Expected result today: the app is rejected because it is unsigned and not notarized. Do not soften or omit that fact in release notes.
 
 ## Release body template
 
@@ -82,11 +73,13 @@ This release may include these binary assets:
 
 The binary from this repository is currently unsigned and not notarized.
 
-## Verify the download
+## Check release-asset integrity
 
 ```bash
 shasum -a 256 -c Kern-macOS-Release.dmg.sha256
 ```
+
+This only proves the downloaded DMG matches the published checksum sidecar from the same GitHub release. It does **not** authenticate publisher identity the way Apple signing/notarization would.
 
 ## Install
 
@@ -113,7 +106,7 @@ Upload both files to the GitHub release:
 
 ## Bind the published asset to the reviewed digest
 
-After upload, verify the published DMG against the recorded local SHA-256 sidecar:
+After upload, verify the published DMG and the published checksum sidecar against the reviewed local SHA-256 sidecar:
 
 ```bash
 ./scripts/verify-github-release-asset.sh <tag>
@@ -125,4 +118,9 @@ Defaults:
 - SHA sidecar: `dist/Kern-macOS-Release.dmg.sha256`
 - repo: derived from `origin`
 
-Archive the successful verification output with the release evidence. The release is not complete until the downloaded published asset matches the recorded digest.
+Archive the successful verification output with the release evidence. The release is not complete until:
+
+- the published DMG matches the recorded digest
+- the published `.sha256` asset matches the reviewed local sidecar
+- `MANUAL-TESTING.md` has been completed for the packaged-app path
+- the tested macOS version is recorded with the release evidence

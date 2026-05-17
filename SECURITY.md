@@ -42,6 +42,8 @@ Examples of issues that are in scope:
 - unsafe local file handling
 - path traversal or sandbox escape behavior
 - code execution paths triggered by crafted markdown or assets
+- suspicious published release assets or checksum mismatches
+- suspected release-asset tampering or replacement
 - data loss or corruption caused by malformed input
 
 Examples that are usually out of scope:

@@ -15,8 +15,13 @@ For reproducible bugs in Kern, open a GitHub issue with the bug-report form.
 Use issues for:
 - editor bugs
 - rendering/import/export regressions
-- packaging/install bugs for published release assets
+- packaging/install bugs for published release assets when the issue is ordinary install friction
 - documentation problems
+
+Use the private security reporting path in `SECURITY.md` instead of a public issue if you see:
+- a checksum mismatch for a published release asset
+- suspicious DMG or app bundle contents
+- a release asset that appears tampered with or replaced
 
 ## Feature requests
 

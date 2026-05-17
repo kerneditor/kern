@@ -55,21 +55,13 @@ Expected outputs:
 - `dist/Kern-macOS-Release.dmg`
 - `dist/Kern-macOS-Release.dmg.sha256`
 
-### 2. Smoke-test the packaged app bundle
-
-```bash
-./scripts/test-kern-app.sh --packaged --skip-build
-```
-
-This checks the packaged `dist/Kern.app` path rather than only a Debug launch from DerivedData.
-
-### 3. Verify the local checksum
+### 2. Verify the local checksum
 
 ```bash
 (cd dist && shasum -a 256 -c Kern-macOS-Release.dmg.sha256)
 ```
 
-### 4. Inspect the DMG contents
+### 3. Inspect the DMG contents
 
 ```bash
 TMP_MOUNT_ROOT="$(mktemp -d /tmp/kern-release-mount.XXXXXX)"
@@ -84,34 +76,29 @@ Expected mount contents:
 - `Kern.app`
 - `Applications` symlink
 
-### 5. Inspect signing and trust posture
+### 4. Verify the uploaded release assets after publication
 
-Inspect the packaged app directly:
-
-```bash
-codesign -dvvv --entitlements :- dist/Kern.app
-spctl --assess --type execute -vv dist/Kern.app || true
-plutil -p dist/Kern.app/Contents/Info.plist
-```
-
-For the current unsigned GitHub DMG path, the expected posture is:
-
-- the app is ad-hoc signed for local packaging
-- no Apple team identity is embedded
-- the app is not notarized
-- Gatekeeper/trust assessment is expected to show that this is **not** a trusted notarized distribution artifact
-
-Treat these commands as an inspection step, not as a notarization gate for the current public release model.
-
-### 6. Verify the uploaded release asset after publication
-
-After uploading the DMG to a GitHub release, verify the published asset matches the recorded digest:
+After uploading the DMG to a GitHub release, verify the published DMG and published checksum sidecar match the recorded digest:
 
 ```bash
 ./scripts/verify-github-release-asset.sh <tag>
 ```
 
-This step is required to bind the reviewed local artifact to the downloaded published asset.
+This step is required to bind the reviewed local artifact to the downloaded published assets.
+
+### 5. Record the unsigned/Gatekeeper posture
+
+Capture the current Gatekeeper posture:
+
+```bash
+spctl -a -vv dist/Kern.app
+```
+
+Expected result today: the app is rejected because it is unsigned and not notarized.
+
+### 6. Complete the packaged-app manual checklist
+
+Complete `MANUAL-TESTING.md` against the packaged release flow and archive the tested macOS version with the release evidence.
 
 ## Release-ready conditions
 
@@ -119,22 +106,22 @@ For the current unsigned DMG path, a GitHub release is ready only if **all** of 
 
 1. the contributor baseline is green
 2. the local packager produced the expected DMG and SHA sidecar
-3. the packaged app smoke test passed
-4. the local checksum passed
-5. the DMG mount contents are correct
-6. the signing/trust inspection matches the documented current posture:
-   - ad-hoc signed
-   - not notarized
-   - not a trusted notarized distribution artifact
-7. the release notes and install docs clearly state:
+3. the local checksum passed
+4. the DMG mount contents are correct
+5. the release notes and install docs clearly state:
    - the app is unsigned
    - the app is not notarized
    - macOS may block first launch
    - the documented override path is Finder `Open`, then **Privacy & Security → Open Anyway** if needed
-8. after upload, the published DMG matches the recorded SHA-256 digest
+   - the published checksum only proves same-release integrity, not publisher authentication
+   - building from source is the stronger-trust path when Apple signing/notarization is absent
+6. after upload, the published DMG and the published `.sha256` sidecar both match the reviewed local digest
+7. the unsigned `spctl` posture was recorded
+8. the packaged-app manual checklist was completed and archived with the tested macOS version
 
 ## Related docs
 
 - [Installing Kern from a GitHub release](installing-kern-from-github-release.md)
 - [Building Kern from source](building-kern-from-source.md)
 - [GitHub release checklist](github-release-checklist.md)
+- [Unsigned DMG security posture](unsigned-dmg-security-posture.md)

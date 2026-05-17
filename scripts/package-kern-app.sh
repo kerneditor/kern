@@ -20,7 +20,7 @@ DESTINATION="platform=macOS,arch=${ARCH}"
 mkdir -p "$DIST_DIR"
 
 if ! command -v xcodegen >/dev/null 2>&1; then
-  echo "ERROR: xcodegen is required to package Kern. Install it with: brew install xcodegen" >&2
+  echo "ERROR: xcodegen is required to generate KernTextKit.xcodeproj. Install it with: brew install xcodegen" >&2
   exit 1
 fi
 
@@ -33,8 +33,8 @@ delete_dir_if_exists() {
   fi
 }
 
-echo "▸ Generating Xcode project..."
-xcodegen >/dev/null
+echo "▸ Generating Xcode project (xcodegen)..."
+xcodegen generate >/dev/null
 
 echo "▸ Building Release app (DerivedData: $DERIVED_DATA_APP)..."
 xcodebuild \

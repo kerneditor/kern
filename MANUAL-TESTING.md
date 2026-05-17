@@ -11,6 +11,7 @@ Use it after building the current release artifact:
 ## Automated smoke coverage
 
 These checks are scriptable and should run before the human-only checklist.
+They validate the locally packaged bundle in `dist/`; they do **not** replace the DMG install pass below.
 
 - [ ] Packaged app smoke:
 
@@ -43,6 +44,7 @@ These checks still need a human pass for UX feel, layout, and OS integration.
 - [ ] Open `Kern-macOS-Release.dmg`
 - [ ] Drag `Kern.app` into `Applications`
 - [ ] Launch `Kern.app` from `Applications` rather than from the mounted DMG
+- [ ] Confirm the app is visibly named `Kern` and the packaged bundle reports the expected version
 - [ ] If macOS blocks launch, the documented unsigned-app override flow works:
   - Finder `Open`
   - **System Settings → Privacy & Security → Open Anyway** if needed
@@ -84,6 +86,7 @@ These checks still need a human pass for UX feel, layout, and OS integration.
 - [ ] Cmd+F opens Find and finds matches
 - [ ] Cmd+Shift+H opens Find and Replace
 - [ ] Anchor navigation works without obvious viewport bugs
+- [ ] Link clicking/opening behaves as expected for normal markdown links
 
 ### Preferences / multi-window / OS integration
 

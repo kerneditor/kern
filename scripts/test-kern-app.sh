@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-kern-app.sh — Build and smoke-test Kern.app with mega-stress-test.md
+# test-kern-app.sh — Build and smoke-test Kern.app with a markdown fixture
 #
 # Usage:
 #   ./scripts/test-kern-app.sh [--skip-build] [--screenshots]
@@ -9,6 +9,7 @@
 # Tests:
 #   1. XcodeGen + xcodebuild succeeds
 #   2. Kern launches and opens a markdown file without crashing
+#      (`--packaged` validates the locally packaged bundle in `dist/`)
 #   4. Optional: capture scrolling screenshots for visual review
 #
 # Exit codes:
@@ -26,7 +27,32 @@ USE_PACKAGED=false
 APP_OVERRIDE=""
 SCREENSHOT_DIR="$(cd "$(dirname "$0")/.."; pwd)/test-screenshots"
 KERN_PID=""
+KERN_LAUNCHED_PIDS=""
+KERN_WINDOW_ID=""
 TIMEOUT=15  # seconds to wait for editor ready
+
+matching_bundle_pids() {
+  local binary_path="$1"
+  ps -axo pid=,command= | awk -v target="$binary_path" '
+    index($0, target) {
+      pid = $1
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", pid)
+      if (pid != "") print pid
+    }
+  '
+}
+
+new_pids_since_snapshot() {
+  local before="$1"
+  local after="$2"
+  local pid
+  for pid in $after; do
+    case " $before " in
+      *" $pid "*) ;;
+      *) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -58,8 +84,16 @@ while [ $# -gt 0 ]; do
 done
 
 cleanup() {
-  if [ -n "$KERN_PID" ] && kill -0 "$KERN_PID" 2>/dev/null; then
-    kill "$KERN_PID" 2>/dev/null
+  local pid
+  if [ -n "$KERN_LAUNCHED_PIDS" ]; then
+    for pid in $KERN_LAUNCHED_PIDS; do
+      kill "$pid" 2>/dev/null || true
+    done
+    for pid in $KERN_LAUNCHED_PIDS; do
+      wait "$pid" 2>/dev/null || true
+    done
+  elif [ -n "$KERN_PID" ] && kill -0 "$KERN_PID" 2>/dev/null; then
+    kill "$KERN_PID" 2>/dev/null || true
     wait "$KERN_PID" 2>/dev/null || true
   fi
 }
@@ -134,21 +168,75 @@ if [ ! -f "$KERN_BIN" ]; then
   echo "  ✗ App binary not found inside bundle: $KERN_APP" >&2
   exit 1
 fi
-KERN_PROCESS_NAME="$(basename "$KERN_APP" .app)"
 echo "  App bundle selected: $KERN_APP"
 echo ""
 
+find_window_info() {
+  python3 - "$1" <<'PY'
+import sys
+from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID
+
+pid = int(sys.argv[1])
+windows = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
+matches = []
+for window in windows:
+    if int(window.get("kCGWindowOwnerPID", -1)) != pid:
+        continue
+    if int(window.get("kCGWindowLayer", 0)) != 0:
+        continue
+    bounds = window.get("kCGWindowBounds", {})
+    matches.append((
+        int(window.get("kCGWindowNumber", 0)),
+        int(bounds.get("X", 0)),
+        int(bounds.get("Y", 0)),
+        int(bounds.get("Width", 0)),
+        int(bounds.get("Height", 0)),
+    ))
+
+if not matches:
+    sys.exit(0)
+
+window_id, x, y, width, height = matches[0]
+print(f"{window_id}|{x}|{y}|{width}|{height}")
+PY
+}
+
 # ── Step 2: Launch with test file ──────────────────────────────────────────
 
-TEST_FILE="test-fixtures/mega-stress-test.md"
+TEST_FILE="${KERN_TEST_FILE:-test-fixtures/stress-test.md}"
 if [ ! -f "$TEST_FILE" ]; then
-  TEST_FILE="test-fixtures/stress-test.md"
+  TEST_FILE="test-fixtures/mega-stress-test.md"
+fi
+if [ ! -f "$TEST_FILE" ]; then
+  echo "  ✗ Test fixture not found: $TEST_FILE" >&2
+  exit 1
 fi
 
-echo "▸ Step 2: Launch Kern with $TEST_FILE..."
-"$KERN_BIN" "$(pwd)/$TEST_FILE" &
-KERN_PID=$!
-sleep 3
+ABS_TEST_FILE="$(pwd)/$TEST_FILE"
+if [ "$USE_PACKAGED" = true ] || [ -n "$APP_OVERRIDE" ]; then
+  echo "▸ Step 2: Launch packaged Kern with $TEST_FILE..."
+  PREEXISTING_PIDS="$(matching_bundle_pids "$KERN_BIN" | tr '\n' ' ')"
+  open -n -a "$KERN_APP" "$ABS_TEST_FILE" >/dev/null 2>&1
+  for _ in $(seq 1 20); do
+    CURRENT_PIDS="$(matching_bundle_pids "$KERN_BIN" | tr '\n' ' ')"
+    KERN_LAUNCHED_PIDS="$(new_pids_since_snapshot "$PREEXISTING_PIDS" "$CURRENT_PIDS" | tr '\n' ' ' | xargs)"
+    if [ -n "$KERN_LAUNCHED_PIDS" ]; then
+      KERN_PID="$(printf '%s\n' "$KERN_LAUNCHED_PIDS" | awk '{ print $1 }')"
+      break
+    fi
+    sleep 1
+  done
+  if [ -z "$KERN_LAUNCHED_PIDS" ]; then
+    echo "  ✗ Could not identify the packaged Kern process after launching $TEST_FILE" >&2
+    exit 2
+  fi
+else
+  echo "▸ Step 2: Launch Kern with $TEST_FILE..."
+  "$KERN_BIN" "$ABS_TEST_FILE" &
+  KERN_PID=$!
+  KERN_LAUNCHED_PIDS="$KERN_PID"
+  sleep 1
+fi
 
 # Check if still running
 if ! kill -0 "$KERN_PID" 2>/dev/null; then
@@ -157,22 +245,22 @@ if ! kill -0 "$KERN_PID" 2>/dev/null; then
 fi
 echo "  ✓ Kern launched (PID $KERN_PID)"
 
-# Resize window to left half of screen
-osascript <<APPLESCRIPT
-tell application "Finder"
-    set _bounds to bounds of window of desktop
-    set screenW to item 3 of _bounds
-    set screenH to item 4 of _bounds
-end tell
-tell application "System Events" to tell process "$KERN_PROCESS_NAME"
-    set frontmost to true
-    tell window 1
-        set position to {0, 25}
-        set size to {screenW div 2, screenH - 25}
-    end tell
-end tell
-APPLESCRIPT
-echo "  ✓ Window resized to left half of screen"
+WINDOW_INFO=""
+for _ in $(seq 1 20); do
+  WINDOW_INFO="$(find_window_info "$KERN_PID" || true)"
+  if [ -n "$WINDOW_INFO" ]; then
+    KERN_WINDOW_ID="${WINDOW_INFO%%|*}"
+    break
+  fi
+  sleep 1
+done
+
+if [ -z "$KERN_WINDOW_ID" ]; then
+  echo "  ✗ Kern did not present an on-screen window in time"
+  exit 2
+fi
+
+echo "  ✓ Kern window detected (window $KERN_WINDOW_ID)"
 echo ""
 
 # ── Step 3: Wait for editor ready ─────────────────────────────────────────
@@ -203,82 +291,15 @@ if [ "$SCREENSHOTS" = true ]; then
   SCREENSHOT_DIR="$SCREENSHOT_DIR/$RUN_ID"
   mkdir -p "$SCREENSHOT_DIR"
 
-  # Get screen dimensions for region capture
-  SCREEN_BOUNDS=$(osascript -e '
-  tell application "Finder"
-      set b to bounds of window of desktop
-      return (item 3 of b) & "," & (item 4 of b)
-  end tell')
-  SCREEN_W=${SCREEN_BOUNDS%%,*}
-  SCREEN_H=${SCREEN_BOUNDS##*,}
-  WIN_W=$((SCREEN_W / 2))
-  WIN_H=$((SCREEN_H - 25))
-
-  # Compile scroll helper if not already built (uses AXScrollToVisible on headings)
-  SCROLL_HELPER="/tmp/kern-ax-scroll"
-  SCROLL_SRC="$(cd "$(dirname "$0")"; pwd)/ax-scroll.swift"
-  if [ ! -x "$SCROLL_HELPER" ] && [ -f "$SCROLL_SRC" ]; then
-    swiftc -O -o "$SCROLL_HELPER" "$SCROLL_SRC" 2>&1 || true
-  fi
-
-  # Activate Kern
-  osascript -e "tell application \"$KERN_PROCESS_NAME\" to activate"
+  open -a "$KERN_APP" >/dev/null 2>&1 || true
   sleep 1
-
-  if [ ! -x "$SCROLL_HELPER" ]; then
-    echo "  ⚠ No scroll helper — capturing static screenshots"
-    for i in $(seq 1 30); do
-      FNAME=$(printf "%02d" $i)
-      screencapture -x -R"0,25,${WIN_W},${WIN_H}" "$SCREENSHOT_DIR/page-$FNAME.png" 2>/dev/null
-    done
-  else
-    # Try elements mode first for fine-grained scrolling, fall back to headings
-    ELEMENT_INFO=$("$SCROLL_HELPER" "$KERN_PID" elements 0 2>&1 || echo "ERR:no-elements")
-    if echo "$ELEMENT_INFO" | grep -q "^OK:"; then
-      TOTAL_ELEMENTS=$(echo "$ELEMENT_INFO" | grep -oE '/[0-9]+' | tr -d '/' || echo 0)
-      TOTAL_ELEMENTS=${TOTAL_ELEMENTS:-0}
-      echo "  Found $TOTAL_ELEMENTS content elements in document"
-
-      # Step through elements — every 20th for ~viewport-height jumps
-      STEP=20
-      if [ "$TOTAL_ELEMENTS" -lt 100 ]; then
-        STEP=5
-      fi
-      PAGE=1
-      for i in $(seq 0 "$STEP" "$TOTAL_ELEMENTS"); do
-        "$SCROLL_HELPER" "$KERN_PID" elements "$i" >/dev/null 2>&1 || true
-        sleep 0.2
-        FNAME=$(printf "%03d" $PAGE)
-        screencapture -x -R"0,25,${WIN_W},${WIN_H}" "$SCREENSHOT_DIR/page-$FNAME.png" 2>/dev/null
-        PAGE=$((PAGE + 1))
-      done
-    else
-      # Fallback: heading mode
-      HEADING_INFO=$("$SCROLL_HELPER" "$KERN_PID" 0 2>&1 || echo "OK:0/100")
-      TOTAL_HEADINGS=$(echo "$HEADING_INFO" | grep -oE '/[0-9]+' | tr -d '/' || echo 100)
-      TOTAL_HEADINGS=${TOTAL_HEADINGS:-100}
-      echo "  Found $TOTAL_HEADINGS headings in document (heading mode)"
-
-      PAGE=1
-      for i in $(seq 0 "$TOTAL_HEADINGS"); do
-        "$SCROLL_HELPER" "$KERN_PID" "$i" >/dev/null 2>&1 || true
-        sleep 0.2
-        FNAME=$(printf "%03d" $PAGE)
-        screencapture -x -R"0,25,${WIN_W},${WIN_H}" "$SCREENSHOT_DIR/page-$FNAME.png" 2>/dev/null
-        PAGE=$((PAGE + 1))
-      done
-    fi
-
-    # Scroll all the way to the bottom using iterative mode, then capture
-    echo "  Scrolling to bottom..."
-    BOTTOM_INFO=$("$SCROLL_HELPER" "$KERN_PID" bottom 2>&1 || echo "OK:bottom/0iterations")
-    echo "  $BOTTOM_INFO"
-    sleep 0.5
-    FNAME=$(printf "%03d" $PAGE)
-    screencapture -x -R"0,25,${WIN_W},${WIN_H}" "$SCREENSHOT_DIR/page-${FNAME}-bottom.png" 2>/dev/null
+  if [ -n "$KERN_WINDOW_ID" ]; then
+    screencapture -x -l "$KERN_WINDOW_ID" "$SCREENSHOT_DIR/packaged-smoke-window.png" 2>/dev/null || true
   fi
-
-  CAPTURED=$(ls -1 "$SCREENSHOT_DIR"/page-*.png 2>/dev/null | wc -l | tr -d ' ')
+  if [ ! -f "$SCREENSHOT_DIR/packaged-smoke-window.png" ]; then
+    screencapture -x "$SCREENSHOT_DIR/packaged-smoke-full-screen.png" 2>/dev/null || true
+  fi
+  CAPTURED=$(ls -1 "$SCREENSHOT_DIR"/*.png 2>/dev/null | wc -l | tr -d ' ')
   echo "  ✓ Captured $CAPTURED screenshots in $SCREENSHOT_DIR/"
   echo ""
 fi
@@ -286,14 +307,15 @@ fi
 # ── Step 5: Graceful shutdown ─────────────────────────────────────────────
 
 echo "▸ Step 5: Shutting down Kern..."
-if [ -n "$KERN_PID" ] && kill -0 "$KERN_PID" 2>/dev/null; then
-  kill "$KERN_PID" 2>/dev/null || true
-  wait "$KERN_PID" 2>/dev/null || true
-  echo "  ✓ Kern exited cleanly"
-else
-  echo "  ✓ Kern was already no longer running at shutdown"
-fi
+for pid in $KERN_LAUNCHED_PIDS; do
+  kill "$pid" 2>/dev/null || true
+done
+for pid in $KERN_LAUNCHED_PIDS; do
+  wait "$pid" 2>/dev/null || true
+done
 KERN_PID=""
+KERN_LAUNCHED_PIDS=""
+echo "  ✓ Kern exited cleanly"
 echo ""
 
 # ── Summary ───────────────────────────────────────────────────────────────

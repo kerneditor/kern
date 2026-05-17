@@ -9,7 +9,7 @@ Download both files from the release page:
 - `Kern-macOS-Release.dmg`
 - `Kern-macOS-Release.dmg.sha256`
 
-## Verify the download
+## Check release-asset integrity
 
 Run checksum verification in the directory that contains both files:
 
@@ -24,6 +24,8 @@ Kern-macOS-Release.dmg: OK
 ```
 
 If the checksum does not match, discard the download and fetch the assets again.
+
+This checksum only proves the downloaded DMG matches the published checksum sidecar from the same GitHub release. It does **not** authenticate publisher identity the way Apple signing/notarization would. If you want the stronger-trust path, build Kern from source instead.
 
 ## Install the app
 

@@ -31,15 +31,6 @@ xcodebuild -project KernTextKit.xcodeproj -scheme KernTextKit -configuration Deb
 ./scripts/run-kern-native.sh test-fixtures/stress-test.md
 ```
 
-Helpful local development modes:
-
-```bash
-./scripts/run-kern-native.sh --verify test-fixtures/stress-test.md
-./scripts/run-kern-native.sh --logs test-fixtures/stress-test.md
-./scripts/run-kern-native.sh --telemetry test-fixtures/stress-test.md
-./scripts/run-kern-native.sh --debug test-fixtures/stress-test.md
-```
-
 ## Package a local development DMG
 
 ```bash
@@ -51,6 +42,8 @@ Expected outputs:
 - `dist/Kern.app`
 - `dist/Kern-macOS-Release.dmg`
 - `dist/Kern-macOS-Release.dmg.sha256`
+
+The packager regenerates `KernTextKit.xcodeproj` with XcodeGen before building, so you do not need to run `xcodegen` separately just for the packaging step.
 
 These artifacts are still unsigned and not notarized.
 
