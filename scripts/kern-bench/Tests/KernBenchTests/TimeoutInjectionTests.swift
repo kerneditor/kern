@@ -12,8 +12,8 @@ final class TimeoutInjectionTests: XCTestCase {
 
     func testWithTimeoutThrowsStageTimeoutWhenOperationStalls() async {
         do {
-            _ = try await withTimeout(seconds: 0.02) {
-                try await Task.sleep(nanoseconds: 120_000_000)
+            _ = try await withTimeout(seconds: 0.05) {
+                try await Task.sleep(nanoseconds: 10_000_000_000)
                 return 1
             }
             XCTFail("Expected timeout")
