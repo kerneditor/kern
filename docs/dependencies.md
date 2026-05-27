@@ -6,10 +6,11 @@ This document is the public dependency inventory and update policy for Kern.
 
 Kern's shipped macOS app target is intentionally small:
 
-- no WebView runtime
-- no npm or Node runtime dependency
+- no Electron or Tauri shell
+- no WebView or browser runtime
+- no npm or Node runtime dependency in the shipped app
 - no third-party Swift package linked into the app target
-- AppKit/TextKit plus Apple platform frameworks for the editor implementation
+- Swift, AppKit, TextKit, and Apple platform frameworks for the editor implementation
 
 The current third-party dependency surface is test and tooling oriented.
 

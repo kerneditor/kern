@@ -64,5 +64,5 @@ body:
       label: Validation already run
       description: If you tested a fix locally, list the commands and results.
       placeholder: |
-        ./scripts/test-native-editor.sh --unit-only
+        ./scripts/test-native-editor.sh --no-snapshots
         cd scripts/kern-bench && swift test -c release

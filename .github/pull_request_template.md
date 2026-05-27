@@ -5,7 +5,7 @@
 
 ## Validation
 
-- [ ] `./scripts/test-native-editor.sh --unit-only`
+- [ ] `./scripts/test-native-editor.sh --no-snapshots`
 - [ ] `./scripts/test-markdown-spec-conformance.sh`
 - [ ] `./scripts/run-typing-behavior-gate.sh --lane pr`
 - [ ] `cd scripts/kern-bench && swift test -c release`

@@ -100,3 +100,8 @@ research-*.md
 
 # Nested handoff artifacts
 scripts/kern-bench/HANDOFF.md
+# Remotion demo video local artifacts
+marketing/demo-video/node_modules/
+marketing/demo-video/public/generated/
+marketing/demo-video/.remotion/
+marketing/demo-video/out/

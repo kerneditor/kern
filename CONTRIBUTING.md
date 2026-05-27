@@ -1,6 +1,6 @@
 # Contributing to Kern
 
-Kern is a native macOS Markdown editor built with AppKit + TextKit.
+Kern is a fully native macOS WYSIWYG Markdown editor built with Swift, AppKit, and TextKit. It does not use Electron, Tauri, or a WebView.
 
 If you want end-user install instructions instead of contributor setup, use [Installing Kern from a GitHub release](docs/release/installing-kern-from-github-release.md).
 

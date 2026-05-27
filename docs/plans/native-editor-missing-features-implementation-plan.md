@@ -214,8 +214,8 @@ Phase 4 (Hardening):
 - [x] Phase 2 (native renderers): image/math/mermaid/thematic-break renderers are active in native TextKit and validated by full-spec + layout regression tests.
 - [x] Phase 3 (highlight expansion): multi-language highlighting added with exhaustive matrix coverage for mega-stress language set.
 - [~] Phase 4 (hardening):
-  - exhaustive unit (`--unit-only --exhaustive`) is green
-  - exhaustive snapshots (`--unit-only --snapshots --exhaustive`) are green
+  - exhaustive unit (`--exhaustive`) is green
+  - exhaustive snapshots (`--snapshots --exhaustive`) are green
   - exhaustive orchestration (`scripts/run-exhaustive-native-suite.sh`) is green (fixture generation + smoke + exhaustive + perf)
   - perf suite runs with bounded defaults for mega/ultimate typing and render/scroll workloads
   - heavy ultimate-render perf is explicit opt-in (`KERN_PERF_ENABLE_ULTIMATE_RENDER=1` or `KERN_PERF_RENDER_FULL=1`)

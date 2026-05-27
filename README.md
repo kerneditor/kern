@@ -1,8 +1,8 @@
 # Kern
 
-Kern is a native macOS WYSIWYG Markdown editor. You open a local `.md` file and edit rendered content directly, without living in raw markdown syntax.
+Kern is a fully native macOS WYSIWYG Markdown editor. You open a local `.md` file and edit rendered content directly, without living in raw markdown syntax.
 
-This repository is the Kern codebase. The editor is built with AppKit + TextKit and does not use a WebView.
+This repository is the Kern codebase. The editor is built with Swift, AppKit, and TextKit. It does not use Electron, Tauri, or any WebView/browser runtime.
 
 The product and app name are **Kern**.
 
@@ -19,6 +19,7 @@ Kern is built for a simpler workflow: open any local markdown file, edit in true
 ## What Kern Does Today
 
 - True WYSIWYG as the default editing mode.
+- Fully native macOS implementation, built on Swift + AppKit + TextKit.
 - GFM-first markdown behavior, with optional Kern extensions.
 - Deterministic import/export via native markdown codec.
 - Checkboxes in multiple forms (standalone, bulleted tasks, ordered tasks, heading tasks).

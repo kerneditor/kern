@@ -1,0 +1,24 @@
+{
+  "name": "kern-demo-video",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Remotion source for the short Kern social demo video.",
+  "scripts": {
+    "prepare-assets": "node scripts/prepare-assets.mjs",
+    "studio": "npm run prepare-assets && remotion studio src/index.ts",
+    "compositions": "npm run prepare-assets && remotion compositions src/index.ts",
+    "render:landscape": "npm run prepare-assets && remotion render src/index.ts KernTwitterDemoLandscape ../../dist/social/kern-twitter-demo-landscape.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p --concurrency=2",
+    "render:portrait": "npm run prepare-assets && remotion render src/index.ts KernTwitterDemoPortrait ../../dist/social/kern-twitter-demo-portrait.mp4 --codec=h264 --crf=18 --pixel-format=yuv420p --concurrency=2",
+    "still:poster": "npm run prepare-assets && remotion still src/index.ts KernTwitterDemoLandscape ../../dist/social/kern-twitter-demo-poster.png --frame=75",
+    "render:all": "npm run render:landscape && npm run render:portrait && npm run still:poster"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.462",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "remotion": "4.0.462",
+    "typescript": "latest"
+  }
+}
