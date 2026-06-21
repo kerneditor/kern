@@ -91,7 +91,7 @@ These checks still need a human pass for UX feel, layout, and OS integration.
 ### Preferences / multi-window / OS integration
 
 - [ ] Preferences window opens and theme/font changes apply as expected
-- [ ] Theme picker includes Kern, TurboDraft, Axis, and imported-code-editor theme choices
+- [ ] Theme picker includes Kern, TurboDraft, Wonder, and imported-code-editor theme choices
 - [ ] Editor width can switch between **Full width** and **Centered readable**
 - [ ] Centered readable mode respects the max-width slider and recenters on window resize
 - [ ] Full width mode uses the full document viewport instead of forcing a Notion-style centered column

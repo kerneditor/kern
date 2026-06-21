@@ -109,7 +109,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             in: checkboxHitTargetPopup
         )
         selectValue(
-            defaults.string(forKey: NativeEditorAppearance.themeModeKey) ?? NativeEditorThemeMode.system.rawValue,
+            NativeEditorAppearance.themeMode(defaults: defaults).rawValue,
             in: themeModePopup
         )
         selectValue(

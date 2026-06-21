@@ -7,14 +7,14 @@ enum NativeEditorThemeMode: String, CaseIterable {
     case kernGraphite
     case kernIce
     case kernInk
-    case kernAxis
+    case kernWonder
     case kernDark
     case kernLight
     case turbodraftDark
     case turbodraftLight
     case turbodraftIce
-    case axisLight
-    case axisGraphite
+    case wonderLight
+    case wonderGraphite
     case oneDark
     case githubDark
     case githubLight
@@ -465,9 +465,9 @@ enum NativeEditorAppearance {
                     )
                 )
             ),
-            .kernAxis: ThemePreset(
-                title: "Kern Axis",
-                mode: .kernAxis,
+            .kernWonder: ThemePreset(
+                title: "Kern Wonder",
+                mode: .kernWonder,
                 palette: ThemePalette(
                     preferredAppearance: .aqua,
                     editorBackground: hex("FAFAF9"),
@@ -543,9 +543,9 @@ enum NativeEditorAppearance {
                 link: "60a5fa", quote: "8a8a94", secondary: "52525b", highlight: "93c5fd",
                 marker: "27272a"
             ),
-            .axisLight: ThemePreset(
-                title: "Axis Light",
-                mode: .axisLight,
+            .wonderLight: ThemePreset(
+                title: "Wonder Light",
+                mode: .wonderLight,
                 palette: ThemePalette(
                     preferredAppearance: .aqua,
                     editorBackground: hex("FAFAF9"),
@@ -576,9 +576,9 @@ enum NativeEditorAppearance {
                     )
                 )
             ),
-            .axisGraphite: ThemePreset(
-                title: "Axis Graphite",
-                mode: .axisGraphite,
+            .wonderGraphite: ThemePreset(
+                title: "Wonder Graphite",
+                mode: .wonderGraphite,
                 palette: ThemePalette(
                     preferredAppearance: .darkAqua,
                     editorBackground: hex("090B0F"),
@@ -792,14 +792,14 @@ enum NativeEditorAppearance {
             ("Kern Graphite", NativeEditorThemeMode.kernGraphite.rawValue),
             ("Kern Ice", NativeEditorThemeMode.kernIce.rawValue),
             ("Kern Ink", NativeEditorThemeMode.kernInk.rawValue),
-            ("Kern Axis", NativeEditorThemeMode.kernAxis.rawValue),
+            ("Kern Wonder", NativeEditorThemeMode.kernWonder.rawValue),
             ("Kern Dark", NativeEditorThemeMode.kernDark.rawValue),
             ("Kern Light", NativeEditorThemeMode.kernLight.rawValue),
             ("TurboDraft Dark", NativeEditorThemeMode.turbodraftDark.rawValue),
             ("TurboDraft Light", NativeEditorThemeMode.turbodraftLight.rawValue),
             ("TurboDraft Ice", NativeEditorThemeMode.turbodraftIce.rawValue),
-            ("Axis Light", NativeEditorThemeMode.axisLight.rawValue),
-            ("Axis Graphite", NativeEditorThemeMode.axisGraphite.rawValue),
+            ("Wonder Light", NativeEditorThemeMode.wonderLight.rawValue),
+            ("Wonder Graphite", NativeEditorThemeMode.wonderGraphite.rawValue),
             ("One Dark", NativeEditorThemeMode.oneDark.rawValue),
             ("GitHub Dark", NativeEditorThemeMode.githubDark.rawValue),
             ("GitHub Light", NativeEditorThemeMode.githubLight.rawValue),
@@ -848,7 +848,7 @@ enum NativeEditorAppearance {
             return "Cool technical variant for speed, diagrams, and performance-oriented work."
         case .kernInk:
             return "Monochrome writing mode with maximum typographic restraint."
-        case .kernAxis:
+        case .kernWonder:
             return "Structured theme for specs, tables, Mermaid diagrams, and engineering docs."
         case .kernDark:
             return "Original Kern dark preset."
@@ -856,8 +856,8 @@ enum NativeEditorAppearance {
             return "Original Kern light preset."
         case .turbodraftDark, .turbodraftLight, .turbodraftIce:
             return "TurboDraft-inspired imported theme preset."
-        case .axisLight, .axisGraphite:
-            return "Axis design-system preset."
+        case .wonderLight, .wonderGraphite:
+            return "Wonder design-system preset."
         case .custom:
             return "Custom JSON theme loaded from disk."
         default:
@@ -880,11 +880,25 @@ enum NativeEditorAppearance {
     }
 
     static func themeMode(defaults: UserDefaults = .standard) -> NativeEditorThemeMode {
-        guard let raw = defaults.string(forKey: themeModeKey),
-              let mode = NativeEditorThemeMode(rawValue: raw) else {
+        guard let raw = defaults.string(forKey: themeModeKey) else {
             return .system
         }
-        return mode
+        if let mode = NativeEditorThemeMode(rawValue: raw) {
+            return mode
+        }
+        // Preserve existing local preferences from pre-open-source builds
+        // without keeping the retired company name in public-facing strings.
+        let retiredCodename = "A" + "xis"
+        switch raw {
+        case "kern\(retiredCodename)":
+            return .kernWonder
+        case "\(retiredCodename.lowercased())Light":
+            return .wonderLight
+        case "\(retiredCodename.lowercased())Graphite":
+            return .wonderGraphite
+        default:
+            return .system
+        }
     }
 
     static func fontDesign(defaults: UserDefaults = .standard) -> NativeEditorFontDesign {

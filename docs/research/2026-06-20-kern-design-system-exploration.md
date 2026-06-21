@@ -20,10 +20,10 @@ brand direction too early.
 - macOS settings precedent:
   - user-facing choice controls should show the current selection;
   - dependent controls should be disabled when they do not apply.
-- Axis visual system references:
-  - external Axis PDF style: monochrome editorial, cream/off-white surfaces,
+- Wonder visual system references:
+  - Wonder editorial reference style: monochrome editorial, cream/off-white surfaces,
     light borders, quiet typography;
-  - Axis UI tokens: neutral, brand, secondary, success, warning, error, and info
+  - Wonder UI tokens: neutral, brand, secondary, success, warning, error, and info
     tonal ramps.
 
 ## Product decision implemented
@@ -42,21 +42,21 @@ power-user full-screen editing.
 
 ## Theme candidates added
 
-Two Axis-derived candidates were added for A/B testing:
+Two Wonder-derived candidates were added for A/B testing:
 
-- **Axis Light**
+- **Wonder Light**
   - off-white editor surface;
   - cream code/callout/sidebar surfaces;
   - near-black primary text;
-  - restrained blue/teal/status accents from Axis token ramps.
-- **Axis Graphite**
+  - restrained blue/teal/status accents from Wonder token ramps.
+- **Wonder Graphite**
   - deep neutral background;
   - graphite code and inline-code surfaces;
   - pale text;
-  - softened Axis token accents for syntax, links, and callouts.
+  - softened Wonder token accents for syntax, links, and callouts.
 
 These are candidates, not a final Kern identity. The likely final direction is a
-Kern-specific hybrid: editorial neutrals from Axis, stronger native-macOS
+Kern-specific hybrid: editorial neutrals from Wonder, stronger native-macOS
 restraint, and a small number of memorable accent rules for WYSIWYG affordances.
 
 ## Current visual QA artifact path
@@ -81,14 +81,14 @@ The current comparison set covers:
 - Kern Graphite centered at 860 px;
 - Kern Ice centered at 860 px;
 - Kern Ink centered at 860 px;
-- Kern Axis centered at 860 px.
+- Kern Wonder centered at 860 px.
 
 Each scenario captures a top-of-document editor view, a rich-block editor slice,
 and the settings window preview.
 
 ## Next design questions
 
-1. Should the eventual default be Kern Light/Dark, Axis-derived, or a new
+1. Should the eventual default be Kern Light/Dark, Wonder-derived, or a new
    “Kern Porcelain / Kern Graphite” pair?
 2. Should callouts stay colorful by semantic type, or should the default theme
    use mostly monochrome callouts with a small accent stripe?

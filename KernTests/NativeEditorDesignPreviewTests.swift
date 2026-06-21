@@ -26,7 +26,7 @@ final class NativeEditorDesignPreviewTests: XCTestCase {
             .init(name: "kern-graphite-centered-860", theme: .kernGraphite, appearance: .darkAqua, widthMode: .centered, maxWidth: 860),
             .init(name: "kern-ice-centered-860", theme: .kernIce, appearance: .darkAqua, widthMode: .centered, maxWidth: 860),
             .init(name: "kern-ink-centered-860", theme: .kernInk, appearance: .aqua, widthMode: .centered, maxWidth: 860),
-            .init(name: "kern-axis-centered-860", theme: .kernAxis, appearance: .aqua, widthMode: .centered, maxWidth: 860),
+            .init(name: "kern-wonder-centered-860", theme: .kernWonder, appearance: .aqua, widthMode: .centered, maxWidth: 860),
         ]
         let slices: [PreviewSlice] = [
             .init(name: "top", scrollOffset: 0),

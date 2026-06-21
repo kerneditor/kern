@@ -7,8 +7,8 @@ final class NativeEditorAppearanceTests: XCTestCase {
         let choices = NativeEditorAppearance.builtInThemeChoices
         XCTAssertGreaterThanOrEqual(choices.count, 20, "Expected expanded built-in theme catalog")
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.turbodraftIce.rawValue })
-        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.axisLight.rawValue })
-        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.axisGraphite.rawValue })
+        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.wonderLight.rawValue })
+        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.wonderGraphite.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.tokyoNight.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.vscodeDarkPlus.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.githubDark.rawValue })
@@ -344,8 +344,8 @@ final class NativeEditorAppearanceTests: XCTestCase {
         XCTAssertGreaterThan(codeBg.redComponent, 0.05)
     }
 
-    func testAxisThemeUsesAxisTokenPaletteForLightAndGraphiteModes() {
-        let suiteName = "NativeEditorAppearanceAxisThemeTests.\(UUID().uuidString)"
+    func testWonderThemeUsesWonderTokenPaletteForLightAndGraphiteModes() {
+        let suiteName = "NativeEditorAppearanceWonderThemeTests.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             XCTFail("Expected isolated user defaults suite")
             return
@@ -354,15 +354,40 @@ final class NativeEditorAppearanceTests: XCTestCase {
             defaults.removePersistentDomain(forName: suiteName)
         }
 
-        defaults.set(NativeEditorThemeMode.axisLight.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+        defaults.set(NativeEditorThemeMode.wonderLight.rawValue, forKey: NativeEditorAppearance.themeModeKey)
         assertColor(NativeEditorAppearance.primaryTextColor(defaults: defaults), equalsHex: "#0A0D11")
         assertColor(NativeEditorAppearance.codeBlockStrokeColor(defaults: defaults), equalsHex: "#E8E8E5")
         assertColor(NativeEditorAppearance.linkColor(defaults: defaults), equalsHex: "#3B5BE2")
 
-        defaults.set(NativeEditorThemeMode.axisGraphite.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+        defaults.set(NativeEditorThemeMode.wonderGraphite.rawValue, forKey: NativeEditorAppearance.themeModeKey)
         assertColor(NativeEditorAppearance.editorBackgroundColor(defaults: defaults), equalsHex: "#090B0F")
         assertColor(NativeEditorAppearance.inlineCodeBackgroundColor(defaults: defaults), equalsHex: "#25282F")
         assertColor(NativeEditorAppearance.linkColor(defaults: defaults), equalsHex: "#A5C2FF")
+    }
+
+    func testWonderThemeMigratesRetiredThemePreferenceRawValues() {
+        let suiteName = "NativeEditorAppearanceWonderThemeMigrationTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Expected isolated user defaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let retiredCodename = "A" + "xis"
+
+        defaults.set("kern\(retiredCodename)", forKey: NativeEditorAppearance.themeModeKey)
+        XCTAssertEqual(NativeEditorAppearance.themeMode(defaults: defaults), .kernWonder)
+        XCTAssertEqual(NativeEditorAppearance.themeDisplayName(defaults: defaults), "Kern Wonder")
+
+        defaults.set("\(retiredCodename.lowercased())Light", forKey: NativeEditorAppearance.themeModeKey)
+        XCTAssertEqual(NativeEditorAppearance.themeMode(defaults: defaults), .wonderLight)
+        XCTAssertEqual(NativeEditorAppearance.themeDisplayName(defaults: defaults), "Wonder Light")
+
+        defaults.set("\(retiredCodename.lowercased())Graphite", forKey: NativeEditorAppearance.themeModeKey)
+        XCTAssertEqual(NativeEditorAppearance.themeMode(defaults: defaults), .wonderGraphite)
+        XCTAssertEqual(NativeEditorAppearance.themeDisplayName(defaults: defaults), "Wonder Graphite")
     }
 }
 

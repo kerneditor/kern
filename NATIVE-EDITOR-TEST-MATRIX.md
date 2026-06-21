@@ -83,7 +83,7 @@ Preferences are controlled via:
 | In-document anchors | Clicking `[Text](#anchor)` jumps within the document (no OSStatus errors) | `AnchorNavigationTests` | Jump toast uses `NativeEditor.JumpToast` |
 | Find / Replace | Find bar is native + testable; replace mutates document deterministically | `NativeFindEngineTests`, `NativeFindReplaceIntegrationTests` | Find UI is `NativeEditor.FindBar` (no system Find panel dependency) |
 | Checkbox click hit-target | Clicking checkbox glyph toggles; optional marker-region toggles | options tests | Coordinate-based clicks can be flaky; gated behind exhaustive |
-| Theme catalog | Built-in themes expose Kern, TurboDraft, Axis, and imported-code-editor choices | `NativeEditorAppearanceTests` | Custom JSON theme import remains covered separately |
+| Theme catalog | Built-in themes expose Kern, TurboDraft, Wonder, and imported-code-editor choices | `NativeEditorAppearanceTests` | Custom JSON theme import remains covered separately |
 | Readable editor width | Full-width mode fills the viewport; centered-readable mode caps and centers the TextKit container | `NativeEditorInitialViewportTests` | Max width is user-configurable and clamped |
 | Visual regression | Stable rendering across changes | Snapshot tests (gated) | Enable with `./scripts/test-native-editor.sh --snapshots` |
 | Design previews | Reviewable PNGs for theme and layout A/B comparison | `NativeEditorDesignPreviewTests` (gated) | Enable with `KernTextKitDesignPreviews` scheme |
