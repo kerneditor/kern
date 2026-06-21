@@ -98,6 +98,7 @@ final class NativeMarkdownCodecRichVisualFeatureTests: XCTestCase {
         }
         if let mermaidAttachment {
             let b = mermaidAttachment.attachmentBounds(for: tc, proposedLineFragment: lineFrag, glyphPosition: .zero, characterIndex: 0)
+            XCTAssertEqual(b.width, 792, accuracy: 0.5, "Mermaid block should use the readable column width")
             XCTAssertGreaterThan(b.width, 200)
             XCTAssertGreaterThan(b.height, 120)
         }
@@ -106,6 +107,22 @@ final class NativeMarkdownCodecRichVisualFeatureTests: XCTestCase {
             XCTAssertGreaterThan(b.width, 20)
             XCTAssertGreaterThan(b.height, 10)
         }
+    }
+
+    @MainActor
+    func testBlockMathAttachmentUsesReadableMathGlyphs() {
+        let attachment = MarkdownMathBlockAttachment(sourceMarkdown: """
+        $$
+        E = mc^2 + \\int_0^1 x^2 dx + \\frac{\\rho}{\\epsilon_0} \\to \\infty
+        $$
+        """)
+
+        XCTAssertTrue(attachment.displayText.contains("mc²"), "Expected simple superscripts to render as Unicode math glyphs")
+        XCTAssertTrue(attachment.displayText.contains("∫₀¹"), "Expected integral bounds to render with subscript/superscript glyphs")
+        XCTAssertTrue(attachment.displayText.contains("ρ"), "Expected Greek commands to render as Greek glyphs")
+        XCTAssertTrue(attachment.displayText.contains("ε₀"), "Expected Greek symbol subscripts to render compactly")
+        XCTAssertTrue(attachment.displayText.contains("→ ∞"), "Expected common operators to render as symbols")
+        XCTAssertFalse(attachment.displayText.contains("\\frac"), "Rendered math should not leak raw LaTeX commands")
     }
 
     private func fixture(path: String) -> URL {

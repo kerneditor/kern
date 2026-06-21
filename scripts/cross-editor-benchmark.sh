@@ -24,6 +24,7 @@ NO_SCREENCAPTURE=false
 ENABLE_FRAME_MONITOR=false
 SAVE_DURABLE=false
 DISABLE_WOW_METRICS=false
+PREFLIGHT_ONLY=false
 KERN_OPEN_METRIC_SOURCE=""
 ZED_BENCH_HOOK=""
 ZED_READY_MODE=""
@@ -575,6 +576,7 @@ while [[ $# -gt 0 ]]; do
     --no-screencapture) NO_SCREENCAPTURE=true; shift ;;
     --enable-frame-monitor) ENABLE_FRAME_MONITOR=true; shift ;;
     --disable-wow-metrics) DISABLE_WOW_METRICS=true; shift ;;
+    --preflight-only) PREFLIGHT_ONLY=true; shift ;;
     --kern-open-metric-source) KERN_OPEN_METRIC_SOURCE="$2"; shift 2 ;;
     --zed-bench-hook) ZED_BENCH_HOOK="$2"; shift 2 ;;
     --zed-ready-mode) ZED_READY_MODE="$2"; shift 2 ;;
@@ -607,6 +609,7 @@ Options:
   --enable-frame-monitor
                         Enable optional first-paint/render-stable probes
   --disable-wow-metrics  Disable Kern WOW metric env injection
+  --preflight-only       Validate build, roster, app/CLI resolution, and idle cleanup targets without launching editors
   --kern-open-metric-source MODE
                         Kern open metric source: auto|wow|probe
   --zed-bench-hook MODE  Zed hook mode: auto|off|required
@@ -864,6 +867,42 @@ fi
 
 build_cleanup_targets
 ensure_cleanup_targets_idle
+
+if [[ "$PREFLIGHT_ONLY" == true ]]; then
+  echo "=== Cross-Editor Benchmark Preflight ==="
+  echo "Suite: $SUITE"
+  echo "File:  $FILE"
+  echo "Mode:  $MODE"
+  if [[ ( "$SUITE" == "benchmark_open_ready" || "$SUITE" == "benchmark_full_fidelity" ) && -z "$EDITORS_FILTER" && ${#EDITOR_ARGS[@]} -eq 0 && "$EXPLICIT_ALL" != true ]]; then
+    echo "Editors default: Kern, Zed (override with --editors or --all)"
+  fi
+  if [[ "$NEEDS_ZED" == true ]]; then
+    echo "Zed CLI: fork ($ZED_CLI_SOURCE)"
+  fi
+  if [[ -n "${KERN_BENCH_KERN_APP:-}" ]]; then
+    if [[ -n "$KERN_APP_SOURCE" ]]; then
+      echo "Kern app: $KERN_BENCH_KERN_APP ($KERN_APP_SOURCE)"
+    else
+      echo "Kern app: $KERN_BENCH_KERN_APP"
+    fi
+  elif [[ "$NEEDS_KERN" == true ]]; then
+    echo "Kern app: unresolved (kern-bench registry fallback will decide at runtime)"
+  fi
+  echo "Cleanup targets: idle"
+  echo "Policy: suite-specific roster/classification policy enforced"
+  echo "Claims: README/social headline claims require Official runs"
+  if [[ "$SUITE" == "benchmark_open_ready" || "$SUITE" == "benchmark_full_fidelity" ]]; then
+    echo "Claim-safe defaults: 10 measured runs, 1 warmup, 1500ms inter-editor cooldown"
+  fi
+  if [[ -n "$BENCH_PROFILE" ]]; then
+    echo "Profile: $BENCH_PROFILE"
+  fi
+  printf 'Command:'
+  printf ' %q' "${CMD[@]}"
+  echo ""
+  exit 0
+fi
+
 record_cleanup_baseline_pids
 start_cleanup_reaper
 

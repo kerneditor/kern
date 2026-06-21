@@ -3,11 +3,18 @@ import Foundation
 
 enum NativeEditorThemeMode: String, CaseIterable {
     case system
+    case kernPaper
+    case kernGraphite
+    case kernIce
+    case kernInk
+    case kernAxis
     case kernDark
     case kernLight
     case turbodraftDark
     case turbodraftLight
     case turbodraftIce
+    case axisLight
+    case axisGraphite
     case oneDark
     case githubDark
     case githubLight
@@ -52,6 +59,11 @@ enum NativeEditorTableOverflowMode: String {
     case horizontal
 }
 
+enum NativeEditorReadableWidthMode: String {
+    case fullWidth
+    case centered
+}
+
 enum NativeEditorAppearance {
     static let themeModeKey = "nativeEditor.themeMode"
     static let customThemeJSONKey = "nativeEditor.customThemeJSON"
@@ -60,6 +72,10 @@ enum NativeEditorAppearance {
     static let customFontFamilyKey = "nativeEditor.customFontFamily"
     static let fontSizeKey = "nativeEditor.fontSize"
     static let tableOverflowModeKey = "nativeEditor.tableOverflowMode"
+    static let readableWidthModeKey = "nativeEditor.readableWidthMode"
+    static let readableMaxWidthKey = "nativeEditor.readableMaxWidth"
+    static let defaultReadableMaxWidth: CGFloat = 760
+    static let readableMaxWidthRange: ClosedRange<CGFloat> = 560...1400
 
     enum ThemeImportError: LocalizedError {
         case fileTooLarge
@@ -164,6 +180,12 @@ enum NativeEditorAppearance {
         let tableHeaderBackground: NSColor
         let quoteBar: NSColor
         let quoteFill: NSColor
+        let noteAccent: NSColor
+        let tipAccent: NSColor
+        let successAccent: NSColor
+        let warningAccent: NSColor
+        let cautionAccent: NSColor
+        let importantAccent: NSColor
         let syntax: SyntaxPalette
 
         init(
@@ -180,8 +202,15 @@ enum NativeEditorAppearance {
             tableHeaderBackground: NSColor? = nil,
             quoteBar: NSColor? = nil,
             quoteFill: NSColor? = nil,
+            noteAccent: NSColor? = nil,
+            tipAccent: NSColor? = nil,
+            successAccent: NSColor? = nil,
+            warningAccent: NSColor? = nil,
+            cautionAccent: NSColor? = nil,
+            importantAccent: NSColor? = nil,
             syntax: SyntaxPalette? = nil
         ) {
+            let resolvedSyntax = syntax ?? SyntaxPalette.defaultPalette
             self.preferredAppearance = preferredAppearance
             self.editorBackground = editorBackground ?? .textBackgroundColor
             self.sidebarBackground = sidebarBackground ?? .controlBackgroundColor
@@ -195,7 +224,13 @@ enum NativeEditorAppearance {
             self.tableHeaderBackground = tableHeaderBackground ?? codeBlockBackground.withAlphaComponent(max(0.04, min(1.0, codeBlockBackground.alphaComponent)))
             self.quoteBar = quoteBar ?? .separatorColor
             self.quoteFill = quoteFill ?? codeBlockBackground.withAlphaComponent(max(0.08, min(0.18, codeBlockBackground.alphaComponent)))
-            self.syntax = syntax ?? SyntaxPalette.defaultPalette
+            self.noteAccent = noteAccent ?? linkColor
+            self.tipAccent = tipAccent ?? resolvedSyntax.builtin
+            self.successAccent = successAccent ?? .systemGreen
+            self.warningAccent = warningAccent ?? .systemYellow
+            self.cautionAccent = cautionAccent ?? .systemRed
+            self.importantAccent = importantAccent ?? resolvedSyntax.keyword
+            self.syntax = resolvedSyntax
         }
     }
 
@@ -298,6 +333,171 @@ enum NativeEditorAppearance {
         }
 
         return [
+            .kernPaper: ThemePreset(
+                title: "Kern Paper",
+                mode: .kernPaper,
+                palette: ThemePalette(
+                    preferredAppearance: .aqua,
+                    editorBackground: hex("FAF9F5"),
+                    sidebarBackground: hex("F3F1EA"),
+                    textColor: hex("171713"),
+                    secondaryTextColor: hex("69665F"),
+                    linkColor: hex("3B7CFF"),
+                    codeBlockBackground: hex("F3F4F2"),
+                    codeBlockStroke: hex("E5E0D3"),
+                    inlineCodeBackground: hex("EEF0F3"),
+                    inlineCodeText: hex("B13A32"),
+                    tableHeaderBackground: hex("F3F1EA"),
+                    quoteBar: hex("3B7CFF"),
+                    quoteFill: hexA("3B7CFF", 0.11),
+                    noteAccent: hex("3B7CFF"),
+                    tipAccent: hex("00898A"),
+                    successAccent: hex("248A4B"),
+                    warningAccent: hex("B87913"),
+                    cautionAccent: hex("C73A34"),
+                    importantAccent: hex("6A5CFF"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("3B7CFF"),
+                        builtin: hex("00898A"),
+                        string: hex("B13A32"),
+                        number: hex("B87913"),
+                        comment: hex("8A867B"),
+                        variable: hex("5E5A51")
+                    )
+                )
+            ),
+            .kernGraphite: ThemePreset(
+                title: "Kern Graphite",
+                mode: .kernGraphite,
+                palette: ThemePalette(
+                    preferredAppearance: .darkAqua,
+                    editorBackground: hex("10100E"),
+                    sidebarBackground: hex("181816"),
+                    textColor: hex("F2F1EA"),
+                    secondaryTextColor: hex("A19E94"),
+                    linkColor: hex("8AB4FF"),
+                    codeBlockBackground: hex("181A1D"),
+                    codeBlockStroke: hex("2B2924"),
+                    inlineCodeBackground: hex("25231F"),
+                    inlineCodeText: hex("FF8B80"),
+                    tableHeaderBackground: hex("181816"),
+                    quoteBar: hex("8AB4FF"),
+                    quoteFill: hexA("8AB4FF", 0.15),
+                    noteAccent: hex("8AB4FF"),
+                    tipAccent: hex("73D4C0"),
+                    successAccent: hex("73C990"),
+                    warningAccent: hex("E3B456"),
+                    cautionAccent: hex("FF8B80"),
+                    importantAccent: hex("B9A7FF"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("8AB4FF"),
+                        builtin: hex("73D4C0"),
+                        string: hex("FF8B80"),
+                        number: hex("E3B456"),
+                        comment: hex("8C897F"),
+                        variable: hex("D4D0C7")
+                    )
+                )
+            ),
+            .kernIce: ThemePreset(
+                title: "Kern Ice",
+                mode: .kernIce,
+                palette: ThemePalette(
+                    preferredAppearance: .darkAqua,
+                    editorBackground: hex("090B10"),
+                    sidebarBackground: hex("111620"),
+                    textColor: hex("EAF3FF"),
+                    secondaryTextColor: hex("91A4B8"),
+                    linkColor: hex("7CC7FF"),
+                    codeBlockBackground: hex("0D121A"),
+                    codeBlockStroke: hex("263241"),
+                    inlineCodeBackground: hex("162231"),
+                    inlineCodeText: hex("8DD8FF"),
+                    tableHeaderBackground: hex("111620"),
+                    quoteBar: hex("7CC7FF"),
+                    quoteFill: hexA("7CC7FF", 0.14),
+                    noteAccent: hex("7CC7FF"),
+                    tipAccent: hex("70D6D1"),
+                    successAccent: hex("70D6A5"),
+                    warningAccent: hex("F6C35B"),
+                    cautionAccent: hex("FF8B8B"),
+                    importantAccent: hex("A6B4FF"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("7CC7FF"),
+                        builtin: hex("70D6D1"),
+                        string: hex("70D6A5"),
+                        number: hex("F6C35B"),
+                        comment: hex("738398"),
+                        variable: hex("C5D8EA")
+                    )
+                )
+            ),
+            .kernInk: ThemePreset(
+                title: "Kern Ink",
+                mode: .kernInk,
+                palette: ThemePalette(
+                    preferredAppearance: .aqua,
+                    editorBackground: hex("FBFBFA"),
+                    sidebarBackground: hex("F2F2F0"),
+                    textColor: hex("111111"),
+                    secondaryTextColor: hex("686864"),
+                    linkColor: hex("111111"),
+                    codeBlockBackground: hex("F3F3F1"),
+                    codeBlockStroke: hex("E0E0DC"),
+                    inlineCodeBackground: hex("EFEFED"),
+                    inlineCodeText: hex("3A3A36"),
+                    tableHeaderBackground: hex("F2F2F0"),
+                    quoteBar: hex("111111"),
+                    quoteFill: hexA("111111", 0.08),
+                    noteAccent: hex("111111"),
+                    tipAccent: hex("5E625B"),
+                    successAccent: hex("3F7A4B"),
+                    warningAccent: hex("6A6258"),
+                    cautionAccent: hex("8D3A36"),
+                    importantAccent: hex("111111"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("111111"),
+                        builtin: hex("5E625B"),
+                        string: hex("4E4A43"),
+                        number: hex("6A6258"),
+                        comment: hex("8F8F87"),
+                        variable: hex("3A3A36")
+                    )
+                )
+            ),
+            .kernAxis: ThemePreset(
+                title: "Kern Axis",
+                mode: .kernAxis,
+                palette: ThemePalette(
+                    preferredAppearance: .aqua,
+                    editorBackground: hex("FAFAF9"),
+                    sidebarBackground: hex("F5F5F2"),
+                    textColor: hex("0A0D11"),
+                    secondaryTextColor: hex("525252"),
+                    linkColor: hex("3B5BE2"),
+                    codeBlockBackground: hex("F5F5F2"),
+                    codeBlockStroke: hex("E8E8E5"),
+                    inlineCodeBackground: hex("F1F2F6"),
+                    inlineCodeText: hex("14235D"),
+                    tableHeaderBackground: hex("F5F5F2"),
+                    quoteBar: hex("3B5BE2"),
+                    quoteFill: hexA("3B5BE2", 0.10),
+                    noteAccent: hex("3B5BE2"),
+                    tipAccent: hex("00898A"),
+                    successAccent: hex("008842"),
+                    warningAccent: hex("AC7A00"),
+                    cautionAccent: hex("C80D19"),
+                    importantAccent: hex("684EE8"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("3B5BE2"),
+                        builtin: hex("00898A"),
+                        string: hex("006B6C"),
+                        number: hex("865E00"),
+                        comment: hex("727781"),
+                        variable: hex("515660")
+                    )
+                )
+            ),
             .kernDark: ThemePreset(
                 title: "Kern Dark",
                 mode: .kernDark,
@@ -342,6 +542,72 @@ enum NativeEditorAppearance {
                 code: "7dd3fc", codeBackground: "050507", inlineCodeBackground: "111114",
                 link: "60a5fa", quote: "8a8a94", secondary: "52525b", highlight: "93c5fd",
                 marker: "27272a"
+            ),
+            .axisLight: ThemePreset(
+                title: "Axis Light",
+                mode: .axisLight,
+                palette: ThemePalette(
+                    preferredAppearance: .aqua,
+                    editorBackground: hex("FAFAF9"),
+                    sidebarBackground: hex("F5F5F2"),
+                    textColor: hex("0A0D11"),
+                    secondaryTextColor: hex("525252"),
+                    linkColor: hex("3B5BE2"),
+                    codeBlockBackground: hex("F5F5F2"),
+                    codeBlockStroke: hex("E8E8E5"),
+                    inlineCodeBackground: hex("F1F2F6"),
+                    inlineCodeText: hex("14235D"),
+                    tableHeaderBackground: hex("F5F5F2"),
+                    quoteBar: hex("919191"),
+                    quoteFill: hex("F5F5F2"),
+                    noteAccent: hex("0077C9"),
+                    tipAccent: hex("00898A"),
+                    successAccent: hex("008842"),
+                    warningAccent: hex("AC7A00"),
+                    cautionAccent: hex("C80D19"),
+                    importantAccent: hex("3B5BE2"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("3B5BE2"),
+                        builtin: hex("00898A"),
+                        string: hex("006B6C"),
+                        number: hex("865E00"),
+                        comment: hex("727781"),
+                        variable: hex("515660")
+                    )
+                )
+            ),
+            .axisGraphite: ThemePreset(
+                title: "Axis Graphite",
+                mode: .axisGraphite,
+                palette: ThemePalette(
+                    preferredAppearance: .darkAqua,
+                    editorBackground: hex("090B0F"),
+                    sidebarBackground: hex("14171D"),
+                    textColor: hex("F9FAFC"),
+                    secondaryTextColor: hex("CBCED6"),
+                    linkColor: hex("A5C2FF"),
+                    codeBlockBackground: hex("14171D"),
+                    codeBlockStroke: hex("3B3F48"),
+                    inlineCodeBackground: hex("25282F"),
+                    inlineCodeText: hex("B4E3FF"),
+                    tableHeaderBackground: hex("14171D"),
+                    quoteBar: hex("727781"),
+                    quoteFill: hexA("727781", 0.18),
+                    noteAccent: hex("7FCEFF"),
+                    tipAccent: hex("6FD8D8"),
+                    successAccent: hex("7DD998"),
+                    warningAccent: hex("F9C85A"),
+                    cautionAccent: hex("FF9F93"),
+                    importantAccent: hex("A5C2FF"),
+                    syntax: SyntaxPalette(
+                        keyword: hex("A5C2FF"),
+                        builtin: hex("6FD8D8"),
+                        string: hex("7DD998"),
+                        number: hex("F9C85A"),
+                        comment: hex("9EA2AB"),
+                        variable: hex("CBCED6")
+                    )
+                )
             ),
             .oneDark: importedTheme(
                 title: "One Dark", mode: .oneDark, dark: true,
@@ -522,11 +788,18 @@ enum NativeEditorAppearance {
     static var builtInThemeChoices: [(title: String, value: String)] {
         [
             ("System", NativeEditorThemeMode.system.rawValue),
+            ("Kern Paper", NativeEditorThemeMode.kernPaper.rawValue),
+            ("Kern Graphite", NativeEditorThemeMode.kernGraphite.rawValue),
+            ("Kern Ice", NativeEditorThemeMode.kernIce.rawValue),
+            ("Kern Ink", NativeEditorThemeMode.kernInk.rawValue),
+            ("Kern Axis", NativeEditorThemeMode.kernAxis.rawValue),
             ("Kern Dark", NativeEditorThemeMode.kernDark.rawValue),
             ("Kern Light", NativeEditorThemeMode.kernLight.rawValue),
             ("TurboDraft Dark", NativeEditorThemeMode.turbodraftDark.rawValue),
             ("TurboDraft Light", NativeEditorThemeMode.turbodraftLight.rawValue),
             ("TurboDraft Ice", NativeEditorThemeMode.turbodraftIce.rawValue),
+            ("Axis Light", NativeEditorThemeMode.axisLight.rawValue),
+            ("Axis Graphite", NativeEditorThemeMode.axisGraphite.rawValue),
             ("One Dark", NativeEditorThemeMode.oneDark.rawValue),
             ("GitHub Dark", NativeEditorThemeMode.githubDark.rawValue),
             ("GitHub Light", NativeEditorThemeMode.githubLight.rawValue),
@@ -546,6 +819,50 @@ enum NativeEditorAppearance {
             ("Sublime Mariana", NativeEditorThemeMode.sublimeMariana.rawValue),
             ("Custom Theme JSON", NativeEditorThemeMode.custom.rawValue),
         ]
+    }
+
+    static func themeDisplayName(defaults: UserDefaults = .standard) -> String {
+        if themeMode(defaults: defaults) == .custom,
+           let customName = importedCustomTheme(defaults: defaults)?.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !customName.isEmpty
+        {
+            return customName
+        }
+
+        let mode = themeMode(defaults: defaults)
+        if mode == .system {
+            return "System"
+        }
+        return presetThemes[mode]?.title ?? "System"
+    }
+
+    static func themeDesignNote(defaults: UserDefaults = .standard) -> String {
+        switch themeMode(defaults: defaults) {
+        case .system:
+            return "Follows the current macOS appearance."
+        case .kernPaper:
+            return "Warm editorial default: paper surface, graphite text, precise blue caret."
+        case .kernGraphite:
+            return "Dark counterpart: graphite surface, warm text, restrained ice-blue accent."
+        case .kernIce:
+            return "Cool technical variant for speed, diagrams, and performance-oriented work."
+        case .kernInk:
+            return "Monochrome writing mode with maximum typographic restraint."
+        case .kernAxis:
+            return "Structured theme for specs, tables, Mermaid diagrams, and engineering docs."
+        case .kernDark:
+            return "Original Kern dark preset."
+        case .kernLight:
+            return "Original Kern light preset."
+        case .turbodraftDark, .turbodraftLight, .turbodraftIce:
+            return "TurboDraft-inspired imported theme preset."
+        case .axisLight, .axisGraphite:
+            return "Axis design-system preset."
+        case .custom:
+            return "Custom JSON theme loaded from disk."
+        default:
+            return "Developer/community theme preset."
+        }
     }
 
     static var fontFamilyChoices: [(title: String, value: String)] {
@@ -606,6 +923,20 @@ enum NativeEditorAppearance {
             return .wrap
         }
         return mode
+    }
+
+    static func readableWidthMode(defaults: UserDefaults = .standard) -> NativeEditorReadableWidthMode {
+        guard let raw = defaults.string(forKey: readableWidthModeKey),
+              let mode = NativeEditorReadableWidthMode(rawValue: raw) else {
+            return .fullWidth
+        }
+        return mode
+    }
+
+    static func readableMaxWidth(defaults: UserDefaults = .standard) -> CGFloat {
+        let raw = defaults.double(forKey: readableMaxWidthKey)
+        let candidate = raw == 0 ? defaultReadableMaxWidth : CGFloat(raw)
+        return min(readableMaxWidthRange.upperBound, max(readableMaxWidthRange.lowerBound, candidate))
     }
 
     static func baseFont(defaults: UserDefaults = .standard) -> NSFont {
@@ -718,17 +1049,17 @@ enum NativeEditorAppearance {
         let base: NSColor
         switch kind {
         case .note:
-            base = palette.linkColor
+            base = palette.noteAccent
         case .tip:
-            base = palette.syntax.builtin
+            base = palette.tipAccent
         case .success:
-            base = NSColor.systemGreen
+            base = palette.successAccent
         case .warning:
-            base = NSColor.systemYellow
+            base = palette.warningAccent
         case .caution:
-            base = NSColor.systemRed
+            base = palette.cautionAccent
         case .important:
-            base = palette.syntax.keyword
+            base = palette.importantAccent
         }
         return CalloutStyle(
             fill: base.withAlphaComponent(isDarkAppearance(appearance) ? 0.16 : 0.11),
@@ -855,6 +1186,12 @@ enum NativeEditorAppearance {
                 tableHeaderBackground: basePalette.tableHeaderBackground,
                 quoteBar: basePalette.quoteBar,
                 quoteFill: basePalette.quoteFill,
+                noteAccent: basePalette.noteAccent,
+                tipAccent: basePalette.tipAccent,
+                successAccent: basePalette.successAccent,
+                warningAccent: basePalette.warningAccent,
+                cautionAccent: basePalette.cautionAccent,
+                importantAccent: basePalette.importantAccent,
                 syntax: basePalette.syntax
             )
         }

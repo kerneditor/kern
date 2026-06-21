@@ -22,6 +22,7 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
                 glyphPosition: .zero,
                 characterIndex: 0
             )
+            XCTAssertEqual(bounds.width, 752, accuracy: 0.5, "Mermaid blocks should align to the readable column, not shrink to diagram content width")
             XCTAssertGreaterThanOrEqual(bounds.width, 280, "Mermaid bounds are too narrow for readability")
             XCTAssertLessThanOrEqual(bounds.width, 760, "Mermaid bounds overflow the available line width")
             XCTAssertGreaterThanOrEqual(bounds.height, 150, "Mermaid bounds are too short and risk clipped content")
@@ -60,6 +61,7 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
             glyphPosition: .zero,
             characterIndex: 0
         )
+        XCTAssertEqual(bounds.width, 692, accuracy: 0.5, "Mermaid sequence blocks should align with the containing column")
         XCTAssertGreaterThan(bounds.width, 300)
         XCTAssertGreaterThan(bounds.height, 150)
         XCTAssertLessThan(bounds.height, 520)
@@ -124,7 +126,7 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
     }
 
     @MainActor
-    func testSequenceDiagramSuppressesEdgeLabelsToAvoidGhostTextOverdraw() {
+    func testSequenceDiagramAllowsEdgeLabelsWithRowLayout() {
         let markdown = """
         ```mermaid
         sequenceDiagram
@@ -140,11 +142,11 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
         XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
         guard let mermaid = mermaids.first else { return }
 
-        XCTAssertFalse(mermaid.debugShowsEdgeLabelsForTesting, "Sequence diagrams should suppress edge labels to prevent overdraw")
+        XCTAssertTrue(mermaid.debugShowsEdgeLabelsForTesting, "Sequence diagrams should allow labels once messages are placed on separate rows")
         XCTAssertGreaterThan(
             mermaid.edges.compactMap(\.label).count,
             0,
-            "Parser should still keep labels in model; suppression is a rendering choice"
+            "Parser should keep labels in the model for sequence message rows"
         )
     }
 
@@ -173,6 +175,7 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
             glyphPosition: .zero,
             characterIndex: 0
         )
+        XCTAssertEqual(bounds.width, 692, accuracy: 0.5, "ASCII Mermaid blocks should align with the containing column")
         XCTAssertGreaterThanOrEqual(bounds.width, 280)
         XCTAssertLessThan(bounds.height, 420, "ASCII mode should remain compact")
     }

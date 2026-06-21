@@ -1015,13 +1015,14 @@ final class NativeMarkdownCodecTests: XCTestCase {
             XCTAssertNotEqual(codeRange.location, NSNotFound)
             guard codeRange.location != NSNotFound else { return }
 
-            let actualBackground = imported.attribute(.backgroundColor, at: codeRange.location, effectiveRange: nil) as? NSColor
-            let expectedBackground = NativeEditorAppearance.inlineCodeBackgroundColor()
+            let actualForeground = imported.attribute(.foregroundColor, at: codeRange.location, effectiveRange: nil) as? NSColor
+            let expectedForeground = NativeEditorAppearance.inlineCodeTextColor()
             assertColorsEqual(
-                actualBackground,
-                expectedBackground,
-                "Shared inline cache should not reuse inline-code colors across theme changes"
+                actualForeground,
+                expectedForeground,
+                "Shared inline cache should not reuse inline-code text colors across theme changes"
             )
+            XCTAssertEqual(imported.attribute(.kernInlineCode, at: codeRange.location, effectiveRange: nil) as? Bool, true)
         }
     }
 

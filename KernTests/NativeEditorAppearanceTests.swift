@@ -7,6 +7,8 @@ final class NativeEditorAppearanceTests: XCTestCase {
         let choices = NativeEditorAppearance.builtInThemeChoices
         XCTAssertGreaterThanOrEqual(choices.count, 20, "Expected expanded built-in theme catalog")
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.turbodraftIce.rawValue })
+        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.axisLight.rawValue })
+        XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.axisGraphite.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.tokyoNight.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.vscodeDarkPlus.rawValue })
         XCTAssertTrue(choices.contains { $0.value == NativeEditorThemeMode.githubDark.rawValue })
@@ -257,6 +259,34 @@ final class NativeEditorAppearanceTests: XCTestCase {
         XCTAssertEqual(NativeEditorAppearance.tableOverflowMode(defaults: defaults), .horizontal)
     }
 
+    func testReadableWidthPreferencesDefaultToFullWidthAndClampMaxWidth() {
+        let suiteName = "NativeEditorAppearanceWidthTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Expected isolated user defaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        XCTAssertEqual(NativeEditorAppearance.readableWidthMode(defaults: defaults), .fullWidth)
+        XCTAssertEqual(
+            NativeEditorAppearance.readableMaxWidth(defaults: defaults),
+            NativeEditorAppearance.defaultReadableMaxWidth,
+            accuracy: 0.01
+        )
+
+        defaults.set(NativeEditorReadableWidthMode.centered.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+        defaults.set(10_000, forKey: NativeEditorAppearance.readableMaxWidthKey)
+
+        XCTAssertEqual(NativeEditorAppearance.readableWidthMode(defaults: defaults), .centered)
+        XCTAssertEqual(
+            NativeEditorAppearance.readableMaxWidth(defaults: defaults),
+            NativeEditorAppearance.readableMaxWidthRange.upperBound,
+            accuracy: 0.01
+        )
+    }
+
     func testCodeBlockColorsAdaptBetweenLightAndDarkAppearances() {
         let defaults = UserDefaults.standard
         let key = NativeEditorAppearance.themeModeKey
@@ -312,6 +342,27 @@ final class NativeEditorAppearanceTests: XCTestCase {
 
         XCTAssertGreaterThan(link.blueComponent, link.redComponent)
         XCTAssertGreaterThan(codeBg.redComponent, 0.05)
+    }
+
+    func testAxisThemeUsesAxisTokenPaletteForLightAndGraphiteModes() {
+        let suiteName = "NativeEditorAppearanceAxisThemeTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            XCTFail("Expected isolated user defaults suite")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        defaults.set(NativeEditorThemeMode.axisLight.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+        assertColor(NativeEditorAppearance.primaryTextColor(defaults: defaults), equalsHex: "#0A0D11")
+        assertColor(NativeEditorAppearance.codeBlockStrokeColor(defaults: defaults), equalsHex: "#E8E8E5")
+        assertColor(NativeEditorAppearance.linkColor(defaults: defaults), equalsHex: "#3B5BE2")
+
+        defaults.set(NativeEditorThemeMode.axisGraphite.rawValue, forKey: NativeEditorAppearance.themeModeKey)
+        assertColor(NativeEditorAppearance.editorBackgroundColor(defaults: defaults), equalsHex: "#090B0F")
+        assertColor(NativeEditorAppearance.inlineCodeBackgroundColor(defaults: defaults), equalsHex: "#25282F")
+        assertColor(NativeEditorAppearance.linkColor(defaults: defaults), equalsHex: "#A5C2FF")
     }
 }
 

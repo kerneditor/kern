@@ -25,6 +25,7 @@ Kern is built for a simpler workflow: open any local markdown file, edit in true
 - Checkboxes in multiple forms (standalone, bulleted tasks, ordered tasks, heading tasks).
 - Native code block chrome (language pill + copy affordance).
 - Native rendering paths for images, Mermaid, and math.
+- Appearance preferences for themes, fonts, full-width editing, and centered readable columns.
 - File watching, autosave, and standard macOS window/tab behavior.
 
 ## Quick Start (Open a Markdown File)

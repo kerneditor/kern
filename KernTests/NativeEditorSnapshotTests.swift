@@ -681,6 +681,8 @@ final class NativeEditorSnapshotTests: XCTestCase {
             NativeEditorAppearance.fontDesignKey,
             NativeEditorAppearance.fontSizeKey,
             NativeEditorAppearance.tableOverflowModeKey,
+            NativeEditorAppearance.readableWidthModeKey,
+            NativeEditorAppearance.readableMaxWidthKey,
             MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey,
         ]
 
@@ -718,6 +720,8 @@ final class NativeEditorSnapshotTests: XCTestCase {
             defaults.set(NativeEditorFontDesign.system.rawValue, forKey: NativeEditorAppearance.fontDesignKey)
             defaults.set(16, forKey: NativeEditorAppearance.fontSizeKey)
             defaults.set(NativeEditorTableOverflowMode.wrap.rawValue, forKey: NativeEditorAppearance.tableOverflowModeKey)
+            defaults.set(NativeEditorReadableWidthMode.fullWidth.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+            defaults.set(NativeEditorAppearance.defaultReadableMaxWidth, forKey: NativeEditorAppearance.readableMaxWidthKey)
             defaults.set(false, forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
         case .kernExtensions:
             defaults.set("kern", forKey: "nativeEditor.exportDialect")
@@ -739,6 +743,8 @@ final class NativeEditorSnapshotTests: XCTestCase {
             defaults.set(NativeEditorFontDesign.system.rawValue, forKey: NativeEditorAppearance.fontDesignKey)
             defaults.set(16, forKey: NativeEditorAppearance.fontSizeKey)
             defaults.set(NativeEditorTableOverflowMode.wrap.rawValue, forKey: NativeEditorAppearance.tableOverflowModeKey)
+            defaults.set(NativeEditorReadableWidthMode.fullWidth.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+            defaults.set(NativeEditorAppearance.defaultReadableMaxWidth, forKey: NativeEditorAppearance.readableMaxWidthKey)
             defaults.set(false, forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
         }
 

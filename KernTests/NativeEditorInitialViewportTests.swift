@@ -118,7 +118,24 @@ final class NativeEditorInitialViewportTests: XCTestCase {
     }
 
     @MainActor
-    func testReadableEditorColumnCentersInWideViewportAndKeepsCompactInsetInNarrowViewport() {
+    func testReadableEditorColumnPreferenceCentersWideViewportAndFullWidthUsesCompactInset() {
+        let defaults = UserDefaults.standard
+        let previousMode = defaults.object(forKey: NativeEditorAppearance.readableWidthModeKey)
+        let previousMaxWidth = defaults.object(forKey: NativeEditorAppearance.readableMaxWidthKey)
+        defer {
+            if let previousMode {
+                defaults.set(previousMode, forKey: NativeEditorAppearance.readableWidthModeKey)
+            } else {
+                defaults.removeObject(forKey: NativeEditorAppearance.readableWidthModeKey)
+            }
+            if let previousMaxWidth {
+                defaults.set(previousMaxWidth, forKey: NativeEditorAppearance.readableMaxWidthKey)
+            } else {
+                defaults.removeObject(forKey: NativeEditorAppearance.readableMaxWidthKey)
+            }
+            NotificationCenter.default.post(name: .nativeEditorPreferencesDidChange, object: nil)
+        }
+
         let markdown = """
         A plain paragraph that should sit in a centered readable column.
 
@@ -126,6 +143,10 @@ final class NativeEditorInitialViewportTests: XCTestCase {
         let centered = true
         ```
         """
+
+        defaults.set(NativeEditorReadableWidthMode.centered.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+        defaults.set(760, forKey: NativeEditorAppearance.readableMaxWidthKey)
+        NotificationCenter.default.post(name: .nativeEditorPreferencesDidChange, object: nil)
 
         let wide = makeHostedEditorWindow(size: NSSize(width: 1400, height: 720), markdown: markdown)
         defer { wide.window.close() }
@@ -151,6 +172,25 @@ final class NativeEditorInitialViewportTests: XCTestCase {
             viewportWidth: narrow.scrollView.contentView.bounds.width,
             expectedMinimumInset: 31,
             message: "Narrow editor column should still have balanced left/right margins."
+        )
+
+        defaults.set(NativeEditorReadableWidthMode.fullWidth.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+        NotificationCenter.default.post(name: .nativeEditorPreferencesDidChange, object: nil)
+
+        let fullWidth = makeHostedEditorWindow(size: NSSize(width: 1400, height: 720), markdown: markdown)
+        defer { fullWidth.window.close() }
+
+        XCTAssertEqual(
+            fullWidth.textView.textContainerInset.width,
+            32,
+            accuracy: 0.5,
+            "Full-width mode should use the compact editing inset instead of forcing a Notion-style column."
+        )
+        XCTAssertColumnIsCentered(
+            in: fullWidth.textView,
+            viewportWidth: fullWidth.scrollView.contentView.bounds.width,
+            expectedMinimumInset: 31,
+            message: "Full-width mode should keep balanced compact text margins."
         )
     }
 

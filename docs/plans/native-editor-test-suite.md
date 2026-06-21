@@ -111,6 +111,12 @@ At minimum, full-spec tests must enumerate:
 - `headingCheckboxesEnabled`: `0|1`
 - `orderedListNumbering`: `gfmDefault`, `preserveTyped`
 - `checkboxHitTarget`: `glyph`, `marker`
+- `themeMode`: built-in light/dark/code-editor themes plus custom JSON
+- `fontFamily`, `fontDesign`, `fontSize`
+- `readableWidthMode`: `fullWidth`, `centered`
+- `readableMaxWidth`: min/default/max values
+- `tableOverflowMode`: `wrap`, `horizontal`
+- `remoteImageLoading`: `0|1`
 
 ### Pixel-Level Rendering
 
@@ -118,6 +124,9 @@ We will verify:
 
 - Checkbox glyph vertical alignment vs baseline/line fragment
 - Marker spacing and indentation (bullets, numbers, tasks)
+- Inline code background/pill alignment against text baseline and line fragment
+- Code block, table, quote, callout, math, Mermaid, image, and theme color rendering
+- Full-width and centered-readable layout at narrow, default, and wide window sizes
 - Marker vertical alignment vs adjacent text (bullets, ordered markers, bulleted-tasks)
 - Code block chrome:
   - background radius/padding
@@ -135,6 +144,17 @@ We will measure (cold + warm where relevant):
 - Export latency on large docs
 - Save latency (including export flush)
 - Memory (RSS) after opening mega doc + after idle
+
+Current performance-pipeline hardening details live in
+`docs/plans/2026-06-20-performance-evaluation-pipeline-hardening.md`. Use that
+workflow for baseline/candidate A/B runs before accepting performance-sensitive
+rendering changes.
+
+The native benchmark runner must preserve enough data to audit each A/B
+decision after the fact: selected tests, manifest/environment, fixture hashes,
+baseline-selection notes, process snapshots, raw XCTest log, machine-readable
+metrics, and human summary. A candidate is not a valid strict regression pass if
+it stops emitting a metric that existed in the selected baseline.
 
 ## Datasets / Fixtures
 

@@ -65,6 +65,8 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
         NativeEditorAppearance.fontDesignKey,
         NativeEditorAppearance.fontSizeKey,
         NativeEditorAppearance.tableOverflowModeKey,
+        NativeEditorAppearance.readableWidthModeKey,
+        NativeEditorAppearance.readableMaxWidthKey,
         MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey,
     ]
 
@@ -765,6 +767,8 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     "nativeEditor.mermaidRenderMode": "rich",
                     "nativeEditor.checkboxHitTarget": "glyph",
                     NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                    NativeEditorAppearance.readableWidthModeKey: NativeEditorReadableWidthMode.fullWidth.rawValue,
+                    NativeEditorAppearance.readableMaxWidthKey: NativeEditorAppearance.defaultReadableMaxWidth,
                     MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
                 ]
             ),
@@ -781,6 +785,8 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     "nativeEditor.mermaidRenderMode": "rich",
                     "nativeEditor.checkboxHitTarget": "marker",
                     NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                    NativeEditorAppearance.readableWidthModeKey: NativeEditorReadableWidthMode.fullWidth.rawValue,
+                    NativeEditorAppearance.readableMaxWidthKey: NativeEditorAppearance.defaultReadableMaxWidth,
                     MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
                 ]
             ),
@@ -797,6 +803,8 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                     "nativeEditor.mermaidRenderMode": "rich",
                     "nativeEditor.checkboxHitTarget": "glyph",
                     NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                    NativeEditorAppearance.readableWidthModeKey: NativeEditorReadableWidthMode.fullWidth.rawValue,
+                    NativeEditorAppearance.readableMaxWidthKey: NativeEditorAppearance.defaultReadableMaxWidth,
                     MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: true,
                 ]
             ),
@@ -858,6 +866,8 @@ final class NativeEditorMegaStressTypingMatrixTests: XCTestCase {
                                                             "nativeEditor.mermaidRenderMode": mermaidMode,
                                                             "nativeEditor.checkboxHitTarget": checkboxHitTarget,
                                                             NativeEditorAppearance.tableOverflowModeKey: NativeEditorTableOverflowMode.wrap.rawValue,
+                                                            NativeEditorAppearance.readableWidthModeKey: NativeEditorReadableWidthMode.fullWidth.rawValue,
+                                                            NativeEditorAppearance.readableMaxWidthKey: NativeEditorAppearance.defaultReadableMaxWidth,
                                                             MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey: remoteImages,
                                                         ]
                                                     )

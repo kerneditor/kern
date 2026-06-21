@@ -29,9 +29,19 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
     private let fontDesignPopup = NSPopUpButton()
     private let fontSizePopup = NSPopUpButton()
     private let tableOverflowModePopup = NSPopUpButton()
+    private let readableWidthModePopup = NSPopUpButton()
     private let customFontFamilyField = NSTextField()
     private let importThemeButton = NSButton(title: "Import JSON…", target: nil, action: nil)
     private let clearCustomThemeButton = NSButton(title: "Clear Custom", target: nil, action: nil)
+    private let readableMaxWidthSlider = NSSlider(
+        value: Double(NativeEditorAppearance.defaultReadableMaxWidth),
+        minValue: Double(NativeEditorAppearance.readableMaxWidthRange.lowerBound),
+        maxValue: Double(NativeEditorAppearance.readableMaxWidthRange.upperBound),
+        target: nil,
+        action: nil
+    )
+    private let readableMaxWidthValueLabel = NSTextField(labelWithString: "")
+    private let brandPreviewView = KernBrandPreviewView()
 
     private let orderedTasksCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let headingCheckboxesCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -42,7 +52,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         self.notificationCenter = notificationCenter
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 980),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -52,6 +62,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         window.center()
 
         super.init(window: window)
+        brandPreviewView.defaults = defaults
         setupUI()
         refreshFromDefaults()
     }
@@ -118,6 +129,16 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             defaults.string(forKey: NativeEditorAppearance.tableOverflowModeKey) ?? NativeEditorTableOverflowMode.wrap.rawValue,
             in: tableOverflowModePopup
         )
+        selectValue(
+            defaults.string(forKey: NativeEditorAppearance.readableWidthModeKey)
+                ?? NativeEditorReadableWidthMode.fullWidth.rawValue,
+            in: readableWidthModePopup
+        )
+        readableMaxWidthSlider.doubleValue = roundedReadableMaxWidthValue(
+            Double(NativeEditorAppearance.readableMaxWidth(defaults: defaults))
+        )
+        updateReadableMaxWidthControls()
+        brandPreviewView.needsDisplay = true
         customFontFamilyField.stringValue = defaults.string(forKey: NativeEditorAppearance.customFontFamilyKey) ?? ""
 
         orderedTasksCheckbox.state = boolPreference(
@@ -139,7 +160,12 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
 
     @objc private func settingDidChange(_ sender: Any?) {
         guard !isSyncingControls else { return }
+        if let slider = sender as? NSSlider, slider === readableMaxWidthSlider {
+            readableMaxWidthSlider.doubleValue = roundedReadableMaxWidthValue(slider.doubleValue)
+        }
         persistSettings()
+        updateReadableMaxWidthControls()
+        brandPreviewView.needsDisplay = true
         postPreferencesDidChange()
     }
 
@@ -169,6 +195,8 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         defaults.removeObject(forKey: NativeEditorAppearance.customThemeJSONKey)
         defaults.set(16, forKey: NativeEditorAppearance.fontSizeKey)
         defaults.set(NativeEditorTableOverflowMode.wrap.rawValue, forKey: NativeEditorAppearance.tableOverflowModeKey)
+        defaults.set(NativeEditorReadableWidthMode.fullWidth.rawValue, forKey: NativeEditorAppearance.readableWidthModeKey)
+        defaults.set(NativeEditorAppearance.defaultReadableMaxWidth, forKey: NativeEditorAppearance.readableMaxWidthKey)
         defaults.set(false, forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
 
         refreshFromDefaults()
@@ -219,6 +247,13 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         if let value = selectedValue(from: tableOverflowModePopup) {
             defaults.set(value, forKey: NativeEditorAppearance.tableOverflowModeKey)
         }
+        if let value = selectedValue(from: readableWidthModePopup) {
+            defaults.set(value, forKey: NativeEditorAppearance.readableWidthModeKey)
+        }
+        defaults.set(
+            roundedReadableMaxWidthValue(readableMaxWidthSlider.doubleValue),
+            forKey: NativeEditorAppearance.readableMaxWidthKey
+        )
 
         defaults.set(orderedTasksCheckbox.state == .on, forKey: "nativeEditor.orderedTasksEnabled")
         defaults.set(headingCheckboxesCheckbox.state == .on, forKey: "nativeEditor.headingCheckboxesEnabled")
@@ -267,6 +302,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             "Base editor font size used for body text and proportional heading scaling."
         let tableOverflowModeHelp =
             "Wide markdown tables: Wrap keeps columns within the main viewport. Horizontal reserves table-local overflow behavior without enabling document-wide side scrolling."
+        let readableWidthModeHelp =
+            "Controls the editor text column. Full width uses the available window; Centered readable caps the column like Notion."
+        let readableMaxWidthHelp =
+            "Maximum document column width when Centered readable is selected."
         let orderedTasksHelp =
             "If enabled, lines like \"1. [ ] task\" are parsed as ordered tasks. If disabled, that syntax remains literal text."
         let headingCheckboxesHelp =
@@ -361,6 +400,13 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
                 Choice(title: "Horizontal scroll", value: NativeEditorTableOverflowMode.horizontal.rawValue),
             ]
         )
+        configurePopup(
+            readableWidthModePopup,
+            choices: [
+                Choice(title: "Full width (default)", value: NativeEditorReadableWidthMode.fullWidth.rawValue),
+                Choice(title: "Centered readable", value: NativeEditorReadableWidthMode.centered.rawValue),
+            ]
+        )
 
         orderedTasksCheckbox.title = ""
         headingCheckboxesCheckbox.title = ""
@@ -378,9 +424,24 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         fontDesignPopup.toolTip = fontDesignHelp
         fontSizePopup.toolTip = fontSizeHelp
         tableOverflowModePopup.toolTip = tableOverflowModeHelp
+        readableWidthModePopup.toolTip = readableWidthModeHelp
+        readableMaxWidthSlider.toolTip = readableMaxWidthHelp
+        readableMaxWidthValueLabel.toolTip = readableMaxWidthHelp
         orderedTasksCheckbox.toolTip = orderedTasksHelp
         headingCheckboxesCheckbox.toolTip = headingCheckboxesHelp
         remoteImageLoadingCheckbox.toolTip = remoteImageLoadingHelp
+
+        readableWidthModePopup.setAccessibilityIdentifier("NativeEditor.Settings.ReadableWidthMode")
+        readableMaxWidthSlider.target = self
+        readableMaxWidthSlider.action = #selector(settingDidChange(_:))
+        readableMaxWidthSlider.isContinuous = false
+        readableMaxWidthSlider.numberOfTickMarks = 0
+        readableMaxWidthSlider.allowsTickMarkValuesOnly = false
+        readableMaxWidthSlider.setAccessibilityIdentifier("NativeEditor.Settings.ReadableMaxWidth")
+        readableMaxWidthValueLabel.alignment = .right
+        readableMaxWidthValueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        readableMaxWidthValueLabel.textColor = .secondaryLabelColor
+        readableMaxWidthValueLabel.setAccessibilityIdentifier("NativeEditor.Settings.ReadableMaxWidthValue")
 
         customFontFamilyField.placeholderString = "Custom font family (e.g. IBM Plex Sans)"
         customFontFamilyField.toolTip = customFontFamilyHelp
@@ -406,6 +467,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
 
         let content = NSView()
         content.translatesAutoresizingMaskIntoConstraints = false
+        brandPreviewView.translatesAutoresizingMaskIntoConstraints = false
 
         let exportDialectLabel = makeRowLabel("Export dialect", tooltip: exportDialectHelp)
         let gfmExtensionStrategyLabel = makeRowLabel("GFM extension strategy", tooltip: gfmExtensionStrategyHelp)
@@ -421,9 +483,16 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         let fontDesignLabel = makeRowLabel("Font design", tooltip: fontDesignHelp)
         let fontSizeLabel = makeRowLabel("Font size", tooltip: fontSizeHelp)
         let tableOverflowModeLabel = makeRowLabel("Table overflow", tooltip: tableOverflowModeHelp)
+        let readableWidthModeLabel = makeRowLabel("Editor width", tooltip: readableWidthModeHelp)
+        let readableMaxWidthLabel = makeRowLabel("Max readable width", tooltip: readableMaxWidthHelp)
         let orderedTasksLabel = makeRowLabel("Enable ordered tasks", tooltip: orderedTasksHelp)
         let headingCheckboxesLabel = makeRowLabel("Enable heading checkboxes", tooltip: headingCheckboxesHelp)
         let remoteImageLoadingLabel = makeRowLabel("Enable remote image loading", tooltip: remoteImageLoadingHelp)
+
+        let readableWidthControls = NSStackView(views: [readableMaxWidthSlider, readableMaxWidthValueLabel])
+        readableWidthControls.orientation = .horizontal
+        readableWidthControls.spacing = 8
+        readableWidthControls.alignment = .centerY
 
         let grid = NSGridView(views: [
             [exportDialectLabel, exportDialectPopup],
@@ -440,6 +509,8 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             [fontDesignLabel, fontDesignPopup],
             [fontSizeLabel, fontSizePopup],
             [tableOverflowModeLabel, tableOverflowModePopup],
+            [readableWidthModeLabel, readableWidthModePopup],
+            [readableMaxWidthLabel, readableWidthControls],
             [orderedTasksLabel, orderedTasksCheckbox],
             [headingCheckboxesLabel, headingCheckboxesCheckbox],
             [remoteImageLoadingLabel, remoteImageLoadingCheckbox],
@@ -460,12 +531,18 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         restoreButton.toolTip = "Resets native editor settings to the default profile."
         restoreButton.translatesAutoresizingMaskIntoConstraints = false
 
+        content.addSubview(brandPreviewView)
         content.addSubview(grid)
         content.addSubview(noteLabel)
         content.addSubview(restoreButton)
 
         NSLayoutConstraint.activate([
-            grid.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            brandPreviewView.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            brandPreviewView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
+            brandPreviewView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+            brandPreviewView.heightAnchor.constraint(equalToConstant: 150),
+
+            grid.topAnchor.constraint(equalTo: brandPreviewView.bottomAnchor, constant: 18),
             grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
             grid.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -18),
 
@@ -484,18 +561,39 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             content.topAnchor.constraint(equalTo: root.topAnchor),
             content.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            content.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
         ])
 
         window.contentView = root
 
         // Apply minimum control widths for a stable layout.
-        [exportDialectPopup, gfmExtensionStrategyPopup, taskRenderingPopup, orderedNumberingPopup, syntaxVisibilityPopup, mermaidRenderModePopup, checkboxHitTargetPopup, themeModePopup, fontFamilyPopup, fontDesignPopup, fontSizePopup, tableOverflowModePopup].forEach {
+        [exportDialectPopup, gfmExtensionStrategyPopup, taskRenderingPopup, orderedNumberingPopup, syntaxVisibilityPopup, mermaidRenderModePopup, checkboxHitTargetPopup, themeModePopup, fontFamilyPopup, fontDesignPopup, fontSizePopup, tableOverflowModePopup, readableWidthModePopup].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             $0.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         }
         customFontFamilyField.translatesAutoresizingMaskIntoConstraints = false
         customFontFamilyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        readableMaxWidthSlider.translatesAutoresizingMaskIntoConstraints = false
+        readableMaxWidthSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
+        readableMaxWidthValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        readableMaxWidthValueLabel.widthAnchor.constraint(equalToConstant: 52).isActive = true
+    }
+
+    private func roundedReadableMaxWidthValue(_ raw: Double) -> Double {
+        let lower = Double(NativeEditorAppearance.readableMaxWidthRange.lowerBound)
+        let upper = Double(NativeEditorAppearance.readableMaxWidthRange.upperBound)
+        let clamped = min(upper, max(lower, raw))
+        return (clamped / 20).rounded() * 20
+    }
+
+    private func updateReadableMaxWidthControls() {
+        let centered = selectedValue(from: readableWidthModePopup) == NativeEditorReadableWidthMode.centered.rawValue
+        readableMaxWidthSlider.isEnabled = centered
+        readableMaxWidthValueLabel.textColor = centered ? .labelColor : .disabledControlTextColor
+        readableMaxWidthValueLabel.stringValue = String(
+            format: "%.0f px",
+            roundedReadableMaxWidthValue(readableMaxWidthSlider.doubleValue)
+        )
     }
 
     private func configurePopup(_ popup: NSPopUpButton, choices: [Choice]) {
@@ -566,5 +664,190 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
     func controlTextDidEndEditing(_ obj: Notification) {
         guard !isSyncingControls else { return }
         settingDidChange(obj.object)
+    }
+}
+
+private final class KernBrandPreviewView: NSView {
+    var defaults: UserDefaults = .standard {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+
+        let appearance = effectiveAppearance
+        let background = NativeEditorAppearance.sidebarBackgroundColor(defaults: defaults, appearance: appearance)
+        let text = NativeEditorAppearance.primaryTextColor(defaults: defaults)
+        let secondary = NativeEditorAppearance.secondaryTextColor(defaults: defaults)
+        let accent = NativeEditorAppearance.linkColor(defaults: defaults)
+        let editorBackground = NativeEditorAppearance.editorBackgroundColor(defaults: defaults, appearance: appearance)
+        let codeBackground = NativeEditorAppearance.codeBlockBackgroundColor(defaults: defaults, appearance: appearance)
+        let inlineBackground = NativeEditorAppearance.inlineCodeBackgroundColor(defaults: defaults, appearance: appearance)
+        let border = NativeEditorAppearance.codeBlockStrokeColor(defaults: defaults, appearance: appearance)
+        let inlineText = NativeEditorAppearance.inlineCodeTextColor(defaults: defaults, appearance: appearance)
+
+        drawRoundedRect(bounds.insetBy(dx: 0.5, dy: 0.5), radius: 14, fill: background, stroke: border, lineWidth: 1)
+
+        let markTile = NSRect(x: 18, y: 20, width: 108, height: 108)
+        drawRoundedRect(markTile, radius: 22, fill: editorBackground, stroke: border, lineWidth: 1)
+        drawKernAppIcon(in: markTile.insetBy(dx: 8, dy: 8), text: text)
+
+        drawText(
+            NativeEditorAppearance.themeDisplayName(defaults: defaults),
+            in: NSRect(x: 148, y: 24, width: bounds.width - 356, height: 28),
+            font: .systemFont(ofSize: 18, weight: .semibold),
+            color: text
+        )
+        drawText(
+            NativeEditorAppearance.themeDesignNote(defaults: defaults),
+            in: NSRect(x: 148, y: 54, width: bounds.width - 176, height: 40),
+            font: .systemFont(ofSize: 12, weight: .regular),
+            color: secondary
+        )
+
+        drawComponentPreview(
+            origin: NSPoint(x: 148, y: 104),
+            inlineBackground: inlineBackground,
+            inlineText: inlineText,
+            codeBackground: codeBackground,
+            border: border,
+            accent: accent,
+            text: text,
+            secondary: secondary
+        )
+
+        drawSwatches(
+            origin: NSPoint(x: bounds.width - 188, y: 25),
+            colors: [text, secondary, accent, inlineBackground, codeBackground]
+        )
+    }
+
+    private func drawComponentPreview(
+        origin: NSPoint,
+        inlineBackground: NSColor,
+        inlineText: NSColor,
+        codeBackground: NSColor,
+        border: NSColor,
+        accent: NSColor,
+        text: NSColor,
+        secondary: NSColor
+    ) {
+        let checkbox = NSRect(x: origin.x, y: origin.y + 1, width: 18, height: 18)
+        drawRoundedRect(checkbox, radius: 4, fill: accent, stroke: accent, lineWidth: 1)
+
+        let check = NSBezierPath()
+        check.lineWidth = 2
+        check.lineCapStyle = .round
+        check.lineJoinStyle = .round
+        check.move(to: NSPoint(x: checkbox.minX + 4, y: checkbox.midY))
+        check.line(to: NSPoint(x: checkbox.minX + 8, y: checkbox.maxY - 5))
+        check.line(to: NSPoint(x: checkbox.maxX - 4, y: checkbox.minY + 5))
+        NSColor.white.setStroke()
+        check.stroke()
+
+        drawText(
+            "Kern logo + native TextKit",
+            in: NSRect(x: origin.x + 28, y: origin.y - 1, width: 170, height: 22),
+            font: .systemFont(ofSize: 12, weight: .medium),
+            color: text
+        )
+
+        let inline = NSRect(x: origin.x + 205, y: origin.y - 2, width: 108, height: 24)
+        drawRoundedRect(inline, radius: 6, fill: inlineBackground, stroke: nil, lineWidth: 0)
+        drawText(
+            "inline code",
+            in: inline.insetBy(dx: 9, dy: 4),
+            font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+            color: inlineText
+        )
+
+        let code = NSRect(x: origin.x + 326, y: origin.y - 2, width: 170, height: 24)
+        drawRoundedRect(code, radius: 6, fill: codeBackground, stroke: border, lineWidth: 1)
+        drawText(
+            "precise spacing",
+            in: code.insetBy(dx: 10, dy: 4),
+            font: .monospacedSystemFont(ofSize: 11, weight: .regular),
+            color: secondary
+        )
+    }
+
+    private func drawKernAppIcon(in rect: NSRect, text: NSColor) {
+        if let icon = NSImage(named: NSImage.applicationIconName) ?? NSImage(named: "AppIcon") {
+            icon.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+            return
+        }
+
+        // Fallback mirrors the bundled macOS icon so the preview remains stable in
+        // unit-hosted render contexts that do not load the asset catalog.
+        let iconPath = NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.22, yRadius: rect.height * 0.22)
+        let gradient = NSGradient(colors: [
+            NSColor(calibratedRed: 0.19, green: 0.58, blue: 1.00, alpha: 1.0),
+            NSColor(calibratedRed: 0.04, green: 0.24, blue: 0.70, alpha: 1.0),
+        ])
+        gradient?.draw(in: iconPath, angle: 315)
+
+        let inset = rect.insetBy(dx: rect.width * 0.22, dy: rect.height * 0.20)
+        let stroke = max(7, rect.width * 0.12)
+        let stemX = inset.minX + inset.width * 0.08
+        let joinX = inset.minX + inset.width * 0.48
+        let outX = inset.maxX
+        let topY = inset.minY
+        let bottomY = inset.maxY
+
+        let mark = NSBezierPath()
+        mark.lineWidth = stroke
+        mark.lineCapStyle = .round
+        mark.lineJoinStyle = .round
+        mark.move(to: NSPoint(x: stemX, y: topY))
+        mark.line(to: NSPoint(x: stemX, y: bottomY))
+        mark.move(to: NSPoint(x: joinX, y: rect.midY))
+        mark.line(to: NSPoint(x: outX, y: topY))
+        mark.move(to: NSPoint(x: joinX, y: rect.midY))
+        mark.line(to: NSPoint(x: outX, y: bottomY))
+        NSColor.white.withAlphaComponent(0.96).setStroke()
+        mark.stroke()
+
+        let highlight = NSBezierPath()
+        highlight.lineWidth = max(2, stroke * 0.20)
+        highlight.lineCapStyle = .round
+        highlight.move(to: NSPoint(x: stemX, y: topY + stroke * 0.20))
+        highlight.line(to: NSPoint(x: stemX, y: rect.midY - stroke * 0.85))
+        text.withAlphaComponent(0.12).setStroke()
+        highlight.stroke()
+    }
+
+    private func drawSwatches(origin: NSPoint, colors: [NSColor]) {
+        for (index, color) in colors.enumerated() {
+            let rect = NSRect(x: origin.x + CGFloat(index * 30), y: origin.y, width: 22, height: 22)
+            drawRoundedRect(rect, radius: 6, fill: color, stroke: color.withAlphaComponent(0.35), lineWidth: 1)
+        }
+    }
+
+    private func drawText(_ string: String, in rect: NSRect, font: NSFont, color: NSColor) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        (string as NSString).draw(
+            in: rect,
+            withAttributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph,
+            ]
+        )
+    }
+
+    private func drawRoundedRect(_ rect: NSRect, radius: CGFloat, fill: NSColor, stroke: NSColor?, lineWidth: CGFloat) {
+        let path = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+        fill.setFill()
+        path.fill()
+        if let stroke, lineWidth > 0 {
+            path.lineWidth = lineWidth
+            stroke.setStroke()
+            path.stroke()
+        }
     }
 }

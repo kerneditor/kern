@@ -4566,7 +4566,6 @@ enum NativeMarkdownCodec {
         var attrs: [NSAttributedString.Key: Any] = baseAttributes(baseFont: baseFont)
         if style.code {
             attrs[.kernInlineCode] = true
-            attrs[.backgroundColor] = NativeEditorAppearance.inlineCodeBackgroundColor()
             attrs[.foregroundColor] = NativeEditorAppearance.inlineCodeTextColor()
         } else {
             if style.strong {

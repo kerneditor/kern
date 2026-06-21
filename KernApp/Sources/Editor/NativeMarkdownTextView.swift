@@ -40,6 +40,7 @@ final class NativeMarkdownTextView: NSTextView {
     override func draw(_ dirtyRect: NSRect) {
         drawBlockquoteDecorations(in: dirtyRect)
         drawCodeBlockBackgrounds(in: dirtyRect)
+        drawInlineCodeBackgrounds(in: dirtyRect)
         super.draw(dirtyRect)
         drawCheckboxDecorations(in: dirtyRect)
     }
@@ -633,6 +634,55 @@ final class NativeMarkdownTextView: NSTextView {
         }
 
         return nil
+    }
+
+    private func drawInlineCodeBackgrounds(in dirtyRect: NSRect) {
+        guard let storage = textStorage, let lm = layoutManager, let tc = textContainer else { return }
+        let nsLength = storage.length
+        guard nsLength > 0 else { return }
+
+        let containerRect = dirtyRect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y)
+        let dirtyGlyphs = lm.glyphRange(forBoundingRect: containerRect, in: tc)
+        let dirtyChars = lm.characterRange(forGlyphRange: dirtyGlyphs, actualGlyphRange: nil)
+        let start = max(0, dirtyChars.location)
+        let end = min(nsLength, dirtyChars.location + dirtyChars.length)
+        guard start < end else { return }
+
+        let background = NativeEditorAppearance.inlineCodeBackgroundColor(appearance: effectiveAppearance)
+        background.setFill()
+
+        storage.enumerateAttribute(.kernInlineCode, in: NSRange(location: start, length: end - start), options: []) { value, range, _ in
+            guard (value as? Bool) == true else { return }
+            let glyphRange = lm.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.length > 0 else { return }
+
+            lm.enumerateLineFragments(forGlyphRange: glyphRange) { lineRect, _, textContainer, lineGlyphRange, _ in
+                let segment = NSIntersectionRange(glyphRange, lineGlyphRange)
+                guard segment.length > 0 else { return }
+
+                var rect = lm.boundingRect(forGlyphRange: segment, in: textContainer)
+                rect.origin.x += self.textContainerOrigin.x
+                rect.origin.y += self.textContainerOrigin.y
+
+                var line = lineRect
+                line.origin.x += self.textContainerOrigin.x
+                line.origin.y += self.textContainerOrigin.y
+
+                let font = storage.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+                let fontHeight = font.map { ceil($0.ascender - $0.descender) } ?? ceil(rect.height)
+                let height = min(line.height - 2, max(fontHeight + 4, rect.height + 4))
+                let y = line.minY + ((line.height - height) / 2).rounded(.down)
+                let pill = NSRect(
+                    x: floor(rect.minX - 3),
+                    y: y,
+                    width: ceil(rect.width + 6),
+                    height: ceil(height)
+                )
+
+                guard pill.intersects(dirtyRect) else { return }
+                NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
+            }
+        }
     }
 
     private func drawCodeBlockBackgrounds(in dirtyRect: NSRect) {

@@ -652,7 +652,7 @@ final class MarkdownMathBlockAttachment: NSTextAttachment {
     let sourceMarkdown: String
     let displayText: String
 
-    private let lineHeight: CGFloat = 26
+    private let lineHeight: CGFloat = 30
     private var displayWidth: CGFloat = 420
 
     init(sourceMarkdown: String) {
@@ -676,11 +676,28 @@ final class MarkdownMathBlockAttachment: NSTextAttachment {
         characterIndex charIndex: Int
     ) -> NSRect {
         let widthSource = textContainer?.containerSize.width ?? lineFrag.width
-        let maxWidth = max(220, min(880, widthSource - 8))
+        let finiteWidth = widthSource.isFinite && widthSource > 1 ? widthSource : lineFrag.width
+        let maxWidth = max(220, min(880, finiteWidth - 8))
         displayWidth = maxWidth
         let lineCount = max(1, displayText.split(separator: "\n", omittingEmptySubsequences: false).count)
-        let h = CGFloat(lineCount) * lineHeight + 18
-        return NSRect(x: 0, y: -4, width: maxWidth, height: h)
+        let h = CGFloat(lineCount) * lineHeight + 34
+        return NSRect(x: 0, y: -2, width: maxWidth, height: h)
+    }
+}
+
+private enum MarkdownAttachmentChrome {
+    static func topY(in frame: NSRect, inset: CGFloat, height: CGFloat, flipped: Bool) -> CGFloat {
+        if flipped {
+            return frame.minY + inset
+        }
+        return frame.maxY - inset - height
+    }
+
+    static func contentMinY(in frame: NSRect, topInset: CGFloat, bottomInset: CGFloat, flipped: Bool) -> CGFloat {
+        if flipped {
+            return frame.minY + topInset
+        }
+        return frame.minY + bottomInset
     }
 }
 
@@ -715,36 +732,73 @@ private final class MarkdownMathBlockAttachmentCell: NSTextAttachmentCell {
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
         guard let owner = attachment as? MarkdownMathBlockAttachment else { return }
         let frame = cellFrame.integral
+        let isFlipped = controlView?.isFlipped ?? true
 
-        let bg = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
-        NSColor.controlBackgroundColor.withAlphaComponent(0.92).setFill()
+        let bg = NSBezierPath(roundedRect: frame, xRadius: 10, yRadius: 10)
+        NSColor.textBackgroundColor.withAlphaComponent(0.78).setFill()
         bg.fill()
-        NSColor.separatorColor.withAlphaComponent(0.8).setStroke()
+        NSColor.separatorColor.withAlphaComponent(0.70).setStroke()
         bg.lineWidth = 1
         bg.stroke()
+
+        let accentRect = NSRect(
+            x: frame.minX + 1,
+            y: frame.minY + 10,
+            width: 3,
+            height: max(1, frame.height - 20)
+        )
+        let accent = NSBezierPath(roundedRect: accentRect, xRadius: 1.5, yRadius: 1.5)
+        NSColor.controlAccentColor.withAlphaComponent(0.55).setFill()
+        accent.fill()
 
         let badgeAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
+        let badgeSize = ("MATH" as NSString).size(withAttributes: badgeAttrs)
+        let badgeHeight: CGFloat = 14
+        let badgeRect = NSRect(
+            x: frame.maxX - badgeSize.width - 18,
+            y: MarkdownAttachmentChrome.topY(in: frame, inset: 7, height: badgeHeight, flipped: isFlipped),
+            width: badgeSize.width + 10,
+            height: badgeHeight
+        ).integral
+        let badge = NSBezierPath(roundedRect: badgeRect, xRadius: 6, yRadius: 6)
+        NSColor.controlBackgroundColor.withAlphaComponent(0.55).setFill()
+        badge.fill()
         ("MATH" as NSString).draw(
-            in: NSRect(x: frame.maxX - 56, y: frame.maxY - 18, width: 44, height: 12),
+            in: NSRect(
+                x: badgeRect.midX - badgeSize.width / 2,
+                y: badgeRect.midY - badgeSize.height / 2,
+                width: badgeSize.width,
+                height: badgeSize.height
+            ),
             withAttributes: badgeAttrs
         )
 
+        let textFont = MathTextRenderer.displayFont(size: 23)
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 20, weight: .medium),
+            .font: textFont,
             .foregroundColor: NSColor.labelColor,
+            .kern: 0.2,
         ]
         let para = NSMutableParagraphStyle()
         para.alignment = .center
+        para.lineSpacing = 2
 
         let textAttrs = attrs.merging([.paragraphStyle: para]) { _, rhs in rhs }
+        let maxTextWidth = max(1, frame.width - 52)
+        let measuredText = (owner.displayText as NSString).boundingRect(
+            with: CGSize(width: maxTextWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: textAttrs
+        )
+        let textHeight = min(max(1, ceil(measuredText.height)), max(1, frame.height - 26))
         let textRect = NSRect(
-            x: frame.minX + 10,
-            y: frame.minY + 8,
-            width: frame.width - 20,
-            height: frame.height - 24
+            x: frame.minX + 26,
+            y: frame.midY - textHeight / 2,
+            width: maxTextWidth,
+            height: textHeight
         )
         (owner.displayText as NSString).draw(in: textRect, withAttributes: textAttrs)
     }
@@ -824,20 +878,20 @@ final class MarkdownMermaidAttachment: NSTextAttachment {
         let height: CGFloat
         if effectiveRenderMode == .ascii {
             let layout = asciiLayout(maxContentWidth: contentWidth)
-            width = min(availableWidth, layout.size.width + MermaidChromeMetrics.horizontalPadding * 2)
+            width = availableWidth
             height = max(
                 MermaidChromeMetrics.minimumHeightASCII,
                 layout.size.height + MermaidChromeMetrics.topChromeHeight + MermaidChromeMetrics.bottomPadding
             )
         } else {
             let layout = layoutResult(maxContentWidth: contentWidth)
-            width = min(availableWidth, layout.size.width + MermaidChromeMetrics.horizontalPadding * 2)
+            width = availableWidth
             height = max(
                 MermaidChromeMetrics.minimumHeight,
                 layout.size.height + MermaidChromeMetrics.topChromeHeight + MermaidChromeMetrics.bottomPadding
             )
         }
-        return NSRect(x: 0, y: -4, width: width, height: height)
+        return NSRect(x: 0, y: -2, width: width, height: height)
     }
 
     nonisolated fileprivate func layoutResult(maxContentWidth: CGFloat) -> MermaidMiniLayout.Result {
@@ -938,7 +992,7 @@ final class MarkdownMermaidAttachment: NSTextAttachment {
     var debugNodeHeightsForTesting: [CGFloat] {
         Array(layoutResult(maxContentWidth: 560).nodeFrames.values.map(\.height))
     }
-    var debugShowsEdgeLabelsForTesting: Bool { kind != .sequence }
+    var debugShowsEdgeLabelsForTesting: Bool { true }
     var debugEffectiveRenderModeForTesting: NativeMarkdownCodec.Options.MermaidRenderMode { effectiveRenderMode }
 }
 
@@ -981,20 +1035,26 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
     override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
         guard let owner = attachment as? MarkdownMermaidAttachment else { return }
         let frame = cellFrame.integral
+        let isFlipped = controlView?.isFlipped ?? true
 
         let bg = NSBezierPath(roundedRect: frame, xRadius: 10, yRadius: 10)
-        NSColor.controlBackgroundColor.withAlphaComponent(0.92).setFill()
+        NSColor.textBackgroundColor.withAlphaComponent(0.78).setFill()
         bg.fill()
-        NSColor.separatorColor.withAlphaComponent(0.8).setStroke()
+        NSColor.separatorColor.withAlphaComponent(0.70).setStroke()
         bg.lineWidth = 1
         bg.stroke()
 
         let badgeText = owner.effectiveRenderMode == .ascii ? "MERMAID ASCII" : "MERMAID"
-        drawBadge(text: badgeText, in: frame)
+        drawBadge(text: badgeText, in: frame, flipped: isFlipped)
 
         let contentRect = NSRect(
             x: frame.minX + MermaidChromeMetrics.horizontalPadding,
-            y: frame.minY + MermaidChromeMetrics.bottomPadding,
+            y: MarkdownAttachmentChrome.contentMinY(
+                in: frame,
+                topInset: MermaidChromeMetrics.topChromeHeight,
+                bottomInset: MermaidChromeMetrics.bottomPadding,
+                flipped: isFlipped
+            ),
             width: frame.width - MermaidChromeMetrics.horizontalPadding * 2,
             height: frame.height - MermaidChromeMetrics.topChromeHeight - MermaidChromeMetrics.bottomPadding
         ).integral
@@ -1015,7 +1075,7 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
         let drawHeight = layout.size.height * scale
         let origin = CGPoint(
             x: contentRect.minX + (contentRect.width - drawWidth) / 2,
-            y: contentRect.maxY - drawHeight
+            y: contentRect.midY - drawHeight / 2
         )
 
         let canvasRect = NSRect(
@@ -1025,28 +1085,34 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             height: drawHeight
         )
         let canvas = NSBezierPath(roundedRect: canvasRect, xRadius: 8, yRadius: 8)
-        NSColor.textBackgroundColor.withAlphaComponent(0.72).setFill()
+        NSColor.controlBackgroundColor.withAlphaComponent(0.55).setFill()
         canvas.fill()
         NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
         canvas.lineWidth = 1
         canvas.stroke()
 
-        drawEdges(layout: layout, origin: origin, scale: scale, showLabels: owner.kind != .sequence)
-        drawNodes(layout: layout, origin: origin, scale: scale)
+        if owner.kind == .sequence {
+            drawSequenceDiagram(layout: layout, origin: origin, scale: scale)
+        } else {
+            drawEdges(layout: layout, origin: origin, scale: scale, showLabels: true)
+            drawNodes(layout: layout, origin: origin, scale: scale)
+        }
     }
 
     private func drawASCII(owner: MarkdownMermaidAttachment, contentRect: NSRect) {
         let layout = owner.asciiLayout(maxContentWidth: contentRect.width)
+        let canvasWidth = min(contentRect.width, layout.size.width)
+        let canvasHeight = min(contentRect.height, layout.size.height)
 
         let canvasRect = NSRect(
-            x: contentRect.minX,
-            y: contentRect.maxY - layout.size.height,
-            width: min(contentRect.width, layout.size.width),
-            height: min(contentRect.height, layout.size.height)
+            x: contentRect.minX + (contentRect.width - canvasWidth) / 2,
+            y: contentRect.midY - canvasHeight / 2,
+            width: canvasWidth,
+            height: canvasHeight
         ).integral
 
         let canvas = NSBezierPath(roundedRect: canvasRect, xRadius: 8, yRadius: 8)
-        NSColor.textBackgroundColor.withAlphaComponent(0.72).setFill()
+        NSColor.controlBackgroundColor.withAlphaComponent(0.55).setFill()
         canvas.fill()
         NSColor.separatorColor.withAlphaComponent(0.6).setStroke()
         canvas.lineWidth = 1
@@ -1077,17 +1143,18 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
         }
     }
 
-    private func drawBadge(text: String, in frame: NSRect) {
+    private func drawBadge(text: String, in frame: NSRect, flipped: Bool) {
         let textAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
         let textSize = (text as NSString).size(withAttributes: textAttrs)
+        let pillHeight: CGFloat = 14
         let pillRect = NSRect(
             x: frame.maxX - textSize.width - 18,
-            y: frame.maxY - 20,
+            y: MarkdownAttachmentChrome.topY(in: frame, inset: 6, height: pillHeight, flipped: flipped),
             width: textSize.width + 10,
-            height: 14
+            height: pillHeight
         ).integral
         let pill = NSBezierPath(roundedRect: pillRect, xRadius: 6, yRadius: 6)
         NSColor.textBackgroundColor.withAlphaComponent(0.55).setFill()
@@ -1101,6 +1168,108 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             ).integral,
             withAttributes: textAttrs
         )
+    }
+
+    private func drawSequenceDiagram(layout: MermaidMiniLayout.Result, origin: CGPoint, scale: CGFloat) {
+        guard !layout.nodes.isEmpty else { return }
+
+        func point(_ local: CGPoint) -> CGPoint {
+            CGPoint(x: origin.x + local.x * scale, y: origin.y + local.y * scale)
+        }
+
+        let nodeBottom = layout.nodeFrames.values.map(\.maxY).max() ?? 0
+        let messageTop = nodeBottom + 24
+        let messageStep: CGFloat = 26
+        let bottomY = max(messageTop + messageStep, layout.size.height - 18)
+
+        NSColor.labelColor.withAlphaComponent(0.18).setStroke()
+        for node in layout.nodes {
+            guard let frame = layout.nodeFrames[node.id] else { continue }
+            let path = NSBezierPath()
+            path.move(to: point(CGPoint(x: frame.midX, y: frame.maxY + 7)))
+            path.line(to: point(CGPoint(x: frame.midX, y: bottomY)))
+            path.lineWidth = max(1, 1 * scale)
+            let dash: [CGFloat] = [4 * scale, 4 * scale]
+            path.setLineDash(dash, count: dash.count, phase: 0)
+            path.stroke()
+        }
+
+        NSColor.labelColor.withAlphaComponent(0.52).setStroke()
+        for (index, edge) in layout.edges.enumerated() {
+            guard let from = layout.nodeFrames[edge.from], let to = layout.nodeFrames[edge.to] else { continue }
+            let y = messageTop + CGFloat(index) * messageStep
+            guard y < bottomY + 1 else { break }
+
+            let startX = from.midX
+            let endX = to.midX
+            if abs(startX - endX) < 4 {
+                drawSequenceSelfMessage(x: startX, y: y, edge: edge, origin: origin, scale: scale)
+                continue
+            }
+
+            let start = point(CGPoint(x: startX, y: y))
+            let end = point(CGPoint(x: endX, y: y))
+            let path = NSBezierPath()
+            path.move(to: start)
+            path.line(to: end)
+            path.lineWidth = max(1, 1.35 * scale)
+            path.stroke()
+
+            let direction: CGFloat = endX >= startX ? 1 : -1
+            drawArrowHead(at: end, angle: direction >= 0 ? 0 : .pi, scale: scale)
+
+            if let label = edge.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+                drawEdgeLabel(label, at: CGPoint(x: (start.x + end.x) / 2, y: start.y - 10 * scale))
+            }
+        }
+
+        drawNodes(layout: layout, origin: origin, scale: scale)
+    }
+
+    private func drawSequenceSelfMessage(
+        x: CGFloat,
+        y: CGFloat,
+        edge: MarkdownMermaidAttachment.Edge,
+        origin: CGPoint,
+        scale: CGFloat
+    ) {
+        let loopWidth: CGFloat = 42
+        let loopHeight: CGFloat = 18
+        let rect = NSRect(
+            x: origin.x + x * scale,
+            y: origin.y + (y - loopHeight / 2) * scale,
+            width: loopWidth * scale,
+            height: loopHeight * scale
+        )
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX, y: rect.midY))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+        path.lineWidth = max(1, 1.35 * scale)
+        path.stroke()
+        drawArrowHead(at: NSPoint(x: rect.minX, y: rect.maxY), angle: .pi, scale: scale)
+
+        if let label = edge.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
+            drawEdgeLabel(label, at: CGPoint(x: rect.midX, y: rect.minY - 8 * scale))
+        }
+    }
+
+    private func drawArrowHead(at end: CGPoint, angle: CGFloat, scale: CGFloat) {
+        let arrowSize = max(4.5, 5.5 * scale)
+        let arrow = NSBezierPath()
+        arrow.move(to: end)
+        arrow.line(to: CGPoint(
+            x: end.x - arrowSize * cos(angle - .pi / 7),
+            y: end.y - arrowSize * sin(angle - .pi / 7)
+        ))
+        arrow.move(to: end)
+        arrow.line(to: CGPoint(
+            x: end.x - arrowSize * cos(angle + .pi / 7),
+            y: end.y - arrowSize * sin(angle + .pi / 7)
+        ))
+        arrow.lineWidth = max(1, 1.2 * scale)
+        arrow.stroke()
     }
 
     private func drawEdges(layout: MermaidMiniLayout.Result, origin: CGPoint, scale: CGFloat, showLabels: Bool) {
@@ -1133,21 +1302,8 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             path.stroke()
 
             // Arrow head.
-            let arrowSize = max(4.5, 5.5 * scale)
             let angle = atan2(end.y - start.y, end.x - start.x)
-            let arrow = NSBezierPath()
-            arrow.move(to: end)
-            arrow.line(to: CGPoint(
-                x: end.x - arrowSize * cos(angle - .pi / 7),
-                y: end.y - arrowSize * sin(angle - .pi / 7)
-            ))
-            arrow.move(to: end)
-            arrow.line(to: CGPoint(
-                x: end.x - arrowSize * cos(angle + .pi / 7),
-                y: end.y - arrowSize * sin(angle + .pi / 7)
-            ))
-            arrow.lineWidth = max(1, 1.2 * scale)
-            arrow.stroke()
+            drawArrowHead(at: end, angle: angle, scale: scale)
 
             if showLabels, let label = edge.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty {
                 drawEdgeLabel(label, at: CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2))
@@ -1166,9 +1322,9 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             )
 
             let nodePath = NSBezierPath(roundedRect: drawRect, xRadius: max(5, 7 * scale), yRadius: max(5, 7 * scale))
-            NSColor(white: 1, alpha: 0.95).setFill()
+            NSColor.textBackgroundColor.withAlphaComponent(0.96).setFill()
             nodePath.fill()
-            NSColor(white: 0, alpha: 0.22).setStroke()
+            NSColor.separatorColor.withAlphaComponent(0.75).setStroke()
             nodePath.lineWidth = max(1, 1 * scale)
             nodePath.stroke()
 
@@ -1178,7 +1334,7 @@ private final class MarkdownMermaidAttachmentCell: NSTextAttachmentCell {
             let textFont = NSFont.systemFont(ofSize: max(10, 12 * scale), weight: .semibold)
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: textFont,
-                .foregroundColor: NSColor(calibratedWhite: 0.14, alpha: 1.0),
+                .foregroundColor: NSColor.labelColor,
                 .paragraphStyle: paragraph,
             ]
             let insetRect = drawRect.insetBy(dx: max(6, 8 * scale), dy: max(4, 6 * scale))
@@ -1243,84 +1399,197 @@ enum MathTextRenderer {
         return normalize(body.joined(separator: "\n"))
     }
 
-    private static func normalize(_ raw: String) -> String {
-        var s = raw
-        let replacements: [(String, String)] = [
-            (#"\\alpha"#, "alpha"),
-            (#"\\beta"#, "beta"),
-            (#"\\gamma"#, "gamma"),
-            (#"\\delta"#, "delta"),
-            (#"\\theta"#, "theta"),
-            (#"\\lambda"#, "lambda"),
-            (#"\\mu"#, "mu"),
-            (#"\\pi"#, "pi"),
-            (#"\\sigma"#, "sigma"),
-            (#"\\phi"#, "phi"),
-            (#"\\omega"#, "omega"),
-            (#"\\int"#, "integral"),
-            (#"\\sum"#, "sum"),
-            (#"\\prod"#, "prod"),
-            (#"\\cdot"#, "·"),
-            (#"\\times"#, "x"),
-            (#"\\leq"#, "<="),
-            (#"\\geq"#, ">="),
-            (#"\\neq"#, "!="),
-            (#"\\to"#, "->"),
-            (#"\\rightarrow"#, "->"),
-            (#"\\left"#, ""),
-            (#"\\right"#, ""),
-            (#"\\,"#, " "),
-        ]
-        for (pattern, replacement) in replacements {
-            s = s.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+    static func displayFont(size: CGFloat) -> NSFont {
+        if let math = NSFont(name: "STIX Two Math", size: size) ?? NSFont(name: "STIXTwoMath-Regular", size: size) {
+            return math
         }
+        if let serif = NSFont(name: "Times New Roman", size: size) {
+            return NSFontManager.shared.convert(serif, toHaveTrait: .italicFontMask)
+        }
+        return NSFont.systemFont(ofSize: size, weight: .regular)
+    }
+
+    private static func normalize(_ raw: String) -> String {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "\r\n", with: "\n")
+        s = s.replacingOccurrences(of: "\\\\", with: "\n")
+        s = s.replacingOccurrences(of: "&", with: "")
+
+        s = unwrapLatexCommands(in: s)
+        s = replaceFractions(in: s)
+        s = replaceSquareRoots(in: s)
+        s = replaceKnownSymbols(in: s)
         s = collapseSuperscriptsAndSubscripts(in: s)
-        s = s.replacingOccurrences(of: "{", with: "")
-        s = s.replacingOccurrences(of: "}", with: "")
-        s = s.replacingOccurrences(of: "\\", with: "")
+
+        let cleanupReplacements: [(String, String)] = [
+            ("\\left", ""),
+            ("\\right", ""),
+            ("\\,", " "),
+            ("\\;", " "),
+            ("\\:", " "),
+            ("\\!", ""),
+            ("{", ""),
+            ("}", ""),
+            ("\\", ""),
+        ]
+        for (target, replacement) in cleanupReplacements {
+            s = s.replacingOccurrences(of: target, with: replacement)
+        }
+        s = s.replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func collapseSuperscriptsAndSubscripts(in text: String) -> String {
+    private static func unwrapLatexCommands(in text: String) -> String {
         var s = text
-
-        let superscriptMap: [Character: Character] = [
-            "0": "0", "1": "1", "2": "2", "3": "3", "4": "4",
-            "5": "5", "6": "6", "7": "7", "8": "8", "9": "9",
-            "+": "+", "-": "-", "=": "=",
-        ]
-        let subscriptMap: [Character: Character] = [
-            "0": "0", "1": "1", "2": "2", "3": "3", "4": "4",
-            "5": "5", "6": "6", "7": "7", "8": "8", "9": "9",
-            "+": "+", "-": "-", "=": "=",
-        ]
-
-        // Keep rendering deterministic without introducing non-ASCII glyph surprises in tests.
-        func convertGroup(_ group: String, with map: [Character: Character]) -> String {
-            String(group.map { map[$0] ?? $0 })
+        let removableEnvironments = ["aligned", "align", "gathered", "matrix", "pmatrix", "bmatrix"]
+        for environment in removableEnvironments {
+            s = s.replacingOccurrences(of: "\\begin{\(environment)}", with: "")
+            s = s.replacingOccurrences(of: "\\end{\(environment)}", with: "")
         }
 
-        if let regex = try? NSRegularExpression(pattern: #"\^\{([^}]+)\}"#) {
-            let ns = s as NSString
-            let matches = regex.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed()
-            for m in matches where m.numberOfRanges > 1 {
-                let whole = m.range(at: 0)
-                let inner = ns.substring(with: m.range(at: 1))
-                let converted = convertGroup(inner, with: superscriptMap)
-                s = (s as NSString).replacingCharacters(in: whole, with: "^\(converted)")
-            }
-        }
-        if let regex = try? NSRegularExpression(pattern: #"_\{([^}]+)\}"#) {
-            let ns = s as NSString
-            let matches = regex.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed()
-            for m in matches where m.numberOfRanges > 1 {
-                let whole = m.range(at: 0)
-                let inner = ns.substring(with: m.range(at: 1))
-                let converted = convertGroup(inner, with: subscriptMap)
-                s = (s as NSString).replacingCharacters(in: whole, with: "_\(converted)")
+        let wrappers = ["mathbf", "mathbb", "mathcal", "mathrm", "mathit", "text", "operatorname"]
+        for wrapper in wrappers {
+            s = replaceRegex(pattern: "\\\\\(wrapper)\\{([^{}]+)\\}", in: s) { match, ns in
+                guard match.numberOfRanges > 1 else { return "" }
+                return ns.substring(with: match.range(at: 1))
             }
         }
         return s
+    }
+
+    private static func replaceFractions(in text: String) -> String {
+        var s = text
+        for _ in 0..<6 {
+            let next = replaceRegex(pattern: #"\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}"#, in: s) { match, ns in
+                guard match.numberOfRanges > 2 else { return "" }
+                let numerator = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+                let denominator = ns.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+                return "(\(numerator))⁄(\(denominator))"
+            }
+            if next == s { break }
+            s = next
+        }
+        return s
+    }
+
+    private static func replaceSquareRoots(in text: String) -> String {
+        replaceRegex(pattern: #"\\sqrt\s*\{([^{}]+)\}"#, in: text) { match, ns in
+            guard match.numberOfRanges > 1 else { return "√()" }
+            let inner = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return "√(\(inner))"
+        }
+    }
+
+    private static func replaceKnownSymbols(in text: String) -> String {
+        var s = text
+        let replacements: [(String, String)] = [
+            ("\\rightarrow", "→"),
+            ("\\leftarrow", "←"),
+            ("\\Rightarrow", "⇒"),
+            ("\\Leftarrow", "⇐"),
+            ("\\leftrightarrow", "↔"),
+            ("\\alpha", "α"),
+            ("\\beta", "β"),
+            ("\\gamma", "γ"),
+            ("\\Gamma", "Γ"),
+            ("\\delta", "δ"),
+            ("\\Delta", "Δ"),
+            ("\\epsilon", "ε"),
+            ("\\varepsilon", "ε"),
+            ("\\theta", "θ"),
+            ("\\lambda", "λ"),
+            ("\\mu", "μ"),
+            ("\\pi", "π"),
+            ("\\rho", "ρ"),
+            ("\\sigma", "σ"),
+            ("\\Sigma", "Σ"),
+            ("\\phi", "φ"),
+            ("\\omega", "ω"),
+            ("\\Omega", "Ω"),
+            ("\\nabla", "∇"),
+            ("\\partial", "∂"),
+            ("\\infty", "∞"),
+            ("\\int", "∫"),
+            ("\\sum", "∑"),
+            ("\\prod", "∏"),
+            ("\\cdot", "·"),
+            ("\\times", "×"),
+            ("\\div", "÷"),
+            ("\\pm", "±"),
+            ("\\leq", "≤"),
+            ("\\le", "≤"),
+            ("\\geq", "≥"),
+            ("\\ge", "≥"),
+            ("\\neq", "≠"),
+            ("\\approx", "≈"),
+            ("\\equiv", "≡"),
+            ("\\to", "→"),
+        ]
+        for (target, replacement) in replacements {
+            s = s.replacingOccurrences(of: target, with: replacement)
+        }
+        return s
+    }
+
+    private static func collapseSuperscriptsAndSubscripts(in text: String) -> String {
+        let superscriptMap: [Character: String] = [
+            "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+            "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+            "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+            "n": "ⁿ", "i": "ⁱ",
+        ]
+        let subscriptMap: [Character: String] = [
+            "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+            "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+            "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+            "a": "ₐ", "e": "ₑ", "h": "ₕ", "i": "ᵢ", "j": "ⱼ",
+            "k": "ₖ", "l": "ₗ", "m": "ₘ", "n": "ₙ", "o": "ₒ",
+            "p": "ₚ", "r": "ᵣ", "s": "ₛ", "t": "ₜ", "u": "ᵤ",
+            "v": "ᵥ", "x": "ₓ",
+        ]
+
+        var s = convertScripts(marker: "^", in: text, map: superscriptMap)
+        s = convertScripts(marker: "_", in: s, map: subscriptMap)
+        return s
+    }
+
+    private static func convertScripts(marker: Character, in text: String, map: [Character: String]) -> String {
+        let escaped = marker == "^" ? #"\^"# : "_"
+        var s = replaceRegex(pattern: "\(escaped)\\{([^{}]+)\\}", in: text) { match, ns in
+            guard match.numberOfRanges > 1 else { return String(marker) }
+            let inner = ns.substring(with: match.range(at: 1))
+            return convertScriptGroup(inner, marker: marker, map: map)
+        }
+        s = replaceRegex(pattern: "\(escaped)([A-Za-z0-9+\\-=()])", in: s) { match, ns in
+            guard match.numberOfRanges > 1 else { return String(marker) }
+            let inner = ns.substring(with: match.range(at: 1))
+            return convertScriptGroup(inner, marker: marker, map: map)
+        }
+        return s
+    }
+
+    private static func convertScriptGroup(_ group: String, marker: Character, map: [Character: String]) -> String {
+        let converted = group.map { map[$0] ?? String($0) }.joined()
+        if converted == group {
+            return "\(marker)(\(group))"
+        }
+        return converted
+    }
+
+    private static func replaceRegex(
+        pattern: String,
+        in source: String,
+        replacement: (_ match: NSTextCheckingResult, _ ns: NSString) -> String
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return source }
+        let ns = source as NSString
+        let matches = regex.matches(in: source, range: NSRange(location: 0, length: ns.length)).reversed()
+        var output = source
+        for match in matches {
+            output = (output as NSString).replacingCharacters(in: match.range, with: replacement(match, ns))
+        }
+        return output
     }
 }
 
@@ -1592,6 +1861,35 @@ private enum MermaidMiniLayout {
         let nodeHeights: [String: CGFloat] = Dictionary(uniqueKeysWithValues: nodes.map { node in
             (node.id, measuredNodeHeight(for: node.label))
         })
+
+        if kind == .sequence {
+            let sequenceColumns = max(1, min(columnCount, nodes.count))
+            let rowGap: CGFloat = 12
+            let topRowHeight = max(minimumNodeHeight, nodes.map { nodeHeights[$0.id] ?? minimumNodeHeight }.max() ?? minimumNodeHeight)
+            var frames: [String: CGRect] = [:]
+            var maxX: CGFloat = margin
+            var maxY: CGFloat = margin
+
+            for (index, node) in nodes.enumerated() {
+                let column = index % sequenceColumns
+                let row = index / sequenceColumns
+                let nodeHeight = nodeHeights[node.id] ?? minimumNodeHeight
+                let x = margin + CGFloat(column) * (fittedNodeWidth + gapX)
+                let y = margin + CGFloat(row) * (topRowHeight + rowGap)
+                let rect = CGRect(x: x, y: y, width: fittedNodeWidth, height: nodeHeight)
+                frames[node.id] = rect
+                maxX = max(maxX, rect.maxX)
+                maxY = max(maxY, rect.maxY)
+            }
+
+            let messageRows = max(1, min(edges.count, 20))
+            let sequenceHeight = maxY + 24 + CGFloat(messageRows) * 26 + margin
+            let size = CGSize(
+                width: min(maxContentWidth, maxX + margin),
+                height: sequenceHeight
+            )
+            return Result(size: size, nodes: nodes, edges: edges, nodeFrames: frames)
+        }
 
         func compressedColumn(for depthValue: Int) -> Int {
             let rank = depthRank[depthValue] ?? 0

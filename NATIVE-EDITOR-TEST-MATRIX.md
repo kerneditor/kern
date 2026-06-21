@@ -16,6 +16,7 @@ Defaults (per your prefs):
 - Full-spec case matrix (250+ generator-backed cases, expected-to-fail until implemented): `KernTests/NativeMarkdownCodecFullSpecCaseMatrixTests.swift`
 - Strict Markdown spec conformance (official corpora; Kern extensions explicitly separated): `KernTests/NativeMarkdownSpecConformanceTests.swift`
 - Visual regression (optional): `KernTests/NativeEditorSnapshotTests.swift`
+- Design-preview captures (manual-review artifact generation): `KernTests/NativeEditorDesignPreviewTests.swift`
 
 ## Test Inventory (What Exists Today)
 
@@ -42,20 +43,25 @@ Exhaustive / expected-to-fail until full spec is implemented:
 - `KernTests/NativeEditorCheckboxLayoutMetricSpecTests.swift` (pixel-level checkbox alignment + sizing)
 - `KernTests/NativeEditorMarkerAlignmentMetricSpecTests.swift` (pixel-level marker alignment: bullets + ordered + bulleted-tasks)
 - `KernTests/NativeEditorCodeBlockChromeSpecTests.swift` (code block chrome: language label, syntax highlight, copied feedback, placement)
+- `KernTests/NativeEditorDesignPreviewTests.swift` (gated screenshot captures across theme + width scenarios for design review)
 - `KernTests/NativeMarkdownSpecConformanceTests.swift` (official CommonMark + cmark-gfm fixtures, semantic HTML oracle via `cmarkgfm`; strict profile disables Kern extensions)
 
 Snapshots (visual regression; gated):
 - `KernTests/NativeEditorSnapshotTests.swift` (AppKit view snapshots; record + verify modes)
 
 Perf / benchmarks (gated behind `KERN_ENABLE_PERF_TESTS=1`):
-- `KernTests/NativeMarkdownCodecPerformanceTests.swift` (import/export perf on benchmark fixture)
+- `KernTests/NativeMarkdownCodecPerformanceTests.swift` (import/export perf on benchmark fixture; inline parsing; measured image/math/Mermaid import + attachment-bounds benchmarks)
 - `KernTests/NativeEditorRenderPerformanceTests.swift` (render/layout perf on benchmark fixture)
 - `KernTests/NativeEditorMegaStressPerformanceTests.swift` (stress/ultimate/mega render + mega scroll + incremental typing + ultimate/mega char-by-char + ultimate/mega interleaved action bursts)
+- `scripts/bench-native-editor.sh` now emits a run manifest, selected-test roster, baseline-selection log, process snapshots, and parsed `metrics-summary.json` / `summary.md` artifacts through `scripts/xctest-perf-report.py`; it archives pass/fail artifacts under the ignored local benchmark archive, validates compatible baselines, fails strict A/B mode when baseline metrics disappear, and enforces owned-process cleanup on timeout/failure.
 
 ## Preferences Under Test
 
 Preferences are controlled via:
 - Unit tests: `NativeMarkdownCodec.Options(...)`
+- Appearance tests: `NativeEditorAppearanceTests` for theme/font/layout preference parsing
+- Hosted editor layout tests: `NativeEditorInitialViewportTests` for full-width vs centered readable columns
+- Snapshot/design preview tests: fixed profiles for rendering-affecting preferences
 
 ## Coverage Matrix
 
@@ -77,7 +83,10 @@ Preferences are controlled via:
 | In-document anchors | Clicking `[Text](#anchor)` jumps within the document (no OSStatus errors) | `AnchorNavigationTests` | Jump toast uses `NativeEditor.JumpToast` |
 | Find / Replace | Find bar is native + testable; replace mutates document deterministically | `NativeFindEngineTests`, `NativeFindReplaceIntegrationTests` | Find UI is `NativeEditor.FindBar` (no system Find panel dependency) |
 | Checkbox click hit-target | Clicking checkbox glyph toggles; optional marker-region toggles | options tests | Coordinate-based clicks can be flaky; gated behind exhaustive |
+| Theme catalog | Built-in themes expose Kern, TurboDraft, Axis, and imported-code-editor choices | `NativeEditorAppearanceTests` | Custom JSON theme import remains covered separately |
+| Readable editor width | Full-width mode fills the viewport; centered-readable mode caps and centers the TextKit container | `NativeEditorInitialViewportTests` | Max width is user-configurable and clamped |
 | Visual regression | Stable rendering across changes | Snapshot tests (gated) | Enable with `./scripts/test-native-editor.sh --snapshots` |
+| Design previews | Reviewable PNGs for theme and layout A/B comparison | `NativeEditorDesignPreviewTests` (gated) | Enable with `KernTextKitDesignPreviews` scheme |
 | Full Markdown features (full spec) | Blockquotes, HR, images, strikethrough, autolinks, nested lists, math, mermaid, etc. | `NativeMarkdownCodecFullSpecCaseMatrixTests` + `NativeMarkdownCodecFutureSpecTests` (gated + expected-failure) | Enable with `./scripts/test-native-editor.sh --exhaustive` |
 | Stress fixture (full spec) | `stress-test.md` must import as true WYSIWYG + export stable | `NativeEditorStressFixtureFullSpecTests` (gated + expected-failure) | Ensures "ultimate" fixture actually drives development |
 | Live typing permutation matrix | Character-by-character typing + action permutations across preference combinations | `NativeEditorMegaStressTypingMatrixTests` (gated) | Primary exhaustive engine loop |

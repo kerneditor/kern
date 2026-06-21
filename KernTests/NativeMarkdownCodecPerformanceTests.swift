@@ -184,6 +184,101 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
     }
 
     @MainActor
+    func testImageAttachmentImportAndBoundsPerformance() throws {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
+            throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
+        }
+
+        let markdown = buildImageAttachmentBenchmarkMarkdown()
+        let baseURL = perfFixtureRootURL()
+        let lineFragment = NSRect(x: 0, y: 0, width: 760, height: 28)
+
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
+            MarkdownImageAttachment.resetImageCacheForTesting()
+            let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: .fromUserDefaults(), baseURL: baseURL)
+            let images = collectImageAttachments(in: attributed)
+            XCTAssertGreaterThanOrEqual(images.count, 24, "Image benchmark should create local image attachments")
+
+            var areaAccumulator: CGFloat = 0
+            for attachment in images {
+                for _ in 0..<3 {
+                    let bounds = attachment.attachmentBounds(
+                        for: nil,
+                        proposedLineFragment: lineFragment,
+                        glyphPosition: .zero,
+                        characterIndex: 0
+                    )
+                    areaAccumulator += bounds.width * bounds.height
+                }
+            }
+            XCTAssertGreaterThan(areaAccumulator, 0)
+        }
+    }
+
+    @MainActor
+    func testMathBlockImportAndBoundsPerformance() throws {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
+            throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
+        }
+
+        let markdown = buildMathBlockBenchmarkMarkdown()
+        let lineFragment = NSRect(x: 0, y: 0, width: 760, height: 28)
+
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
+            let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: .fromUserDefaults(), baseURL: nil)
+            let mathBlocks = collectMathBlockAttachments(in: attributed)
+            XCTAssertGreaterThanOrEqual(mathBlocks.count, 24, "Math benchmark should create block math attachments")
+
+            var areaAccumulator: CGFloat = 0
+            for attachment in mathBlocks {
+                for _ in 0..<4 {
+                    let bounds = attachment.attachmentBounds(
+                        for: nil,
+                        proposedLineFragment: lineFragment,
+                        glyphPosition: .zero,
+                        characterIndex: 0
+                    )
+                    areaAccumulator += bounds.width * bounds.height
+                }
+            }
+            XCTAssertGreaterThan(areaAccumulator, 0)
+        }
+    }
+
+    @MainActor
+    func testMermaidImportAndBoundsPerformance() throws {
+        guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
+            throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
+        }
+
+        let sourceFixture = try loadPerfFixture(name: "native-editor-benchmark.md")
+        let markdown = benchmarkMarkdown(from: sourceFixture)
+        let lineFragment = NSRect(x: 0, y: 0, width: 760, height: 28)
+
+        measure(metrics: [XCTClockMetric(), XCTMemoryMetric()], options: defaultPerformanceOptions()) {
+            var options = NativeMarkdownCodec.Options.fromUserDefaults()
+            options.mermaidRenderMode = .auto
+            let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+            let mermaids = collectMermaidAttachments(in: attributed)
+            XCTAssertGreaterThanOrEqual(mermaids.count, 12, "Mermaid benchmark should create Mermaid attachments")
+
+            var areaAccumulator: CGFloat = 0
+            for attachment in mermaids {
+                for _ in 0..<3 {
+                    let bounds = attachment.attachmentBounds(
+                        for: nil,
+                        proposedLineFragment: lineFragment,
+                        glyphPosition: .zero,
+                        characterIndex: 0
+                    )
+                    areaAccumulator += bounds.width * bounds.height
+                }
+            }
+            XCTAssertGreaterThan(areaAccumulator, 0)
+        }
+    }
+
+    @MainActor
     func testImportPhaseProfileBenchmark() throws {
         guard TestRuntimeConfig.bool("KERN_ENABLE_PERF_TESTS") else {
             throw XCTSkip("Set KERN_ENABLE_PERF_TESTS=1 to run performance tests")
@@ -529,6 +624,59 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
         return fragments
     }
 
+    private func buildImageAttachmentBenchmarkMarkdown() -> String {
+        let localImages = [
+            "screenshots/01-default-sample.png",
+            "screenshots/02-checklist-strikethrough-test.png",
+            "screenshots/03-checklist-deep-nesting.png",
+            "screenshots/04-mermaid-flowchart.png",
+        ]
+        var lines: [String] = ["# Image Attachment Benchmark", ""]
+        for cycle in 1...8 {
+            lines.append("## Image cycle \(cycle)")
+            lines.append("")
+            for (index, image) in localImages.enumerated() {
+                lines.append("![Local image \(cycle)-\(index)](\(image))")
+                lines.append("")
+                lines.append("Paragraph after image \(cycle)-\(index) with **bold**, `inline code`, and a [link](https://example.com/\(cycle)/\(index)).")
+                lines.append("")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildMathBlockBenchmarkMarkdown() -> String {
+        let formulas = [
+            "\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\epsilon_0}",
+            "\\int_{0}^{1} x^2\\,dx = \\frac{1}{3}",
+            "\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}",
+            "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}\\begin{bmatrix} x \\\\ y \\end{bmatrix} = \\begin{bmatrix} ax + by \\\\ cx + dy \\end{bmatrix}",
+            "E = mc^2",
+            "\\frac{\\partial u}{\\partial t} = \\alpha \\nabla^2 u",
+        ]
+        var lines: [String] = ["# Math Block Benchmark", ""]
+        for cycle in 1...8 {
+            lines.append("## Math cycle \(cycle)")
+            lines.append("")
+            for (index, formula) in formulas.enumerated() {
+                lines.append("Paragraph with inline math $x_\(cycle)_\(index)^2$ before the block.")
+                lines.append("")
+                lines.append("$$")
+                lines.append(formula)
+                lines.append("$$")
+                lines.append("")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func perfFixtureRootURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KernTests/
+            .deletingLastPathComponent() // repo root
+            .appendingPathComponent("test-fixtures", isDirectory: true)
+    }
+
     private func extractSection(named heading: String, from markdown: String) throws -> String {
         let fullHeading = "## \(heading)"
         let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -629,6 +777,26 @@ final class NativeMarkdownCodecPerformanceTests: XCTestCase {
         var out: [MarkdownMermaidAttachment] = []
         attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length), options: []) { value, _, _ in
             if let attachment = value as? MarkdownMermaidAttachment {
+                out.append(attachment)
+            }
+        }
+        return out
+    }
+
+    private func collectImageAttachments(in attributed: NSAttributedString) -> [MarkdownImageAttachment] {
+        var out: [MarkdownImageAttachment] = []
+        attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length), options: []) { value, _, _ in
+            if let attachment = value as? MarkdownImageAttachment {
+                out.append(attachment)
+            }
+        }
+        return out
+    }
+
+    private func collectMathBlockAttachments(in attributed: NSAttributedString) -> [MarkdownMathBlockAttachment] {
+        var out: [MarkdownMathBlockAttachment] = []
+        attributed.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributed.length), options: []) { value, _, _ in
+            if let attachment = value as? MarkdownMathBlockAttachment {
                 out.append(attachment)
             }
         }

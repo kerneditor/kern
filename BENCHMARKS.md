@@ -162,6 +162,9 @@ Benchmark artifacts are written to:
 #### Phase 1: Stable wrapper entrypoint
 
 ```bash
+# Preflight only: validates build, suite policy, Kern/Zed resolution, and idle cleanup targets without launching editors
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --preflight-only --runs 10
+
 # All detected editors, 30 runs, warm
 ./scripts/cross-editor-benchmark.sh
 
@@ -343,6 +346,9 @@ Before any benchmark run:
 - [ ] Do Not Disturb enabled
 - [ ] Wait 10+ minutes after boot
 - [ ] Same test file for all editors (committed to repo)
+- [ ] Run `./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --preflight-only --runs 10`
+      and, for full-fidelity work, `./scripts/cross-editor-benchmark.sh --suite benchmark_full_fidelity --preflight-only --runs 10`
+      before launching a real claim run
 
 ## JSON Schema (v4)
 

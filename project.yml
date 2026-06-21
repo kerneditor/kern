@@ -163,6 +163,15 @@ schemes:
         KERN_PERF_ULTIMATE_INTERLEAVED_CHAR_LIMIT: "12000"
         KERN_PERF_MEGA_CHAR_LIMIT: "30000"
         KERN_PERF_MEGA_INTERLEAVED_CHAR_LIMIT: "20000"
+  KernTextKitDesignPreviews:
+    build:
+      targets:
+        KernTextKit: all
+    test:
+      targets:
+        - KernTextKitTests
+      environmentVariables:
+        KERN_CAPTURE_DESIGN_PREVIEWS: "1"
 targets:
   KernTextKit:
     type: application

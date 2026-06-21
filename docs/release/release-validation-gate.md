@@ -33,6 +33,20 @@ These checks answer the question:
 
 > Is the current tree healthy enough to merge as source code?
 
+Benchmark-harness changes also require:
+
+```bash
+python3 -m unittest discover scripts/tests
+./scripts/cross-editor-benchmark.sh --suite benchmark_open_ready --preflight-only --runs 10
+```
+
+Performance-sensitive app/rendering changes also require persisted A/B evidence:
+a named baseline, candidate run, matching fixture hashes, raw benchmark data,
+generated summary, and explicit regression decision. Native XCTest perf evidence
+should include `metrics-summary.json`, `summary.md`, raw `perf.log`,
+`baseline-selection.log`, and process snapshots. Diagnostic/high-load runs must
+not be promoted as release-quality baseline evidence.
+
 ## Release-only maintainer validation
 
 These checks are **not** part of the contributor PR baseline.
