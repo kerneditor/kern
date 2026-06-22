@@ -10,6 +10,10 @@ This repository is the Kern codebase. The editor is built with Swift, AppKit, an
 
 The product and app name are **Kern**.
 
+<p align="center">
+  <img src="docs/assets/readme/kern-hero.png" alt="Kern editing a Markdown document with native WYSIWYG text, callouts, tasks, tables, and code blocks">
+</p>
+
 ## Why Kern Exists
 
 Most local markdown workflows break down in one of these ways:
@@ -19,6 +23,14 @@ Most local markdown workflows break down in one of these ways:
 - You get a web stack wrapped in desktop chrome, with bridge and runtime edge cases.
 
 Kern is built for a simpler workflow: open any local markdown file, edit in true WYSIWYG, save back to deterministic markdown.
+
+## Screenshots
+
+The screenshots below are real captures from the native app using `test-fixtures/readme-showcase.md`. They are intentionally captured from Kern itself rather than mocked in a design tool.
+
+<p align="center">
+  <img src="docs/assets/readme/kern-renderers.png" alt="Kern showing native math rendering, Mermaid rendering, and large-file benchmark notes">
+</p>
 
 ## What Kern Does Today
 

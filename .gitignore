@@ -102,3 +102,6 @@ research-*.md
 scripts/kern-bench/HANDOFF.md
 # Marketing/demo video workspace is maintainer-local and not part of the public app source
 marketing/
+
+# README media: keep polished captures, ignore raw window captures
+docs/assets/readme/*-raw.png
