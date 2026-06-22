@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="KernApp/Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="112" height="112" alt="Kern app icon">
+</p>
+
 # Kern
 
 Kern is a fully native macOS WYSIWYG Markdown editor. You open a local `.md` file and edit rendered content directly, without living in raw markdown syntax.
