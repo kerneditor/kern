@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="KernApp/Resources/Assets.xcassets/AppIcon.appiconset/icon_256.png" width="112" height="112" alt="Kern app icon">
+  <img src="docs/assets/readme/kern-brand-hero.png" alt="Kern — Native Markdown, rendered directly">
 </p>
 
 # Kern
@@ -9,10 +9,6 @@ Kern is a fully native macOS WYSIWYG Markdown editor. You open a local `.md` fil
 This repository is the Kern codebase. The editor is built with Swift, AppKit, and TextKit. It does not use Electron, Tauri, or any WebView/browser runtime.
 
 The product and app name are **Kern**.
-
-<p align="center">
-  <img src="docs/assets/readme/kern-hero.png" alt="Kern editing a Markdown document with native WYSIWYG text, callouts, tasks, tables, and code blocks">
-</p>
 
 ## Why Kern Exists
 
@@ -26,11 +22,28 @@ Kern is built for a simpler workflow: open any local markdown file, edit in true
 
 ## Screenshots
 
-The screenshots below are real captures from the native app using `test-fixtures/readme-showcase.md`. They are intentionally captured from Kern itself rather than mocked in a design tool.
+These are real captures from the native app using `test-fixtures/readme-showcase.md`. They are intentionally captured from Kern itself rather than mocked in a design tool.
+
+<p align="center">
+  <img src="docs/assets/readme/kern-hero.png" alt="Kern editing a Markdown document with native WYSIWYG text, callouts, tasks, tables, and code blocks">
+</p>
 
 <p align="center">
   <img src="docs/assets/readme/kern-renderers.png" alt="Kern showing native math rendering, Mermaid rendering, and large-file benchmark notes">
 </p>
+
+<p align="center">
+  <img src="docs/assets/readme/kern-settings.png" alt="Kern Settings showing Markdown export, Mermaid render modes, themes, fonts, editor width, and task preferences">
+</p>
+
+## Mermaid Render Modes
+
+Kern exposes Mermaid rendering as a preference instead of locking every user into one renderer:
+
+- **Rich (native diagram)** — the default bundled renderer. It draws supported diagrams with AppKit/TextKit and does not require a browser, Node, Electron, Tauri, or a WebView.
+- **ASCII (lightweight)** — a native fallback for compact text-diagram rendering. It is useful as a readable fallback, but it is not official Mermaid parity and should not be marketed as the prettiest mode.
+- **Auto** — chooses between native rich and ASCII based on diagram complexity.
+- **Official External (cached)** — optional high-fidelity Mermaid CLI rendering when explicitly configured. It is disabled by default and falls back to native rendering when unavailable.
 
 ## What Kern Does Today
 

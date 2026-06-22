@@ -105,3 +105,5 @@ marketing/
 
 # README media: keep polished captures, ignore raw window captures
 docs/assets/readme/*-raw.png
+docs/assets/readme/*-imagegen-concept.png
+docs/assets/readme/kern-mermaid-*.png
