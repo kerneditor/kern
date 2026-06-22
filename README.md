@@ -22,7 +22,7 @@ Kern is built for a simpler workflow: open any local markdown file, edit in true
 
 ## Screenshots
 
-These are real captures from the native app using `test-fixtures/readme-showcase.md`. They are intentionally captured from Kern itself rather than mocked in a design tool.
+These are real captures from the native app using `test-fixtures/readme-showcase.md` and `test-fixtures/readme-mermaid-modes.md`. They are intentionally captured from Kern itself rather than mocked in a design tool.
 
 <p align="center">
   <img src="docs/assets/readme/kern-hero.png" alt="Kern editing a Markdown document with native WYSIWYG text, callouts, tasks, tables, and code blocks">
@@ -40,9 +40,13 @@ These are real captures from the native app using `test-fixtures/readme-showcase
 
 Kern exposes Mermaid rendering as a preference instead of locking every user into one renderer:
 
+<p align="center">
+  <img src="docs/assets/readme/kern-mermaid-modes.png" alt="Kern Mermaid render modes showing Rich native, ASCII lightweight, Auto, and Official External Mermaid CLI rendering">
+</p>
+
 - **Rich (native diagram)** — the default bundled renderer. It draws supported diagrams with AppKit/TextKit and does not require a browser, Node, Electron, Tauri, or a WebView.
 - **ASCII (lightweight)** — a native fallback for compact text-diagram rendering. It is useful as a readable fallback, but it is not official Mermaid parity and should not be marketed as the prettiest mode.
-- **Auto** — chooses between native rich and ASCII based on diagram complexity.
+- **Auto** — chooses between native rich and ASCII based on diagram complexity. The screenshot above shows this fixture selecting ASCII.
 - **Official External (cached)** — optional high-fidelity Mermaid CLI rendering when explicitly configured. It is disabled by default and falls back to native rendering when unavailable.
 
 ## What Kern Does Today
