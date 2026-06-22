@@ -22,6 +22,7 @@ The current third-party dependency surface is test and tooling oriented.
 | Snapshot tests | Point-Free SnapshotTesting | Exact direct version pin. Update only with snapshot test validation. | `project.yml` |
 | Strict Markdown oracle | `cmarkgfm` plus transitive Python packages | Exact Python requirement pins for reproducible CommonMark/GFM semantic checks. | `spec-requirements.txt` |
 | Benchmark CLI | Apple frameworks: ScreenCaptureKit, CoreGraphics, CoreMedia, ApplicationServices | System frameworks only; no external Swift packages. | `scripts/kern-bench/Package.swift` |
+| Optional Mermaid renderer | Mermaid CLI (`mmdc`) or opt-in `npx @mermaid-js/mermaid-cli` | Optional user/maintainer external tool. Not bundled, not linked, and not required for the shipped app. Kern can use it only when explicitly configured, and cache hits/failures fall back to native rendering. | `KernApp/Sources/Editor/MarkdownRichAttachments.swift`, `scripts/eval-official-mermaid-renderer.sh` |
 | CI action | `actions/checkout` | Major-version Dependabot updates. | `.github/workflows/ci.yml` |
 | Project generation | XcodeGen | Minimum version enforced by `project.yml`; CI installs from Homebrew when missing. | `project.yml`, `.github/workflows/ci.yml` |
 | Release upload/verification | GitHub CLI | Maintainer-only release tool. Not required for normal contributors. | `docs/release/github-release-checklist.md`, `scripts/verify-github-release-asset.sh` |
@@ -64,6 +65,28 @@ Release maintainers additionally need:
 - GitHub CLI for release asset upload/download verification
 - `hdiutil`, `spctl`, and `shasum` from macOS command-line tools
 
+Optional high-fidelity Mermaid rendering additionally needs one of:
+
+- a configured `mmdc` command or absolute path in Kern Settings;
+- or explicit `npx` opt-in in Kern Settings / `KERN_OFFICIAL_MERMAID_USE_NPX=1`.
+
+This is not a bundled dependency. If unset, Kern keeps using native Mermaid
+rendering and official external mode displays native fallback output. When it is
+configured, Kern supplies a stable subprocess PATH for Homebrew, `/usr/local`,
+and system tools so `npx` can locate `node` even when Kern is launched outside a
+login shell.
+
+Official Mermaid rendering also supports an optional Puppeteer config file via
+Kern Settings or `KERN_OFFICIAL_MERMAID_PUPPETEER_CONFIG_FILE`. Kern passes that
+path to Mermaid CLI with `--puppeteerConfigFile`/`-p`; it does not create,
+validate, or bundle Puppeteer configuration itself. The configured renderer
+command and Puppeteer config path are part of the cache identity so changing
+either value cannot silently reuse stale official-rendered PNGs.
+
+The Settings “Clear official Mermaid cache” action removes only Kern-generated
+cache artifacts (`.work-*` scratch directories and generated hash PNGs). It does
+not delete arbitrary user files placed in the configured cache directory.
+
 ## Update workflow
 
 For dependency updates:
@@ -82,5 +105,8 @@ Do not commit:
 - local Python virtualenvs
 - benchmark outputs
 - packaged app artifacts, DMGs, archives, dSYMs, or xcresult bundles
+- optional external renderer scratch outputs under `benchmark-archive/`
+- optional official Mermaid PNG cache outputs under user caches or ignored
+  `test-results/official-mermaid-cache/`
 - local Forge/session/handoff files
 - maintainer-private research scratch files

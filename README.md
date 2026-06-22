@@ -171,6 +171,7 @@ Signed/notarized macOS distribution is not published from this repository.
 - [docs/release/release-validation-gate.md](docs/release/release-validation-gate.md)
 - [docs/release/public-repo-health.md](docs/release/public-repo-health.md)
 - [docs/release/v0.1.2-validation-evidence.md](docs/release/v0.1.2-validation-evidence.md)
+- [docs/release/v0.1.3-release-candidate-evidence.md](docs/release/v0.1.3-release-candidate-evidence.md)
 - [docs/dependencies.md](docs/dependencies.md)
 - [docs/plans/README.md](docs/plans/README.md)
 - [NATIVE-EDITOR-TEST-MATRIX.md](NATIVE-EDITOR-TEST-MATRIX.md)
@@ -211,4 +212,5 @@ For review requests, include failing/passing test evidence and any snapshot or U
 - This repository is a public source project. Tagged releases may include an unsigned DMG plus checksum, but signed/notarized macOS distribution is not published from this repository.
 - This repository is licensed under **Apache-2.0**.
 - Latest public release: `v0.1.2`.
+- Next release candidate version: `0.1.3` / build `4`.
 - Open-source release hardening is active. Full-fidelity benchmark work remains deferred; product hardening is still in progress.

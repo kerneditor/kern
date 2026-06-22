@@ -43,6 +43,66 @@ final class NativeEditorPreferencesTests: XCTestCase {
     }
 
     @MainActor
+    func testOfficialMermaidSettingsPersistAndClearConfiguredCache() throws {
+        let suiteName = "NativeEditorPreferencesOfficialMermaidTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let notificationCenter = NotificationCenter()
+        let controller = NativeEditorPreferencesWindowController(defaults: defaults, notificationCenter: notificationCenter)
+        defer { controller.close() }
+
+        guard let contentView = controller.window?.contentView else {
+            XCTFail("Expected settings content view")
+            return
+        }
+        controller.window?.layoutIfNeeded()
+        contentView.layoutSubtreeIfNeeded()
+
+        let commandField = try XCTUnwrap(
+            firstDescendant(in: contentView, identifier: "NativeEditor.Settings.OfficialMermaidRendererCommand") as? NSTextField
+        )
+        commandField.stringValue = "mmdc"
+        _ = commandField.target?.perform(commandField.action, with: commandField)
+        XCTAssertEqual(defaults.string(forKey: MermaidOfficialExternalRenderer.commandUserDefaultsKey), "mmdc")
+
+        let puppeteerConfigField = try XCTUnwrap(
+            firstDescendant(in: contentView, identifier: "NativeEditor.Settings.OfficialMermaidPuppeteerConfig") as? NSTextField
+        )
+        puppeteerConfigField.stringValue = "/tmp/kern-puppeteer.json"
+        _ = puppeteerConfigField.target?.perform(puppeteerConfigField.action, with: puppeteerConfigField)
+        XCTAssertEqual(
+            defaults.string(forKey: MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey),
+            "/tmp/kern-puppeteer.json"
+        )
+
+        let npxCheckbox = try XCTUnwrap(
+            firstDescendant(in: contentView, identifier: "NativeEditor.Settings.OfficialMermaidUseNPX") as? NSButton
+        )
+        npxCheckbox.state = .on
+        _ = npxCheckbox.target?.perform(npxCheckbox.action, with: npxCheckbox)
+        XCTAssertTrue(defaults.bool(forKey: MermaidOfficialExternalRenderer.npxEnabledUserDefaultsKey))
+
+        let cacheDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kern-official-mermaid-settings-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let cacheFile = cacheDir.appendingPathComponent(String(repeating: "b", count: 64) + ".png")
+        let unrelatedFile = cacheDir.appendingPathComponent("cached.png")
+        try Data([1, 2, 3]).write(to: cacheFile)
+        try Data([4, 5, 6]).write(to: unrelatedFile)
+        defaults.set(cacheDir.path, forKey: MermaidOfficialExternalRenderer.cacheDirectoryUserDefaultsKey)
+
+        let clearButton = try XCTUnwrap(
+            firstDescendant(in: contentView, identifier: "NativeEditor.Settings.ClearOfficialMermaidCache") as? NSButton
+        )
+        _ = clearButton.target?.perform(clearButton.action, with: clearButton)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheDir.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unrelatedFile.path))
+        try? FileManager.default.removeItem(at: cacheDir)
+    }
+
+    @MainActor
     func testTaskRenderingPreferenceChangeRerendersOpenEditorImmediately() {
         let defaults = UserDefaults.standard
         let key = "nativeEditor.taskRendering"
@@ -106,6 +166,13 @@ final class NativeEditorPreferencesTests: XCTestCase {
 
         let asciiMode = firstMermaidAttachment(in: vc.attributedTextForTesting())
         XCTAssertEqual(asciiMode?.debugEffectiveRenderModeForTesting, .ascii)
+
+        defaults.set("officialExternal", forKey: key)
+        NotificationCenter.default.post(name: .nativeEditorPreferencesDidChange, object: nil)
+
+        let officialMode = firstMermaidAttachment(in: vc.attributedTextForTesting())
+        XCTAssertEqual(officialMode?.debugRequestedRenderModeForTesting, .officialExternal)
+        XCTAssertEqual(officialMode?.debugEffectiveRenderModeForTesting, .rich)
     }
 
     @MainActor
@@ -342,6 +409,11 @@ final class NativeEditorPreferencesTests: XCTestCase {
             }
         }
         return found
+    }
+
+    @MainActor
+    private func firstDescendant(in root: NSView, identifier: String) -> NSView? {
+        allDescendantViews(in: root).first { $0.accessibilityIdentifier() == identifier }
     }
 
     @MainActor

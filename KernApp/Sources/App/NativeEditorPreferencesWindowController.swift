@@ -23,6 +23,11 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
     private let orderedNumberingPopup = NSPopUpButton()
     private let syntaxVisibilityPopup = NSPopUpButton()
     private let mermaidRenderModePopup = NSPopUpButton()
+    private let officialMermaidRendererCommandField = NSTextField()
+    private let officialMermaidPuppeteerConfigField = NSTextField()
+    private let officialMermaidUseNPXCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let clearOfficialMermaidCacheButton = NSButton(title: "Clear Cache", target: nil, action: nil)
+    private let officialMermaidCacheStatusLabel = NSTextField(labelWithString: "")
     private let checkboxHitTargetPopup = NSPopUpButton()
     private let themeModePopup = NSPopUpButton()
     private let fontFamilyPopup = NSPopUpButton()
@@ -52,7 +57,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         self.notificationCenter = notificationCenter
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 980),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 1135),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -140,6 +145,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         updateReadableMaxWidthControls()
         brandPreviewView.needsDisplay = true
         customFontFamilyField.stringValue = defaults.string(forKey: NativeEditorAppearance.customFontFamilyKey) ?? ""
+        officialMermaidRendererCommandField.stringValue =
+            defaults.string(forKey: MermaidOfficialExternalRenderer.commandUserDefaultsKey) ?? ""
+        officialMermaidPuppeteerConfigField.stringValue =
+            defaults.string(forKey: MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey) ?? ""
 
         orderedTasksCheckbox.state = boolPreference(
             key: "nativeEditor.orderedTasksEnabled",
@@ -149,6 +158,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             key: "nativeEditor.headingCheckboxesEnabled",
             fallback: true
         ) ? .on : .off
+        officialMermaidUseNPXCheckbox.state = boolPreference(
+            key: MermaidOfficialExternalRenderer.npxEnabledUserDefaultsKey,
+            fallback: false
+        ) ? .on : .off
 
         if defaults.object(forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey) != nil {
             remoteImageLoadingCheckbox.state =
@@ -156,6 +169,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         } else {
             remoteImageLoadingCheckbox.state = .off
         }
+        updateOfficialMermaidCacheStatusLabel()
     }
 
     @objc private func settingDidChange(_ sender: Any?) {
@@ -165,6 +179,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         }
         persistSettings()
         updateReadableMaxWidthControls()
+        updateOfficialMermaidCacheStatusLabel()
         brandPreviewView.needsDisplay = true
         postPreferencesDidChange()
     }
@@ -187,6 +202,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             NativeMarkdownCodec.Options.MermaidRenderMode.rich.rawValue,
             forKey: "nativeEditor.mermaidRenderMode"
         )
+        defaults.removeObject(forKey: MermaidOfficialExternalRenderer.commandUserDefaultsKey)
+        defaults.removeObject(forKey: MermaidOfficialExternalRenderer.cacheDirectoryUserDefaultsKey)
+        defaults.removeObject(forKey: MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey)
+        defaults.set(false, forKey: MermaidOfficialExternalRenderer.npxEnabledUserDefaultsKey)
         defaults.set("glyph", forKey: "nativeEditor.checkboxHitTarget")
         defaults.set(NativeEditorThemeMode.system.rawValue, forKey: NativeEditorAppearance.themeModeKey)
         defaults.set(NativeEditorFontFamilyPreset.system.rawValue, forKey: NativeEditorAppearance.fontFamilyKey)
@@ -240,6 +259,18 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         } else {
             defaults.set(customFontFamily, forKey: NativeEditorAppearance.customFontFamilyKey)
         }
+        let officialMermaidCommand = officialMermaidRendererCommandField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if officialMermaidCommand.isEmpty {
+            defaults.removeObject(forKey: MermaidOfficialExternalRenderer.commandUserDefaultsKey)
+        } else {
+            defaults.set(officialMermaidCommand, forKey: MermaidOfficialExternalRenderer.commandUserDefaultsKey)
+        }
+        let officialMermaidPuppeteerConfig = officialMermaidPuppeteerConfigField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if officialMermaidPuppeteerConfig.isEmpty {
+            defaults.removeObject(forKey: MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey)
+        } else {
+            defaults.set(officialMermaidPuppeteerConfig, forKey: MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey)
+        }
         if let value = selectedValue(from: fontSizePopup),
            let size = Double(value) {
             defaults.set(size, forKey: NativeEditorAppearance.fontSizeKey)
@@ -257,6 +288,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
 
         defaults.set(orderedTasksCheckbox.state == .on, forKey: "nativeEditor.orderedTasksEnabled")
         defaults.set(headingCheckboxesCheckbox.state == .on, forKey: "nativeEditor.headingCheckboxesEnabled")
+        defaults.set(
+            officialMermaidUseNPXCheckbox.state == .on,
+            forKey: MermaidOfficialExternalRenderer.npxEnabledUserDefaultsKey
+        )
         defaults.set(remoteImageLoadingCheckbox.state == .on, forKey: MarkdownImageAttachment.remoteImageLoadingUserDefaultsKey)
     }
 
@@ -285,7 +320,15 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         let syntaxVisibilityHelp =
             "WYSIWYG hides Markdown markers. Hybrid expands inline markdown syntax near the caret for precise edits. Markdown syntax shows full raw source."
         let mermaidRenderModeHelp =
-            "Mermaid render mode: Rich draws full native diagrams, ASCII is a lightweight text diagram, Auto switches by complexity."
+            "Mermaid render mode: Rich draws native diagrams, ASCII is a lightweight text diagram, Auto switches by complexity, Official External uses cached mmdc output when available and otherwise falls back to native rich."
+        let officialMermaidRendererCommandHelp =
+            "Optional command for the official Mermaid CLI renderer. Examples: mmdc, /path/to/mmdc, or npx -y @mermaid-js/mermaid-cli@11.15.0. Leave blank to disable unless npx is allowed."
+        let officialMermaidPuppeteerConfigHelp =
+            "Optional Puppeteer config JSON passed to Mermaid CLI with -p. Use this for advanced browser executable or sandbox configuration."
+        let officialMermaidUseNPXHelp =
+            "Allow Kern to use npx for the official external renderer when no explicit command is set. This is opt-in because it can download/run Node tooling."
+        let officialMermaidCacheHelp =
+            "Cached official Mermaid PNG output. Clear Cache removes rendered Mermaid images and forces the next official render to regenerate."
         let checkboxHitTargetHelp =
             "Click behavior for toggling tasks. Glyph-only toggles only on the checkbox; marker-region toggles from anywhere in the list marker area."
         let themeModeHelp =
@@ -356,6 +399,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
                 Choice(title: "Rich (native diagram)", value: NativeMarkdownCodec.Options.MermaidRenderMode.rich.rawValue),
                 Choice(title: "ASCII (lightweight)", value: NativeMarkdownCodec.Options.MermaidRenderMode.ascii.rawValue),
                 Choice(title: "Auto (complexity-based)", value: NativeMarkdownCodec.Options.MermaidRenderMode.auto.rawValue),
+                Choice(title: "Official External (cached)", value: NativeMarkdownCodec.Options.MermaidRenderMode.officialExternal.rawValue),
             ]
         )
         configurePopup(
@@ -410,6 +454,7 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
 
         orderedTasksCheckbox.title = ""
         headingCheckboxesCheckbox.title = ""
+        officialMermaidUseNPXCheckbox.title = ""
         remoteImageLoadingCheckbox.title = ""
 
         exportDialectPopup.toolTip = exportDialectHelp
@@ -418,6 +463,11 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         orderedNumberingPopup.toolTip = orderedNumberingHelp
         syntaxVisibilityPopup.toolTip = syntaxVisibilityHelp
         mermaidRenderModePopup.toolTip = mermaidRenderModeHelp
+        officialMermaidRendererCommandField.toolTip = officialMermaidRendererCommandHelp
+        officialMermaidPuppeteerConfigField.toolTip = officialMermaidPuppeteerConfigHelp
+        officialMermaidUseNPXCheckbox.toolTip = officialMermaidUseNPXHelp
+        clearOfficialMermaidCacheButton.toolTip = officialMermaidCacheHelp
+        officialMermaidCacheStatusLabel.toolTip = officialMermaidCacheHelp
         checkboxHitTargetPopup.toolTip = checkboxHitTargetHelp
         themeModePopup.toolTip = themeModeHelp
         fontFamilyPopup.toolTip = fontFamilyHelp
@@ -450,6 +500,31 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         customFontFamilyField.delegate = self
         customFontFamilyField.setAccessibilityIdentifier("NativeEditor.Settings.CustomFontFamily")
 
+        officialMermaidRendererCommandField.placeholderString = "Optional Mermaid CLI command"
+        officialMermaidRendererCommandField.target = self
+        officialMermaidRendererCommandField.action = #selector(settingDidChange(_:))
+        officialMermaidRendererCommandField.delegate = self
+        officialMermaidRendererCommandField.setAccessibilityIdentifier("NativeEditor.Settings.OfficialMermaidRendererCommand")
+
+        officialMermaidPuppeteerConfigField.placeholderString = "Optional Puppeteer config JSON path"
+        officialMermaidPuppeteerConfigField.target = self
+        officialMermaidPuppeteerConfigField.action = #selector(settingDidChange(_:))
+        officialMermaidPuppeteerConfigField.delegate = self
+        officialMermaidPuppeteerConfigField.setAccessibilityIdentifier("NativeEditor.Settings.OfficialMermaidPuppeteerConfig")
+
+        officialMermaidUseNPXCheckbox.target = self
+        officialMermaidUseNPXCheckbox.action = #selector(settingDidChange(_:))
+        officialMermaidUseNPXCheckbox.setAccessibilityIdentifier("NativeEditor.Settings.OfficialMermaidUseNPX")
+
+        clearOfficialMermaidCacheButton.target = self
+        clearOfficialMermaidCacheButton.action = #selector(clearOfficialMermaidCache(_:))
+        clearOfficialMermaidCacheButton.setAccessibilityIdentifier("NativeEditor.Settings.ClearOfficialMermaidCache")
+
+        officialMermaidCacheStatusLabel.textColor = .secondaryLabelColor
+        officialMermaidCacheStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        officialMermaidCacheStatusLabel.lineBreakMode = .byTruncatingMiddle
+        officialMermaidCacheStatusLabel.setAccessibilityIdentifier("NativeEditor.Settings.OfficialMermaidCacheStatus")
+
         importThemeButton.target = self
         importThemeButton.action = #selector(importCustomThemeJSON(_:))
         importThemeButton.toolTip = importThemeHelp
@@ -475,6 +550,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         let orderedNumberingLabel = makeRowLabel("Ordered list numbering", tooltip: orderedNumberingHelp)
         let syntaxVisibilityLabel = makeRowLabel("Syntax visibility", tooltip: syntaxVisibilityHelp)
         let mermaidRenderModeLabel = makeRowLabel("Mermaid render mode", tooltip: mermaidRenderModeHelp)
+        let officialMermaidRendererCommandLabel = makeRowLabel("Official Mermaid command", tooltip: officialMermaidRendererCommandHelp)
+        let officialMermaidPuppeteerConfigLabel = makeRowLabel("Puppeteer config", tooltip: officialMermaidPuppeteerConfigHelp)
+        let officialMermaidUseNPXLabel = makeRowLabel("Allow npx renderer", tooltip: officialMermaidUseNPXHelp)
+        let officialMermaidCacheLabel = makeRowLabel("Official Mermaid cache", tooltip: officialMermaidCacheHelp)
         let checkboxHitTargetLabel = makeRowLabel("Checkbox hit target", tooltip: checkboxHitTargetHelp)
         let themeModeLabel = makeRowLabel("Theme", tooltip: themeModeHelp)
         let importThemeLabel = makeRowLabel("Theme import", tooltip: importThemeHelp)
@@ -494,6 +573,11 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         readableWidthControls.spacing = 8
         readableWidthControls.alignment = .centerY
 
+        let officialMermaidCacheControls = NSStackView(views: [clearOfficialMermaidCacheButton, officialMermaidCacheStatusLabel])
+        officialMermaidCacheControls.orientation = .horizontal
+        officialMermaidCacheControls.spacing = 8
+        officialMermaidCacheControls.alignment = .firstBaseline
+
         let grid = NSGridView(views: [
             [exportDialectLabel, exportDialectPopup],
             [gfmExtensionStrategyLabel, gfmExtensionStrategyPopup],
@@ -501,6 +585,10 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             [orderedNumberingLabel, orderedNumberingPopup],
             [syntaxVisibilityLabel, syntaxVisibilityPopup],
             [mermaidRenderModeLabel, mermaidRenderModePopup],
+            [officialMermaidRendererCommandLabel, officialMermaidRendererCommandField],
+            [officialMermaidPuppeteerConfigLabel, officialMermaidPuppeteerConfigField],
+            [officialMermaidUseNPXLabel, officialMermaidUseNPXCheckbox],
+            [officialMermaidCacheLabel, officialMermaidCacheControls],
             [checkboxHitTargetLabel, checkboxHitTargetPopup],
             [themeModeLabel, themeModePopup],
             [importThemeLabel, themeButtonsStack],
@@ -573,6 +661,12 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         }
         customFontFamilyField.translatesAutoresizingMaskIntoConstraints = false
         customFontFamilyField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
+        officialMermaidRendererCommandField.translatesAutoresizingMaskIntoConstraints = false
+        officialMermaidRendererCommandField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        officialMermaidPuppeteerConfigField.translatesAutoresizingMaskIntoConstraints = false
+        officialMermaidPuppeteerConfigField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        officialMermaidCacheStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        officialMermaidCacheStatusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
         readableMaxWidthSlider.translatesAutoresizingMaskIntoConstraints = false
         readableMaxWidthSlider.widthAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
         readableMaxWidthValueLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -594,6 +688,15 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
             format: "%.0f px",
             roundedReadableMaxWidthValue(readableMaxWidthSlider.doubleValue)
         )
+    }
+
+    private func updateOfficialMermaidCacheStatusLabel(_ statusPrefix: String? = nil) {
+        let cacheURL = MermaidOfficialExternalRenderer.configuredCacheDirectoryForDisplay(defaults: defaults)
+        if let statusPrefix {
+            officialMermaidCacheStatusLabel.stringValue = "\(statusPrefix): \(cacheURL.path)"
+        } else {
+            officialMermaidCacheStatusLabel.stringValue = cacheURL.path
+        }
     }
 
     private func configurePopup(_ popup: NSPopUpButton, choices: [Choice]) {
@@ -659,6 +762,17 @@ final class NativeEditorPreferencesWindowController: NSWindowController, NSTextF
         }
         refreshFromDefaults()
         postPreferencesDidChange()
+    }
+
+    @objc
+    private func clearOfficialMermaidCache(_ sender: Any?) {
+        do {
+            try MermaidOfficialExternalRenderer.clearCache(defaults: defaults)
+            updateOfficialMermaidCacheStatusLabel("Cleared")
+            postPreferencesDidChange()
+        } catch {
+            officialMermaidCacheStatusLabel.stringValue = "Clear failed: \(error.localizedDescription)"
+        }
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {

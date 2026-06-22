@@ -30,7 +30,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         // Ensure the editor view fills the content area.
         if let contentView = window.contentView {
+            contentView.autoresizesSubviews = true
             editorVC.view.frame = contentView.bounds
+            editorVC.view.autoresizingMask = [.width, .height]
         }
 
         self.init(window: window)

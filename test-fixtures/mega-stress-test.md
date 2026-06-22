@@ -2581,35 +2581,34 @@ gitGraph
 ```mermaid
 mindmap
   root((Kern Editor))
-    Swift Layer
-      AppDelegate
-        Menu Bar
-        Theme Observer
+    Native macOS
+      AppKit Shell
+        Menus
+        Preferences
+        Windows
       NSDocument
         File I/O
         Autosave
         File Watching
-      WKWebView
-        Pool of 5
-        Virtualization
-        Tab Support
-    Web Layer
-      Milkdown Crepe
-        ProseMirror
-        CodeMirror
-        KaTeX
+      TextKit Editor
+        WYSIWYG Markdown
+        Native Attachments
+        Incremental Layout
+    Rich Blocks
+      Tables
+        TextKit Table Blocks
+        GFM Export
       Mermaid
-        Lazy Loading
-        SVG Rendering
-      Bridge
-        getMarkdown
-        setMarkdown
-        execCommand
-    Design
-      Notion-like UI
-      Dark Mode
-      SF Pro Fonts
-      720px Max Width
+        Native Fallback
+        Official Renderer Preference
+      Math
+        Inline Math
+        Block Attachments
+    Design System
+      Kern Theme
+      Wonder Theme
+      Light and Dark Mode
+      Configurable Readable Width
 ```
 
 ### 4J: Timeline
@@ -2617,16 +2616,17 @@ mindmap
 ```mermaid
 timeline
     title Kern Development Timeline
-    2025-01 : Project Started
-             : Architecture Design
-    2025-02 : CoreEditor HTML
-             : Swift Shell
-             : NSDocument
-    2025-03 : File Watching
-             : Tab Virtualization
-    2025-04 : Themes and Polish
-             : Bug Fixes
-             : Beta Testing
+    2025-01 : Native TextKit prototype
+             : Markdown codec baseline
+    2025-02 : NSDocument lifecycle
+             : File watching and autosave
+             : Native preferences
+    2025-03 : Rich block attachments
+             : Mermaid renderer modes
+             : Math renderer evaluation
+    2025-04 : Theme system
+             : Open source release prep
+             : Regression gates
 ```
 
 ### 4K: Journey Diagram
@@ -2648,9 +2648,9 @@ journey
       Content reloads: 4: Kern
     section Multi-tab
       Open more files: 4: User
-      Background tabs virtualized: 5: Kern
-      Switch tabs: 4: User
-      Tab rehydrates: 4: Kern
+      Native windows stay responsive: 5: Kern
+      Switch documents: 4: User
+      Layout cache reused: 4: Kern
 ```
 
 ### 4L: Sankey Diagram (experimental)
@@ -2658,23 +2658,19 @@ journey
 ```mermaid
 sankey-beta
 
-Swift Code,App Shell,30
-Swift Code,Document,25
-Swift Code,Bridge,15
-Swift Code,Pool,10
-TypeScript,Editor,40
-TypeScript,Bridge,15
-TypeScript,Mermaid,10
-CSS,Theme,20
-CSS,Layout,15
-App Shell,Kern.app,30
-Document,Kern.app,25
-Bridge,Kern.app,30
-Pool,Kern.app,10
-Editor,index.html,40
-Theme,index.html,20
-Layout,index.html,15
-Mermaid,index.html,10
+Markdown,NativeMarkdownCodec,35
+NativeMarkdownCodec,AttributedString,30
+AttributedString,TextKit Layout,28
+TextKit Layout,Visible Editor,26
+TextKit Layout,Rich Attachments,18
+Rich Attachments,Mermaid Fallback,10
+Rich Attachments,Math Blocks,8
+User Preferences,Theme System,16
+Theme System,Visible Editor,14
+NSDocument,File Watching,14
+NSDocument,Autosave,18
+File Watching,Visible Editor,10
+Autosave,Markdown Export,18
 ```
 
 ***

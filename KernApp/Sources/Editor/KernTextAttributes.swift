@@ -28,6 +28,7 @@ extension NSAttributedString.Key {
     static let kernLinkReferenceID = NSAttributedString.Key("kern.linkReferenceID") // String
     static let kernLinkReferenceURL = NSAttributedString.Key("kern.linkReferenceURL") // String
     static let kernEscapedLiteral = NSAttributedString.Key("kern.escapedLiteral") // Bool (char came from backslash escape)
+    static let kernHtmlLineBreak = NSAttributedString.Key("kern.htmlLineBreak") // Bool (inline HTML <br> rendered as line separator)
     static let kernHybridExpandedInlineLink = NSAttributedString.Key("kern.hybridExpandedInlineLink") // Bool
     static let kernHybridExpandedInlineSyntax = NSAttributedString.Key("kern.hybridExpandedInlineSyntax") // Bool
 

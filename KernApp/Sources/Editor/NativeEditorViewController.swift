@@ -869,6 +869,10 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
     override func viewDidAppear() {
         super.viewDidAppear()
         applyThemeAppearanceFromPreferences()
+        refreshTextLayoutForCurrentViewport()
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshTextLayoutForCurrentViewport()
+        }
     }
 
     override func viewDidLayout() {
@@ -877,6 +881,15 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         syncTextContainerSizeToScrollViewWidth()
         adjustDocumentViewHeightToContent(forceFullLayout: false)
         layoutFindBar()
+        updateCodeBlockChrome()
+    }
+
+    private func refreshTextLayoutForCurrentViewport() {
+        guard isViewLoaded else { return }
+        layoutHeadingOutline()
+        syncTextContainerSizeToScrollViewWidth()
+        adjustDocumentViewHeightToContent(forceFullLayout: false)
+        refreshVisibleTextLayoutAndDisplay()
         updateCodeBlockChrome()
     }
 
@@ -1063,9 +1076,10 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
     private func syncTextContainerSizeToScrollViewWidth() {
         guard let tc = textView.textContainer else { return }
-        let viewportWidth = max(0, scrollView.contentView.bounds.width)
+        let viewportWidth = resolvedEditorViewportWidth()
+        guard viewportWidth > 1 else { return }
         let horizontalInset = editorHorizontalInset(forViewportWidth: viewportWidth)
-        let editorWidth = max(0, viewportWidth - horizontalInset * 2)
+        let editorWidth = max(1, viewportWidth - horizontalInset * 2)
 
         // Keep the primary document viewport width-locked.
         // Document-wide horizontal scrolling creates poor UX for mixed-content markdown files:
@@ -1094,6 +1108,23 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             textView.frame = frame
         }
         isHorizontalTableOverflowActive = false
+    }
+
+    private func resolvedEditorViewportWidth() -> CGFloat {
+        let splitRemainderWidth = max(
+            0,
+            splitView.bounds.width - headingOutlineContainer.frame.width - splitView.dividerThickness
+        )
+        for candidate in [
+            scrollView.contentView.bounds.width,
+            scrollView.bounds.width,
+            scrollView.frame.width,
+            splitRemainderWidth,
+            textView.frame.width,
+        ] where candidate.isFinite && candidate > 1 {
+            return candidate
+        }
+        return 0
     }
 
     private func editorHorizontalInset(forViewportWidth viewportWidth: CGFloat) -> CGFloat {
@@ -1231,6 +1262,45 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         lm.ensureLayout(for: tc)
     }
 
+    private func refreshVisibleTextLayoutAndDisplay(initialCharacterLimit: Int = 8_192) {
+        guard
+            let lm = textView.layoutManager,
+            let tc = textView.textContainer,
+            let storage = textView.textStorage,
+            storage.length > 0
+        else {
+            textView.needsDisplay = true
+            scrollView.contentView.needsDisplay = true
+            return
+        }
+
+        let visibleRect = textView.visibleRect.offsetBy(
+            dx: -textView.textContainerOrigin.x,
+            dy: -textView.textContainerOrigin.y
+        )
+        let visibleGlyphRange = visibleRect.isEmpty
+            ? NSRange(location: 0, length: 0)
+            : lm.glyphRange(forBoundingRect: visibleRect, in: tc)
+        let fallbackCharacterRange = NSRange(location: 0, length: min(storage.length, initialCharacterLimit))
+        let fallbackGlyphRange = lm.glyphRange(
+            forCharacterRange: fallbackCharacterRange,
+            actualCharacterRange: nil
+        )
+        let glyphRange = visibleGlyphRange.length > 0 ? visibleGlyphRange : fallbackGlyphRange
+
+        if glyphRange.length > 0 {
+            lm.ensureLayout(forGlyphRange: glyphRange)
+            let characterRange = lm.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            if characterRange.length > 0 {
+                lm.invalidateDisplay(forCharacterRange: characterRange)
+            }
+        }
+
+        textView.needsDisplay = true
+        textView.setNeedsDisplay(textView.visibleRect)
+        scrollView.contentView.needsDisplay = true
+    }
+
     private func scheduleLargeDocumentLightLayoutIfNeeded(markdown: String) {
         scheduleLargeDocumentLightLayoutIfNeeded(storageLength: markdown.utf16.count)
     }
@@ -1245,6 +1315,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.viewIfLoaded != nil else { return }
             self.adjustDocumentViewHeightToContent(forceFullLayout: false)
+            self.refreshVisibleTextLayoutAndDisplay()
             self.updateCodeBlockChrome()
         }
         largeDocumentLightLayoutWorkItem = work
@@ -1273,6 +1344,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
 
         scrollView.contentView.scroll(to: scrollOrigin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+        refreshVisibleTextLayoutAndDisplay()
     }
 
     private func applyPreferencesAndRerender() {
@@ -1481,6 +1553,11 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         if let scrollOrigin {
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        refreshVisibleTextLayoutAndDisplay()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.renderGeneration == currentGeneration else { return }
+            self.refreshTextLayoutForCurrentViewport()
         }
 
         if syntaxVisibilityMode.isHybridCaretSyntaxMode, !isApplyingHybridInlineTransition {
@@ -1950,6 +2027,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
                     self.textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
                     self.scrollView.contentView.scroll(to: scrollOrigin)
                     self.scrollView.reflectScrolledClipView(self.scrollView.contentView)
+                    self.refreshVisibleTextLayoutAndDisplay()
 
                     self.updateCodeBlockChrome()
                     self.scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
@@ -4165,6 +4243,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
             textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
             scrollView.contentView.scroll(to: scrollOrigin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
+            refreshVisibleTextLayoutAndDisplay()
             stabilizeUndoAfterExternalRenderRefresh(previousRenderedUTF16Count: previousRenderedUTF16Count)
             updateCodeBlockChrome()
             scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
@@ -4194,6 +4273,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
         scrollView.contentView.scroll(to: scrollOrigin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+        refreshVisibleTextLayoutAndDisplay()
         stabilizeUndoAfterExternalRenderRefresh(previousRenderedUTF16Count: previousRenderedUTF16Count)
         updateCodeBlockChrome()
         scheduleFindUpdate(resetIndex: false, anchorLocation: nil)
@@ -7423,6 +7503,7 @@ final class NativeEditorViewController: NSViewController, NSTextViewDelegate, Na
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.adjustDocumentViewHeightToContent(forceFullLayout: false)
+            self.refreshVisibleTextLayoutAndDisplay()
             self.scheduleLargeDocumentLightLayoutIfNeeded(markdown: markdown)
         }
         stagedPromotionLayoutWorkItem = work

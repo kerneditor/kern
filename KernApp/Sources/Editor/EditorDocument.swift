@@ -93,6 +93,12 @@ final class EditorDocument: NSDocument {
         } else if suppressActivation {
             windowController.showWindow(self)
             windowController.window?.orderFrontRegardless()
+        } else {
+            // Do not rely on the document controller's later `showWindows()` pass here. The native
+            // editor's initial TextKit layout needs a realized window/clip-view geometry before the
+            // first deferred render, otherwise LaunchServices file opens can produce a titled but
+            // visually blank document window.
+            windowController.showWindow(self)
         }
 
         // Establish a baseline mod date so our file presenter doesn't treat the initial open
@@ -122,8 +128,12 @@ final class EditorDocument: NSDocument {
             } else {
                 // Keep initial window presentation responsive: let AppKit show the window first,
                 // then start document rendering on the next main-runloop turn.
-                DispatchQueue.main.async { [weak editorVC] in
-                    editorVC?.stringValue = initialMarkdown
+                // Capture the editor strongly for this one-shot handoff. During LaunchServices
+                // document opens, AppKit can defer final window-controller ownership until after
+                // `makeWindowControllers()` returns; a weak capture can disappear before the first
+                // render, leaving a titled but blank editor window.
+                DispatchQueue.main.async { [editorVC] in
+                    editorVC.stringValue = initialMarkdown
                 }
             }
         }

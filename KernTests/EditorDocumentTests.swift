@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import KernTextKit
 
@@ -138,6 +139,40 @@ final class EditorDocumentTests: XCTestCase {
 
     func testCanConcurrentlyRead() {
         XCTAssertTrue(EditorDocument.canConcurrentlyReadDocuments(ofType: "net.daringfireball.markdown"))
+    }
+
+    // MARK: - Window controller integration
+
+    @MainActor
+    func testMakeWindowControllersEventuallyRendersInitialMarkdown() {
+        let doc = EditorDocument()
+        doc.stringValue = "# Visible Heading\n\nInitial body text."
+
+        doc.makeWindowControllers()
+        defer { doc.close() }
+
+        // Normal app opens intentionally render on the next runloop turn so the window can
+        // present first. Pump the main runloop once, then verify the real document/window path
+        // produced visible editor content rather than only a titled blank window.
+        let rendered = expectation(description: "initial document render")
+        DispatchQueue.main.async { rendered.fulfill() }
+        wait(for: [rendered], timeout: 1.0)
+
+        let nativeEditor = doc.windowControllers
+            .compactMap { $0.contentViewController as? NativeEditorViewController }
+            .first
+
+        XCTAssertNotNil(nativeEditor)
+        XCTAssertEqual(nativeEditor?.stringValue, "# Visible Heading\n\nInitial body text.")
+        XCTAssertTrue(nativeEditor?.attributedTextForTesting().string.contains("Visible Heading") == true)
+        XCTAssertTrue(nativeEditor?.attributedTextForTesting().string.contains("Initial body text.") == true)
+        XCTAssertGreaterThan(nativeEditor?.textViewForTesting().frame.width ?? 0, 0)
+        XCTAssertGreaterThan(nativeEditor?.textViewForTesting().frame.height ?? 0, 0)
+        XCTAssertGreaterThan(
+            nativeEditor?.textViewForTesting().textContainer?.containerSize.width ?? 0,
+            100,
+            "Document open should not leave TextKit with a collapsed zero-width text container"
+        )
     }
 
     // MARK: - Mod Date Tracking

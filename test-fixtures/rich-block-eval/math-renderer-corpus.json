@@ -1,0 +1,196 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "inline-einstein-superscript",
+      "title": "Inline superscript baseline",
+      "display": false,
+      "latex": "E=mc^2",
+      "features": [
+        "inline",
+        "superscript",
+        "baseline"
+      ],
+      "expectation": "semantic-inline"
+    },
+    {
+      "id": "inline-subscript-greek-sum",
+      "title": "Inline subscript, Greek symbols, and summation",
+      "display": false,
+      "latex": "\\alpha_i + \\beta_i = \\sum_{k=1}^{n} x_k",
+      "features": [
+        "inline",
+        "subscript",
+        "greek",
+        "sum",
+        "limits"
+      ],
+      "expectation": "semantic-inline-plus-quality-gap"
+    },
+    {
+      "id": "inline-long-text-wrap",
+      "title": "Long inline text and math wrapping",
+      "display": false,
+      "latex": "\\text{Calculate }\\Delta=b^2-4ac\\text{ for }a=1,b=-1,c=-5\\text{ and compare }x_1,x_2",
+      "features": [
+        "inline",
+        "text",
+        "long-wrap",
+        "greek",
+        "subscript"
+      ],
+      "expectation": "semantic-inline-plus-quality-gap"
+    },
+    {
+      "id": "block-quadratic-fraction-radical",
+      "title": "Quadratic formula fraction and radical",
+      "display": true,
+      "latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}",
+      "features": [
+        "block",
+        "fraction",
+        "radical",
+        "superscript"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-nested-fraction",
+      "title": "Nested continued fraction",
+      "display": true,
+      "latex": "1+\\frac{e^{-2\\pi}}{1+\\frac{e^{-4\\pi}}{1+\\frac{e^{-6\\pi}}{1+\\cdots}}}",
+      "features": [
+        "block",
+        "nested-fraction",
+        "superscript",
+        "ellipsis"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-integral-limits",
+      "title": "Integral with limits and Greek variables",
+      "display": true,
+      "latex": "f(x)=\\int\\limits_{-\\infty}^{\\infty}\\hat f(\\xi)e^{2\\pi i\\xi x}\\,d\\xi",
+      "features": [
+        "block",
+        "integral",
+        "limits",
+        "accent",
+        "greek",
+        "spacing"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-sum-product-limits",
+      "title": "Sum/product operators with limits",
+      "display": true,
+      "latex": "\\frac{1}{n}\\sum_{i=1}^{n}x_i \\geq \\sqrt[n]{\\prod_{i=1}^{n}x_i}",
+      "features": [
+        "block",
+        "fraction",
+        "sum",
+        "product",
+        "limits",
+        "nth-root",
+        "comparison"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-left-right-delimiters",
+      "title": "Stretchy left/right delimiters",
+      "display": true,
+      "latex": "\\left(\\frac{a+b}{c+d}\\right)^2 + \\left[\\sum_{i=1}^{n} i\\right]",
+      "features": [
+        "block",
+        "left-right",
+        "stretchy-delimiters",
+        "fraction",
+        "sum"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-pmatrix-multiply",
+      "title": "Matrix multiplication with pmatrix",
+      "display": true,
+      "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\\begin{pmatrix} x \\\\ y \\end{pmatrix}=\\begin{pmatrix} ax+by \\\\ cx+dy \\end{pmatrix}",
+      "features": [
+        "block",
+        "matrix",
+        "pmatrix",
+        "alignment"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-bmatrix-vector",
+      "title": "Bracket matrix and vector",
+      "display": true,
+      "latex": "A = \\begin{bmatrix} a_{11} & a_{12} & a_{13} \\\\ a_{21} & a_{22} & a_{23} \\\\ a_{31} & a_{32} & a_{33} \\end{bmatrix}",
+      "features": [
+        "block",
+        "matrix",
+        "bmatrix",
+        "subscript"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-aligned-maxwell",
+      "title": "Aligned equations / Maxwell system",
+      "display": true,
+      "latex": "\\begin{aligned}\\nabla \\cdot \\mathbf{E} &= \\frac{\\rho}{\\epsilon_0} \\\\ \\nabla \\cdot \\mathbf{B} &= 0 \\\\ \\nabla \\times \\mathbf{E} &= -\\frac{\\partial \\mathbf{B}}{\\partial t} \\\\ \\nabla \\times \\mathbf{B} &= \\mu_0 \\mathbf{J} + \\mu_0 \\epsilon_0 \\frac{\\partial \\mathbf{E}}{\\partial t}\\end{aligned}",
+      "features": [
+        "block",
+        "aligned",
+        "multi-line",
+        "mathbf",
+        "fraction",
+        "greek"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-operatorname-softmax",
+      "title": "Operator name and text",
+      "display": true,
+      "latex": "\\operatorname{softmax}(x_i)=\\frac{e^{x_i}}{\\sum_j e^{x_j}}\\quad \\text{for each }i",
+      "features": [
+        "block",
+        "operatorname",
+        "text",
+        "fraction",
+        "sum"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-accents-overline",
+      "title": "Accents, hats, bars, and overline",
+      "display": true,
+      "latex": "\\hat{x}+\\bar{y}+\\overline{AB}+\\vec{v}",
+      "features": [
+        "block",
+        "accent",
+        "overline",
+        "vector"
+      ],
+      "expectation": "native-candidate-required"
+    },
+    {
+      "id": "block-invalid-command",
+      "title": "Invalid command handling",
+      "display": true,
+      "latex": "\\badcommand{x}+1",
+      "features": [
+        "block",
+        "invalid",
+        "error-handling"
+      ],
+      "expectation": "must-not-crash"
+    }
+  ]
+}

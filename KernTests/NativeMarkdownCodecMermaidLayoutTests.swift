@@ -126,6 +126,28 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testMermaidKindDetectionSkipsLeadingCommentsBeforeRenderableDiagram() {
+        let markdown = """
+        ```mermaid
+        %%{init: {'theme': 'dark'}}%%
+        %% user comment before the diagram keyword
+        flowchart TD
+          A[Start] --> B[End]
+        ```
+        """
+
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: .fromUserDefaults(), baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        guard let mermaid = mermaids.first else { return }
+
+        XCTAssertEqual(mermaid.debugDiagramKindForTesting, "flowchart")
+        XCTAssertTrue(mermaid.debugSupportsNativeRichMermaidForTesting)
+        XCTAssertEqual(mermaid.debugNodeCount, 2)
+        XCTAssertEqual(mermaid.debugEdgeCount, 1)
+    }
+
+    @MainActor
     func testSequenceDiagramAllowsEdgeLabelsWithRowLayout() {
         let markdown = """
         ```mermaid
@@ -151,6 +173,34 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
     }
 
     @MainActor
+    func testSequenceDiagramDoesNotTreatArrowSyntaxAsParticipantNames() {
+        let markdown = """
+        ```mermaid
+        sequenceDiagram
+          participant User
+          participant Kern
+          participant Cache
+          User->>Kern: Open file
+          Kern->>Cache: Lookup render cache
+          Cache-->>Kern: SVG
+          Kern-->>User: Draw block
+        ```
+        """
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .ascii
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        guard let mermaid = mermaids.first else { return }
+
+        XCTAssertEqual(mermaid.debugNodeCount, 3, "Sequence parser should keep only declared/used participants")
+        let ascii = mermaid.debugASCIILinesForTesting.joined(separator: "\n")
+        XCTAssertFalse(ascii.contains("Cache--"), "Sequence ASCII should not let the flowchart parser create fake participants from arrows")
+        XCTAssertFalse(ascii.contains("Kern--"), "Sequence ASCII should not let the flowchart parser create fake participants from arrows")
+    }
+
+    @MainActor
     func testMermaidASCIIRenderModeUsesCompactBounds() {
         let markdown = """
         ```mermaid
@@ -169,6 +219,22 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
         guard let mermaid = mermaids.first else { return }
 
         XCTAssertEqual(mermaid.debugEffectiveRenderModeForTesting, .ascii)
+        XCTAssertEqual(mermaid.debugNodeCount, 4)
+        XCTAssertEqual(mermaid.debugEdgeCount, 3, "ASCII flowcharts should parse edges whose endpoints include Mermaid shape labels")
+        let asciiLines = mermaid.debugASCIILinesForTesting
+        let ascii = asciiLines.joined(separator: "\n")
+        XCTAssertTrue(ascii.contains("Start"), "ASCII mode should render parsed node labels")
+        XCTAssertTrue(ascii.contains("Load"), "ASCII mode should render downstream node labels")
+        XCTAssertTrue(
+            ascii.contains("┌") || ascii.contains("+"),
+            "ASCII mode should render diagram boxes, not only source text"
+        )
+        XCTAssertTrue(
+            ascii.contains("▼") || ascii.contains("▶") || ascii.contains("v") || ascii.contains(">"),
+            "ASCII mode should render directional connectors"
+        )
+        XCTAssertFalse(ascii.contains("flowchart TD"), "Renderable flowcharts should be rendered as diagrams, not source text")
+        XCTAssertFalse(ascii.contains("nodes:"), "ASCII mode should not render only an internal parser inventory")
         let bounds = mermaid.attachmentBounds(
             for: nil,
             proposedLineFragment: NSRect(x: 0, y: 0, width: 700, height: 28),
@@ -178,6 +244,165 @@ final class NativeMarkdownCodecMermaidLayoutTests: XCTestCase {
         XCTAssertEqual(bounds.width, 692, accuracy: 0.5, "ASCII Mermaid blocks should align with the containing column")
         XCTAssertGreaterThanOrEqual(bounds.width, 280)
         XCTAssertLessThan(bounds.height, 420, "ASCII mode should remain compact")
+    }
+
+
+    @MainActor
+    func testMermaidASCIIGenericDiagramUsesStructuredFallback() {
+        let markdown = """
+        ```mermaid
+        classDiagram
+          class Document {
+            +String path
+            +save() void
+          }
+          class Renderer {
+            +render(markdown)
+          }
+          Document --> Renderer
+        ```
+        """
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .ascii
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        guard let mermaid = mermaids.first else { return }
+
+        let asciiLines = mermaid.debugASCIILinesForTesting
+        let ascii = asciiLines.joined(separator: "\n")
+        XCTAssertTrue(ascii.contains("classDiagram"), "Generic ASCII fallback should identify the unsupported Mermaid family")
+        XCTAssertTrue(ascii.contains("Document"), "Generic ASCII fallback should preserve parsed nodes")
+        XCTAssertTrue(ascii.contains("Renderer"), "Generic ASCII fallback should preserve parsed destination nodes")
+        XCTAssertTrue(ascii.contains("nodes"), "Generic ASCII fallback should summarize parsed diagram structure")
+        XCTAssertFalse(ascii.contains("nodes:"), "Generic ASCII fallback should not expose internal parser inventory")
+        XCTAssertLessThanOrEqual(asciiLines.map(\.count).max() ?? 0, 96, "Generic ASCII fallback should stay within a bounded card width")
+    }
+
+    @MainActor
+    func testMindmapUsesSourceFallbackInsteadOfFakeFlowchartRoot() {
+        let markdown = """
+        ```mermaid
+        mindmap
+          root((Kern))
+            Native
+              TextKit
+              AppKit
+            Rich blocks
+              Math
+              Mermaid
+        ```
+        """
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .rich
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaids = collectMermaidAttachments(in: attributed)
+        XCTAssertEqual(mermaids.count, 1, "Expected one Mermaid attachment")
+        guard let mermaid = mermaids.first else { return }
+
+        XCTAssertEqual(mermaid.debugDiagramKindForTesting, "mindmap")
+        XCTAssertFalse(mermaid.debugSupportsNativeRichMermaidForTesting, "Mindmap needs official Mermaid for full-fidelity layout")
+        XCTAssertEqual(mermaid.debugNodeCount, 0, "Mindmap should not be reduced to only the root node by flowchart regexes")
+        XCTAssertEqual(mermaid.debugEdgeCount, 0, "Mindmap indentation should not be fabricated into flowchart edges")
+
+        let sourceFallback = mermaid.debugASCIILinesForTesting.joined(separator: "\n")
+        XCTAssertTrue(sourceFallback.contains("mindmap"), "Fallback should identify the Mermaid family")
+        XCTAssertTrue(sourceFallback.contains("TextKit"), "Fallback should preserve source content for review")
+        XCTAssertTrue(sourceFallback.contains("AppKit"), "Fallback should preserve source content for review")
+
+        let bounds = mermaid.attachmentBounds(
+            for: nil,
+            proposedLineFragment: NSRect(x: 0, y: 0, width: 760, height: 28),
+            glyphPosition: .zero,
+            characterIndex: 0
+        )
+        XCTAssertEqual(bounds.width, 752, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(bounds.height, 128)
+        XCTAssertLessThan(bounds.height, 420)
+    }
+
+    @MainActor
+    func testOfficialOnlyMermaidFamiliesDoNotUseGenericChains() {
+        let samples: [(String, String)] = [
+            (
+                "timeline",
+                """
+                ```mermaid
+                timeline
+                    title Kern Development Timeline
+                    2025-01 : Native TextKit prototype
+                             : WYSIWYG Markdown codec
+                    2025-02 : Preferences and fixtures
+                ```
+                """
+            ),
+            (
+                "journey",
+                """
+                ```mermaid
+                journey
+                    title User Opens a Markdown File in Kern
+                    section Discovery
+                      Open file from Finder: 5: User
+                      Kern renders native document: 4: Kern
+                ```
+                """
+            ),
+            (
+                "sankey",
+                """
+                ```mermaid
+                sankey-beta
+                Markdown,TextKit,30
+                TextKit,Native WYSIWYG,25
+                Native WYSIWYG,Export,20
+                ```
+                """
+            ),
+        ]
+
+        for (expectedKind, markdown) in samples {
+            var options = NativeMarkdownCodec.Options()
+            options.mermaidRenderMode = .rich
+            let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+            let mermaid = collectMermaidAttachments(in: attributed).first
+            XCTAssertNotNil(mermaid, "Expected one Mermaid attachment for \(expectedKind)")
+
+            XCTAssertEqual(mermaid?.debugDiagramKindForTesting, expectedKind)
+            XCTAssertFalse(mermaid?.debugSupportsNativeRichMermaidForTesting ?? true)
+            XCTAssertEqual(mermaid?.debugNodeCount, 0, "\(expectedKind) should not fabricate native-rich nodes")
+            XCTAssertEqual(mermaid?.debugEdgeCount, 0, "\(expectedKind) should not fabricate native-rich edges")
+
+            let sourceFallback = mermaid?.debugASCIILinesForTesting.joined(separator: "\n") ?? ""
+            XCTAssertTrue(sourceFallback.contains(expectedKind), "Fallback should show \(expectedKind) source")
+            XCTAssertFalse(sourceFallback.contains("L1"), "Fallback should not expose synthetic generic chain node identifiers")
+        }
+    }
+
+    @MainActor
+    func testMermaidAutoModeUsesSourceFallbackForOfficialOnlyFamilies() {
+        let markdown = """
+        ```mermaid
+        journey
+            title User Opens a Markdown File in Kern
+            section Loading
+              File read from disk: 5: Kern
+              TextKit layout prepared: 4: Kern
+        ```
+        """
+
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .auto
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options, baseURL: nil)
+        let mermaid = collectMermaidAttachments(in: attributed).first
+
+        XCTAssertEqual(mermaid?.debugDiagramKindForTesting, "journey")
+        XCTAssertEqual(mermaid?.debugEffectiveRenderModeForTesting, .ascii)
+        let sourceFallback = mermaid?.debugASCIILinesForTesting.joined(separator: "\n") ?? ""
+        XCTAssertTrue(sourceFallback.contains("journey"))
+        XCTAssertTrue(sourceFallback.contains("TextKit layout prepared"))
     }
 
     @MainActor

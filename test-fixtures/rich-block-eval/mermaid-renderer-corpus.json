@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "flowchart-basic-decision",
+      "title": "Flowchart decision baseline",
+      "kind": "flowchart",
+      "source": "flowchart TD\n  A[Start] --> B{Decision}\n  B -->|Yes| C[OK]\n  B -->|No| D[Retry]",
+      "features": [
+        "flowchart",
+        "nodes",
+        "edge-labels",
+        "decision"
+      ],
+      "expectedNativeCoverage": "rich-basic"
+    },
+    {
+      "id": "flowchart-subgraph",
+      "title": "Flowchart with subgraph",
+      "kind": "flowchart",
+      "source": "flowchart LR\n  subgraph Client\n    A[Browser]\n    B[Cache]\n  end\n  subgraph Server\n    C[API]\n    D[(Database)]\n  end\n  A --> C\n  C --> D\n  C --> B",
+      "features": [
+        "flowchart",
+        "subgraph",
+        "database-shape",
+        "multi-rank"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "flowchart-html-br-label",
+      "title": "Notion-style HTML break labels",
+      "kind": "flowchart",
+      "source": "flowchart TD\n  A[\"Request<br/>with line break\"] --> B[\"Response<br>with another break\"]",
+      "features": [
+        "flowchart",
+        "html-label",
+        "br",
+        "notion-copy"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "flowchart-markdown-label",
+      "title": "Markdown labels",
+      "kind": "flowchart",
+      "source": "flowchart TD\n  A[\"**Bold** request\"] --> B[\"<code>code</code> label\"]",
+      "features": [
+        "flowchart",
+        "markdown-label",
+        "inline-code-label"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "sequence-basic",
+      "title": "Sequence baseline",
+      "kind": "sequenceDiagram",
+      "source": "sequenceDiagram\n  participant User\n  participant Kern\n  User->>Kern: Open file\n  Kern-->>User: Rendered document",
+      "features": [
+        "sequence",
+        "participants",
+        "messages"
+      ],
+      "expectedNativeCoverage": "rich-basic"
+    },
+    {
+      "id": "sequence-notes-loop-alt",
+      "title": "Sequence notes, loop, and alternatives",
+      "kind": "sequenceDiagram",
+      "source": "sequenceDiagram\n  participant User\n  participant Kern\n  participant Cache\n  User->>Kern: Open file\n  activate Kern\n  Kern->>Cache: Lookup render cache\n  alt cache hit\n    Cache-->>Kern: SVG\n  else cache miss\n    Kern->>Kern: Render native fallback\n  end\n  loop visible diagrams\n    Kern-->>User: Draw block\n  end\n  Note over User,Kern: Should match official Mermaid semantics\n  deactivate Kern",
+      "features": [
+        "sequence",
+        "activate",
+        "alt",
+        "loop",
+        "note",
+        "cache"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "class-basic",
+      "title": "Class diagram baseline",
+      "kind": "classDiagram",
+      "source": "classDiagram\n  class Document {\n    +String path\n    +save() void\n  }\n  class Renderer {\n    +render(markdown)\n  }\n  Document --> Renderer",
+      "features": [
+        "class",
+        "methods",
+        "relation"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "state-basic",
+      "title": "State diagram baseline",
+      "kind": "stateDiagram-v2",
+      "source": "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Loading: open\n  Loading --> Editing: loaded\n  Editing --> Saving: save\n  Saving --> Editing: done",
+      "features": [
+        "state",
+        "transitions",
+        "labels"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "er-basic",
+      "title": "ER diagram baseline",
+      "kind": "erDiagram",
+      "source": "erDiagram\n  USER ||--o{ DOCUMENT : owns\n  DOCUMENT ||--o{ BLOCK : contains\n  USER {\n    string id\n    string name\n  }",
+      "features": [
+        "er",
+        "cardinality",
+        "attributes"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "gantt-basic",
+      "title": "Gantt baseline",
+      "kind": "gantt",
+      "source": "gantt\n  title Kern release plan\n  dateFormat  YYYY-MM-DD\n  section Rendering\n  Corpus design :done, 2026-06-21, 1d\n  Official renderer POC :active, 2026-06-22, 3d",
+      "features": [
+        "gantt",
+        "dates",
+        "sections"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "gitgraph-basic",
+      "title": "Git graph baseline",
+      "kind": "gitGraph",
+      "source": "gitGraph\n  commit id: \"base\"\n  branch theme\n  checkout theme\n  commit id: \"prototype\"\n  checkout main\n  merge theme",
+      "features": [
+        "gitGraph",
+        "branches",
+        "merge"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "pie-basic",
+      "title": "Pie chart baseline",
+      "kind": "pie",
+      "source": "pie title Renderer time\n  \"Parsing\" : 35\n  \"Layout\" : 40\n  \"Draw\" : 25",
+      "features": [
+        "pie",
+        "chart",
+        "title"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "mindmap-basic",
+      "title": "Mindmap baseline",
+      "kind": "mindmap",
+      "source": "mindmap\n  root((Kern))\n    Native\n      TextKit\n      AppKit\n    Rich blocks\n      Math\n      Mermaid",
+      "features": [
+        "mindmap",
+        "hierarchy"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "timeline-basic",
+      "title": "Timeline baseline",
+      "kind": "timeline",
+      "source": "timeline\n  title Kern renderer milestones\n  2026-06-21 : Corpus eval\n  2026-06-22 : Official renderer prototype\n  2026-06-23 : A/B decision",
+      "features": [
+        "timeline",
+        "title",
+        "milestones"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "journey-basic",
+      "title": "User journey baseline",
+      "kind": "journey",
+      "source": "journey\n  title Editing a large Markdown file\n  section Open\n    Select file: 5: User\n    Render WYSIWYG: 4: Kern\n  section Edit\n    Toggle checkbox: 5: User\n    Save automatically: 5: Kern",
+      "features": [
+        "journey",
+        "sections",
+        "scores"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "sankey-basic",
+      "title": "Sankey baseline",
+      "kind": "sankey-beta",
+      "source": "sankey-beta\n  Markdown,Parser,10\n  Parser,TextKit,8\n  Parser,Attachments,2\n  Attachments,Renderer,2",
+      "features": [
+        "sankey",
+        "beta",
+        "csv-like"
+      ],
+      "expectedNativeCoverage": "official-required"
+    },
+    {
+      "id": "invalid-mermaid",
+      "title": "Invalid Mermaid should not crash",
+      "kind": "invalid",
+      "source": "flowchart TD\n  A -->\n  this is not valid official syntax [[[",
+      "features": [
+        "invalid",
+        "error-handling"
+      ],
+      "expectedNativeCoverage": "must-not-crash"
+    }
+  ]
+}

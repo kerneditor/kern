@@ -36,15 +36,34 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
         let markdown = benchmarkMarkdown(from: sourceFixture)
         let runs = max(3, TestRuntimeConfig.int("KERN_MERMAID_BENCH_RUNS", default: 9) ?? 9)
 
-        let modes: [NativeMarkdownCodec.Options.MermaidRenderMode] = [.rich, .ascii, .auto]
         var results: [ModeResult] = []
 
-        for mode in modes {
-            let result = runMode(mode, markdown: markdown, runs: runs)
+        for mode in [
+            NativeMarkdownCodec.Options.MermaidRenderMode.rich,
+            .ascii,
+            .auto,
+            .officialExternal,
+        ] {
+            let label = mode == .officialExternal ? "officialExternalDisabledFallback" : mode.rawValue
+            let result = runMode(label: label, mode: mode, markdown: markdown, runs: runs)
             results.append(result)
         }
 
-        XCTAssertEqual(results.count, 3)
+        if let context = try? makeFakeOfficialRendererContext() {
+            defer { context.restoreAndCleanup() }
+            try prewarmOfficialCache(markdown: markdown, themeIdentifier: "default")
+            results.append(
+                runMode(
+                    label: "officialExternalCacheHit",
+                    mode: .officialExternal,
+                    markdown: markdown,
+                    runs: runs,
+                    officialThemeIdentifier: "default"
+                )
+            )
+        }
+
+        XCTAssertGreaterThanOrEqual(results.count, 4)
 
         let payload = ReportPayload(
             generatedAt: ISO8601DateFormatter().string(from: Date()),
@@ -53,6 +72,8 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
             runsPerMode: runs,
             notes: [
                 "Measures import + mermaid attachment bounds computation.",
+                "officialExternalDisabledFallback measures the non-blocking no-renderer fallback path.",
+                "officialExternalCacheHit uses a local fake renderer to pre-seed Kern's official PNG cache, then measures import + synchronous cache-hit image load + bounds.",
                 "Uses a generated heavy Mermaid-only fixture derived from native-editor-benchmark.md.",
                 "Auto mode chooses rich/ascii per-diagram by complexity score."
             ],
@@ -64,9 +85,11 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
 
     @MainActor
     private func runMode(
-        _ mode: NativeMarkdownCodec.Options.MermaidRenderMode,
+        label: String,
+        mode: NativeMarkdownCodec.Options.MermaidRenderMode,
         markdown: String,
-        runs: Int
+        runs: Int,
+        officialThemeIdentifier: String? = nil
     ) -> ModeResult {
         let lineFragment = NSRect(x: 0, y: 0, width: 760, height: 28)
         var samples: [Double] = []
@@ -88,6 +111,12 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
                 for attachment in mermaids {
                     let effective = attachment.debugEffectiveRenderModeForTesting.rawValue
                     effectiveModeCounts[effective, default: 0] += 1
+                    if let officialThemeIdentifier {
+                        attachment.debugPrepareOfficialExternalRenderForTesting(
+                            maxContentWidth: lineFragment.width,
+                            themeIdentifier: officialThemeIdentifier
+                        )
+                    }
                     for _ in 0..<3 {
                         let bounds = attachment.attachmentBounds(
                             for: nil,
@@ -113,7 +142,7 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
         let mean = samples.reduce(0, +) / Double(max(samples.count, 1))
 
         return ModeResult(
-            mode: mode.rawValue,
+            mode: label,
             runs: runs,
             mermaidAttachmentsPerRun: perRunAttachmentCount,
             effectiveModeCounts: effectiveModeCounts,
@@ -124,6 +153,83 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
             meanMs: mean,
             samplesMs: samples
         )
+    }
+
+    private struct FakeOfficialRendererContext {
+        let root: URL
+        let preserved: [(String, Any?)]
+
+        func restoreAndCleanup() {
+            let defaults = UserDefaults.standard
+            for (key, value) in preserved {
+                if let value {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    private func makeFakeOfficialRendererContext() throws -> FakeOfficialRendererContext {
+        let defaults = UserDefaults.standard
+        let commandKey = MermaidOfficialExternalRenderer.commandUserDefaultsKey
+        let cacheKey = MermaidOfficialExternalRenderer.cacheDirectoryUserDefaultsKey
+        let npxKey = MermaidOfficialExternalRenderer.npxEnabledUserDefaultsKey
+        let puppeteerKey = MermaidOfficialExternalRenderer.puppeteerConfigFileUserDefaultsKey
+        let preserved: [(String, Any?)] = [
+            (commandKey, defaults.object(forKey: commandKey)),
+            (cacheKey, defaults.object(forKey: cacheKey)),
+            (npxKey, defaults.object(forKey: npxKey)),
+            (puppeteerKey, defaults.object(forKey: puppeteerKey)),
+        ]
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kern-mermaid-bench-fake-renderer-\(UUID().uuidString)", isDirectory: true)
+        let cacheDir = root.appendingPathComponent("cache", isDirectory: true)
+        let scriptURL = root.appendingPathComponent("fake-mermaid-renderer.py")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try """
+        import argparse
+        import base64
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-i", "--input", required=True)
+        parser.add_argument("-o", "--output", required=True)
+        parser.add_argument("-b", "--background", default="transparent")
+        parser.add_argument("-w", "--width", default="720")
+        parser.add_argument("-t", "--theme", default="default")
+        parser.add_argument("-q", "--quiet", action="store_true")
+        parser.add_argument("-p", "--puppeteerConfigFile")
+        args = parser.parse_args()
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAQCAYAAAB3AH1ZAAAAK0lEQVR4nGNk+M+ABzCC6lGjBqMGjRo0atCoQaMGjRo0atCoAQBZYwIROrmwSQAAAABJRU5ErkJggg=="
+        )
+        with open(args.output, "wb") as f:
+            f.write(png)
+        """.write(to: scriptURL, atomically: true, encoding: .utf8)
+        defaults.set("/usr/bin/python3 \(shellQuoted(scriptURL.path))", forKey: commandKey)
+        defaults.set(cacheDir.path, forKey: cacheKey)
+        defaults.set(false, forKey: npxKey)
+        defaults.removeObject(forKey: puppeteerKey)
+        return FakeOfficialRendererContext(root: root, preserved: preserved)
+    }
+
+    private func prewarmOfficialCache(markdown: String, themeIdentifier: String) throws {
+        var options = NativeMarkdownCodec.Options()
+        options.mermaidRenderMode = .officialExternal
+        let attributed = NativeMarkdownCodec.importMarkdown(markdown, options: options)
+        let attachments = collectMermaidAttachments(in: attributed)
+        XCTAssertGreaterThan(attachments.count, 0)
+        for attachment in attachments {
+            attachment.debugPrepareOfficialExternalRenderForTesting(maxContentWidth: 760, themeIdentifier: themeIdentifier)
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline,
+                  !attachment.debugHasOfficialExternalImageForTesting,
+                  attachment.debugOfficialExternalRenderStateForTesting != "failed" {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+            }
+        }
+        XCTAssertTrue(attachments.allSatisfy(\.debugHasOfficialExternalImageForTesting), "Fake official renderer should prewarm all Mermaid cache entries")
     }
 
     private func benchmarkMarkdown(from sourceFixture: String) -> String {
@@ -197,6 +303,10 @@ final class NativeMermaidRenderModeBenchmarkTests: XCTestCase {
             }
         }
         return out
+    }
+
+    private func shellQuoted(_ path: String) -> String {
+        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
     private func percentile(_ values: [Double], _ p: Double) -> Double {

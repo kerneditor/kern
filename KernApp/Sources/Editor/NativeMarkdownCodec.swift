@@ -326,6 +326,9 @@ enum NativeMarkdownCodec {
             case ascii
             /// Automatically choose a mode based on diagram complexity.
             case auto
+            /// Prefer the optional official Mermaid external renderer when an async cached result exists.
+            /// Falls back to the native rich renderer until that renderer/cache path is available.
+            case officialExternal
         }
 
         /// Export `.md` as pure GFM (default) or preserve Kern extensions where possible.
@@ -4805,6 +4808,10 @@ enum NativeMarkdownCodec {
             out.append(attr)
         }
 
+        func appendHtmlLineBreak(sourceMarkdown: String) {
+            out.append(makeHtmlLineBreakAttributed(sourceMarkdown: sourceMarkdown, baseFont: baseFont, style: style))
+        }
+
         while index < text.endIndex {
             let ch = text[index]
 
@@ -4847,6 +4854,13 @@ enum NativeMarkdownCodec {
             }
 
             if ch == "<" {
+                if let parsed = parseHtmlLineBreakRangeFirst(text, startIndex: index) {
+                    appendHtmlLineBreak(sourceMarkdown: String(text[index..<parsed.nextIndex]))
+                    index = parsed.nextIndex
+                    literalStart = index
+                    continue
+                }
+
                 if let parsed = parseAutolinkRangeFirst(text, startIndex: index) {
                     var nextStyle = style
                     nextStyle.link = .url(parsed.url)
@@ -4905,6 +4919,63 @@ enum NativeMarkdownCodec {
 
         flushLiteral(upTo: text.endIndex)
         return out
+    }
+
+    private struct RangeHtmlLineBreakMatch {
+        let nextIndex: String.Index
+    }
+
+    private struct HtmlLineBreakMatch {
+        let nextIndex: Int
+    }
+
+    private static func parseHtmlLineBreakRangeFirst(
+        _ text: String,
+        startIndex: String.Index
+    ) -> RangeHtmlLineBreakMatch? {
+        guard startIndex < text.endIndex, text[startIndex] == "<" else { return nil }
+        var index = text.index(after: startIndex)
+        guard index < text.endIndex, text[index].lowercased() == "b" else { return nil }
+        index = text.index(after: index)
+        guard index < text.endIndex, text[index].lowercased() == "r" else { return nil }
+        index = text.index(after: index)
+
+        while index < text.endIndex, text[index].isWhitespace {
+            index = text.index(after: index)
+        }
+        if index < text.endIndex, text[index] == "/" {
+            index = text.index(after: index)
+            while index < text.endIndex, text[index].isWhitespace {
+                index = text.index(after: index)
+            }
+        }
+        guard index < text.endIndex, text[index] == ">" else { return nil }
+        return RangeHtmlLineBreakMatch(nextIndex: text.index(after: index))
+    }
+
+    private static func parseHtmlLineBreak(
+        _ chars: [Character],
+        startIndex: Int,
+        limit: Int
+    ) -> HtmlLineBreakMatch? {
+        guard startIndex < limit, chars[startIndex] == "<" else { return nil }
+        var index = startIndex + 1
+        guard index < limit, chars[index].lowercased() == "b" else { return nil }
+        index += 1
+        guard index < limit, chars[index].lowercased() == "r" else { return nil }
+        index += 1
+
+        while index < limit, chars[index].isWhitespace {
+            index += 1
+        }
+        if index < limit, chars[index] == "/" {
+            index += 1
+            while index < limit, chars[index].isWhitespace {
+                index += 1
+            }
+        }
+        guard index < limit, chars[index] == ">" else { return nil }
+        return HtmlLineBreakMatch(nextIndex: index + 1)
     }
 
     private struct RangeAutolinkMatch {
@@ -5343,6 +5414,10 @@ enum NativeMarkdownCodec {
             out.append(attr)
         }
 
+        func appendHtmlLineBreak(sourceMarkdown: String, style: InlineStyle) {
+            out.append(makeHtmlLineBreakAttributed(sourceMarkdown: sourceMarkdown, baseFont: baseFont, style: style))
+        }
+
         func appendImageAttachment(alt: String, destination: String, sourceMarkdown: String) {
             out.append(
                 measureImportPhase(.makeImageAttachmentAttributed, profiler: ctx.profiler) {
@@ -5388,6 +5463,14 @@ enum NativeMarkdownCodec {
                     literalStart = i
                     continue
                 }
+            }
+
+            // Inline HTML line break: render bare <br>, <br/>, and <br /> as a visual line break.
+            if ch == "<", let parsed = parseHtmlLineBreak(chars, startIndex: i, limit: range.upperBound) {
+                appendHtmlLineBreak(sourceMarkdown: materializeCharacters(chars, range: i..<parsed.nextIndex), style: style)
+                i = parsed.nextIndex
+                literalStart = i
+                continue
             }
 
             // Autolink: <https://...> or <me@example.com>
@@ -6264,6 +6347,20 @@ enum NativeMarkdownCodec {
         return true
     }
 
+    private static func makeHtmlLineBreakAttributed(
+        sourceMarkdown: String,
+        baseFont: NSFont,
+        style: InlineStyle
+    ) -> NSAttributedString {
+        let attr = NSMutableAttributedString(
+            attributedString: makeInlineAttributed("\u{2028}", baseFont: baseFont, style: style)
+        )
+        let full = NSRange(location: 0, length: attr.length)
+        attr.addAttribute(.kernHtmlLineBreak, value: true, range: full)
+        attr.addAttribute(.kernSourceMarkdown, value: sourceMarkdown, range: full)
+        return attr
+    }
+
     private static func makeInlineAttributed(
         _ text: String,
         baseFont: NSFont,
@@ -6544,6 +6641,17 @@ enum NativeMarkdownCodec {
             let text = stripStoragePlaceholders(attributed.attributedSubstring(from: range).string)
 
             if (attrs[.kernPlaceholder] as? Bool) == true, text.isEmpty {
+                index = range.location + range.length
+                continue
+            }
+
+            if (attrs[.kernHtmlLineBreak] as? Bool) == true {
+                closeStyle(current)
+                current = InlineStyle()
+
+                let source = (attrs[.kernSourceMarkdown] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "<br />"
+                let breakCount = max(1, text.unicodeScalars.filter { $0.value == 0x2028 || $0.value == 0x2029 || $0.value == 0x0A }.count)
+                out += String(repeating: source, count: breakCount)
                 index = range.location + range.length
                 continue
             }

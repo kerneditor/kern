@@ -25,7 +25,7 @@ Modes:
                   Opt-in: terminate existing Kern/KernTextKit processes before launch
 
 Notes:
-  - Default behavior preserves the current non-destructive launcher contract and uses `open -n`.
+  - Default behavior preserves the current non-destructive launcher contract and uses `open -F -n`.
   - CONFIGURATION and DERIVED_DATA_PATH can be overridden via environment variables.
 EOF
 }
@@ -163,12 +163,12 @@ launch_bundle() {
   local absolute_file_path="${2:-}"
 
   echo "▸ Launching: $app_path"
-  echo "  note: default behavior uses 'open -n' and does not terminate existing sessions."
+  echo "  note: default behavior uses 'open -F -n' and does not terminate existing sessions."
 
   if [ -n "$absolute_file_path" ]; then
-    /usr/bin/open -n -a "$app_path" "$absolute_file_path"
+    /usr/bin/open -F -n -a "$app_path" "$absolute_file_path"
   else
-    /usr/bin/open -n "$app_path"
+    /usr/bin/open -F -n "$app_path"
   fi
 }
 
