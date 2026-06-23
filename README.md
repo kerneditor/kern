@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> The active Kern repository is now [gradigit/kern](https://github.com/gradigit/kern).
+> This `kerneditor/kern` repository is kept as a public pointer for now. The `kerneditor` organization may become the project home later if Kern grows large enough to need a dedicated org.
+
 <p align="center">
   <img src="docs/assets/readme/kern-brand-hero.png" alt="Kern — Native Markdown, rendered directly">
 </p>
