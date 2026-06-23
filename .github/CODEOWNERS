@@ -1,5 +1,0 @@
-# Conservative initial ownership mapping.
-# Expand into path-specific ownership later if/when maintainer structure grows.
-
-* @gradigit
-/.github/ @gradigit

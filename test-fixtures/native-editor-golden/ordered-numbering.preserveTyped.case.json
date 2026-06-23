@@ -1,9 +1,0 @@
-{
-  "name": "gfm.preserveTyped",
-  "expected": "ordered-numbering.preserveTyped.gfm.out.md",
-  "options": {
-    "exportDialect": "gfm",
-    "orderedListNumbering": "preserveTyped"
-  }
-}
-

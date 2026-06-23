@@ -1,7 +1,0 @@
-# Tab Test 05 — Five Lines
-
-Line 1: Hello World
-Line 2: Hello World
-Line 3: Hello World
-Line 4: Hello World
-Line 5: Hello World
